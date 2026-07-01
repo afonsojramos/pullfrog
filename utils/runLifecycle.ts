@@ -25,6 +25,7 @@
 import * as core from "@actions/core";
 import type { AgentResult } from "../agents/shared.ts";
 import { deleteProgressComment } from "../mcp/comment.ts";
+import { approveAfterFix } from "../mcp/review.ts";
 import type { ToolContext } from "../mcp/server.ts";
 import type { ToolState } from "../toolState.ts";
 import { formatUsageSummary, log, writeSummary } from "./cli.ts";
@@ -157,6 +158,18 @@ export async function finalizeSuccessRun(input: {
   if (input.toolState.output) {
     log.info(`::pullfrog-output::${Buffer.from(input.toolState.output).toString("base64")}`);
     core.setOutput("result", input.toolState.output);
+  }
+
+  // proactive approve-when-clean for the Fix-all / Fix-👍s flow: when a
+  // fix_review run succeeded and every Pullfrog finding it raised is resolved,
+  // post an approving review. composes with create_pull_request_review's gate
+  // (which blocks a bad approval) — this is the approve side. runs before the
+  // status check so the verdict it records lands on `pullfrog-approval`.
+  // best-effort: a failure must not flip the run's outcome.
+  if (input.result.success) {
+    await approveAfterFix(input.toolContext).catch((error) => {
+      log.debug(`fix auto-approval failed: ${error}`);
+    });
   }
 
   // opt-in branch-protection check-runs. `runSucceeded` mirrors the run's

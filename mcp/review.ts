@@ -195,6 +195,85 @@ export async function countOutstandingPullfrogThreads(
   return count;
 }
 
+/**
+ * proactive approve-when-clean for the Fix-all / Fix-👍s flow (`fix_review`
+ * trigger). when such a run completes successfully and every Pullfrog-originated
+ * review thread it raised is resolved, post a NEW approving review summarizing
+ * the run's work.
+ *
+ * the verification step shares `countOutstandingPullfrogThreads` with the
+ * approval gate in create_pull_request_review: that gate REACTIVELY blocks a
+ * bad approval; this is the PROACTIVE approve side. approval is contingent on
+ * Pullfrog's own findings actually being addressed — never a blind post-fix
+ * approval. a Fix-👍s run that only resolved a subset naturally fails the
+ * outstanding-thread check and is left unapproved.
+ *
+ * respects `prApproveEnabled` (the repo's "Allow Pullfrog to approve PRs"
+ * opt-in): a repo that hasn't enabled binding bot approvals never gets one
+ * here. skips when the agent already rendered an explicit review verdict this
+ * run (`toolState.approval`), so an agent that found a real issue and submitted
+ * a non-approving review is never overridden. best-effort — a failure must not
+ * flip the run's outcome.
+ */
+export async function approveAfterFix(ctx: ToolContext): Promise<void> {
+  if (ctx.payload.event.trigger !== "fix_review") return;
+  if (!ctx.prApproveEnabled) return;
+  // the agent already submitted a review this run — respect its verdict (an
+  // approval, or a non-approving review covering a real outstanding issue).
+  if (ctx.toolState.approval) return;
+
+  const pullNumber = ctx.payload.event.issue_number;
+  if (typeof pullNumber !== "number") return;
+
+  const outstanding = await countOutstandingPullfrogThreads(ctx, pullNumber);
+  if (outstanding > 0) {
+    log.info(
+      `skipping fix auto-approval: ${outstanding} unresolved Pullfrog review thread(s) still open on #${pullNumber}`
+    );
+    return;
+  }
+
+  const pr = await ctx.octokit.rest.pulls.get({
+    owner: ctx.repo.owner,
+    repo: ctx.repo.name,
+    pull_number: pullNumber,
+  });
+  // never approve a PR that is closed/merged out from under the run.
+  if (pr.data.state !== "open") return;
+  const headSha = pr.data.head.sha;
+
+  // the agent's own end-of-run summary IS "the work done in this run"; reuse it
+  // as the approval body, falling back to a concise statement when absent.
+  const summary = ctx.toolState.lastProgressBody?.trim();
+  const body =
+    "> ✅ Pullfrog addressed all of its review feedback on this PR.\n\n" +
+    (summary ||
+      "all Pullfrog-raised review threads are resolved — no outstanding findings remain.");
+
+  const params: RestEndpointMethodTypes["pulls"]["createReview"]["parameters"] = {
+    owner: ctx.repo.owner,
+    repo: ctx.repo.name,
+    pull_number: pullNumber,
+    event: "APPROVE",
+    commit_id: headSha,
+  };
+  const result = await createAndSubmitWithFooter(ctx, params, {
+    body,
+    approved: true,
+    hasComments: false,
+  });
+  // record the verdict so the opt-in `pullfrog-approval` status check (posted
+  // right after this in finalizeSuccessRun) reports success on the reviewed sha.
+  ctx.toolState.approval = { wouldApprove: true, sha: headSha };
+  log.info(`» auto-approved #${pullNumber} after fix run (review ${result.data.id})`);
+
+  // the approval review is now the durable artifact for this run; drop the
+  // redundant fix progress comment (mirrors create_pull_request_review).
+  await deleteProgressComment(ctx).catch((err) => {
+    log.debug(`progress comment cleanup after fix auto-approval failed: ${err}`);
+  });
+}
+
 export type ReviewCommentInput = NonNullable<
   RestEndpointMethodTypes["pulls"]["createReview"]["parameters"]["comments"]
 >[number];
@@ -950,11 +1029,11 @@ export async function createReviewWithStrandedRecovery(
   }
 }
 
-async function createAndSubmitWithFooter(
+export async function createAndSubmitWithFooter(
   ctx: ToolContext,
   params: RestEndpointMethodTypes["pulls"]["createReview"]["parameters"],
   opts: FooterOpts
-) {
+): Promise<Awaited<ReturnType<typeof ctx.octokit.rest.pulls.submitReview>>> {
   // create as PENDING (strip event) so we get the review ID before publishing
   const { event: _, ...pendingParams } = params;
   let pending: Awaited<ReturnType<typeof ctx.octokit.rest.pulls.createReview>>;
