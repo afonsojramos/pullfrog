@@ -186,11 +186,25 @@ jobs:
           NOTES: ${{ steps.notes.outputs.result }}
 ```
 
+### Example: Prompt from a file
+
+For longer prompts you want to version and reuse, commit the prompt text to the repo and pass its path with `prompt_file` instead of inlining it. The path is resolved relative to `GITHUB_WORKSPACE`, and it is mutually exclusive with `prompt` — set exactly one.
+
+```yaml
+# .github/workflows/triage.yml
+- uses: actions/checkout@v4
+- uses: pullfrog/pullfrog@v0
+  with:
+    prompt_file: .github/pullfrog/triage.md
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
 ### Example: Structured Output with Zod Schema
 
 You can force the agent to return structured JSON output by providing a JSON schema. This allows you to reliably parse and use the agent's response in subsequent workflow steps.
 
-You can define your JSON schema directly or uou can use any validation library that converts to JSON Schema. Here's an example using [Zod](https://zod.dev):
+You can define your JSON schema directly or you can use any validation library that converts to JSON Schema. Here's an example using [Zod](https://zod.dev):
 
 ```yaml
 name: Release Check

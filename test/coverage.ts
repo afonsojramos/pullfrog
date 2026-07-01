@@ -50,6 +50,7 @@ export const ALWAYS_RUN_ALL: string[] = [
   // dependency graph
   "action/package.json",
   "action/pnpm-lock.yaml",
+  "action/.npmrc",
   // workflow itself
   ".github/workflows/test.yml",
 ];

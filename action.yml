@@ -5,12 +5,15 @@ author: "Pullfrog"
 inputs:
   prompt:
     description: "Prompt to send to the agent (string or JSON payload)"
-    required: true
+    required: false
+  prompt_file:
+    description: "Path to a file (relative to GITHUB_WORKSPACE) whose contents are used as the prompt. Set exactly one of prompt or prompt_file."
+    required: false
   timeout:
     description: "Maximum run duration (e.g., 10m, 1h30m). Default: 1h"
     required: false
   model:
-    description: "Model to use (e.g., anthropic/claude-opus). Overrides repo settings."
+    description: "Model to use — a curated slug (e.g. anthropic/claude-opus) or a raw models.dev specifier (e.g. google/gemini-3.1-flash-lite). Overrides repo settings."
     required: false
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"

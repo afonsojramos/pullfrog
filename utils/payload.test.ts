@@ -1,10 +1,12 @@
 import { Inputs, JsonPayload } from "./payload.ts";
 
 describe("Inputs schema", () => {
-  it("only prompt is required", () => {
-    const result = Inputs.assert({ prompt: "test prompt" });
-    expect(result).toEqual({ prompt: "test prompt" });
-    expect(() => Inputs.assert({})).toThrow();
+  it("accepts prompt or prompt_file, both optional at the schema level", () => {
+    expect(Inputs.assert({ prompt: "test prompt" })).toEqual({ prompt: "test prompt" });
+    expect(Inputs.assert({ prompt_file: ".github/pullfrog/triage.md" })).toEqual({
+      prompt_file: ".github/pullfrog/triage.md",
+    });
+    expect(() => Inputs.assert({})).not.toThrow();
   });
 
   it.each([

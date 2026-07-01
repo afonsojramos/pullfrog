@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import * as core from "@actions/core";
 import { type } from "arktype";
@@ -57,7 +58,8 @@ function isCollaborator(event: PayloadEvent): boolean {
 // the property being absent. arktype's "prop?" means "optional to include" but
 // if included, must match the type - so we need to explicitly allow undefined.
 export const Inputs = type({
-  prompt: "string",
+  "prompt?": type.string.or("undefined"),
+  "prompt_file?": type.string.or("undefined"),
   "model?": type.string.or("undefined"),
   "timeout?": type.string.or("undefined"),
   "push?": PushPermissionInput.or("undefined"),
@@ -82,19 +84,34 @@ function resolveCwd(cwd: string | undefined): string | undefined {
 export type ResolvedPromptInput = string | typeof JsonPayload.infer;
 
 export function resolvePromptInput(): ResolvedPromptInput {
-  const prompt = core.getInput("prompt", { required: true });
+  const promptInput = core.getInput("prompt");
+  const promptFile = core.getInput("prompt_file");
+
+  if (promptInput && promptFile) {
+    throw new Error("set exactly one of 'prompt' or 'prompt_file' inputs, not both.");
+  }
+
+  // a prompt file holds a human-authored prompt, so it is returned verbatim and
+  // never parsed as an internal pullfrog JSON dispatch payload.
+  if (promptFile) {
+    return resolvePromptFile(promptFile);
+  }
+
+  if (!promptInput) {
+    throw new Error("one of 'prompt' or 'prompt_file' inputs is required.");
+  }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(prompt);
+    parsed = JSON.parse(promptInput);
   } catch {
     // JSON parse error is fine (plain text prompt)
-    return prompt;
+    return promptInput;
   }
 
   if (!parsed || typeof parsed !== "object" || !("~pullfrog" in parsed)) {
     // if it doesn't look like a pullfrog payload, return the plain text prompt
-    return prompt;
+    return promptInput;
   }
 
   // validation errors should propagate
@@ -103,8 +120,21 @@ export function resolvePromptInput(): ResolvedPromptInput {
   return jsonPayload;
 }
 
+// the path is workflow-author-controlled (anyone who can set prompt_file can
+// already run arbitrary job steps), so we resolve, read, and empty-check it
+// without sandbox-grade path validation.
+function resolvePromptFile(input: string): string {
+  const workspace = process.env.GITHUB_WORKSPACE;
+  const path = isAbsolute(input) ? input : workspace ? resolve(workspace, input) : resolve(input);
+  const content = readFileSync(path, "utf-8");
+  if (!content.trim()) {
+    throw new Error(`prompt_file ${JSON.stringify(input)} is empty.`);
+  }
+  return content;
+}
+
 function resolveNonPromptInputs() {
-  return Inputs.omit("prompt").assert({
+  return Inputs.omit("prompt", "prompt_file").assert({
     model: core.getInput("model") || undefined,
     timeout: core.getInput("timeout") || undefined,
     cwd: core.getInput("cwd") || undefined,

@@ -78,7 +78,9 @@ function resolveSlug(slug: string): string | undefined {
  *      Bedrock model, change `BEDROCK_MODEL_ID`, not `PULLFROG_MODEL`.
  *   2. slug from repo config / payload → alias registry. routing slugs
  *      (e.g. `bedrock/byok`) defer to a separate env var (`BEDROCK_MODEL_ID`).
- *   3. undefined — agent will auto-select.
+ *      a non-curated value with a slash passes through unchanged as a raw
+ *      models.dev specifier (same as `PULLFROG_MODEL`), not auto-selected away.
+ *   3. undefined (no slug, or a bare-word non-specifier) — agent auto-selects.
  */
 export function resolveModel(ctx: { slug?: string | undefined }): string | undefined {
   const envModel = process.env.PULLFROG_MODEL?.trim();
@@ -86,12 +88,20 @@ export function resolveModel(ctx: { slug?: string | undefined }): string | undef
     return resolveSlug(envModel) ?? envModel;
   }
 
-  if (ctx.slug) {
-    const resolved = resolveSlug(ctx.slug);
+  const slug = ctx.slug?.trim();
+  if (slug) {
+    const resolved = resolveSlug(slug);
     if (resolved) {
       return resolved;
     }
-    log.warning(`» unknown model slug "${ctx.slug}" — agent will auto-select`);
+    // not a curated alias: a slashed value passes through as a raw models.dev
+    // specifier (explicit picks honored); a bare word isn't a valid specifier
+    // and downstream would misread it as a Bedrock/Vertex backend ID — auto-select.
+    if (slug.includes("/")) {
+      log.info(`» "${slug}" is not a curated alias — passing through as a raw model specifier`);
+      return slug;
+    }
+    log.warning(`» unknown model slug "${slug}" — agent will auto-select`);
   }
 
   return undefined;
