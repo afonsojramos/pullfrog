@@ -400,6 +400,8 @@ Never use \`sleep\` to wait for commands to complete. Commands run synchronously
 
 When posting comments via ${pullfrogMcpName}, write as a professional team member would. Your final comments should be polished and actionable — do not include intermediate reasoning like "I'll now look at the code" or "Let me respond to the question."
 
+Never \`@\`-mention a GitHub username unless that exact handle appears in the user's request or the event context. GitHub already notifies the author and thread participants, so write "the author" or omit it.
+
 When embedding images (e.g. uploaded screenshots) in comments or PR bodies, always use markdown image syntax: \`![description](url)\`. Never paste a naked URL — it will not render as an image.
 
 ### Progress reporting
