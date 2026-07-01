@@ -39,9 +39,9 @@ export interface BuildPullfrogFooterParams {
   /**
    * When a Router account had a model (or the intelligent tier) selected that
    * the server clamped to the efficient default — custom picks are card-gated
-   * wholesale. `from` is the configured slug (e.g. "anthropic/claude-opus");
+   * wholesale. `from` is the configured slug (e.g. "anthropic/claude-fable");
    * `reason` names the binding constraint — "card" (no card on file) renders
-   * `Using <Kimi K2> (<Claude Opus> needs a card on file)`, "noRouterPath"
+   * `Using <Kimi K2> (<Claude Fable> needs a card on file)`, "noRouterPath"
    * (no openRouterResolve yet and no stored provider key) renders a
    * provider-key nudge — so the downgrade is visible rather than silently
    * presenting Kimi as the pick.

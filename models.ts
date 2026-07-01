@@ -101,15 +101,18 @@ export const providers = {
     displayName: "Anthropic",
     envVars: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
     models: {
-      // claude-fable-5 is disabled globally — access has been revoked, so it
-      // can't run as-is anywhere (BYOK, Claude Code, or Router). the fallback
-      // redirects all resolution to opus and hides it from pickers; opus is the
-      // universally-available flagship, the AUTO_INTELLIGENT tier target, and
-      // the recommended pick. clear the fallback if fable access returns (#959).
+      // not `preferred`: claude-fable-5 is access-gated but the `opencode
+      // models` catalog lists it as authorized for any Anthropic key, so
+      // auto-select would pick it and hard-fail. opus is the universally-
+      // available flagship; fable stays selectable for users with access (#959)
+      // and is the AUTO_INTELLIGENT tier target for carded Router accounts.
       "claude-fable": {
         displayName: "Claude Fable",
         resolve: "anthropic/claude-fable-5",
-        fallback: "anthropic/claude-opus",
+        // rolling alias: models.dev's OpenRouter mirror lags brand-new pinned
+        // versions (claude-fable-5 isn't indexed yet), so track ~…-latest to
+        // stay catalog-valid and auto-follow version bumps.
+        openRouterResolve: "openrouter/~anthropic/claude-fable-latest",
         subagentModel: "claude-sonnet",
       },
       "claude-opus": {
@@ -444,11 +447,17 @@ export const providers = {
     displayName: "OpenRouter",
     envVars: ["OPENROUTER_API_KEY"],
     models: {
+      "claude-fable": {
+        displayName: "Claude Fable",
+        resolve: "openrouter/~anthropic/claude-fable-latest",
+        openRouterResolve: "openrouter/~anthropic/claude-fable-latest",
+        preferred: true,
+        subagentModel: "claude-sonnet",
+      },
       "claude-opus": {
         displayName: "Claude Opus",
         resolve: "openrouter/~anthropic/claude-opus-latest",
         openRouterResolve: "openrouter/~anthropic/claude-opus-latest",
-        preferred: true,
         subagentModel: "claude-sonnet",
       },
       "claude-sonnet": {
@@ -628,7 +637,7 @@ export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
  * (CLI resolve, OpenRouter resolve, footer label) handles them transparently.
  *
  * `efficient` mirrors the OSS/default subsidy model (Kimi K2 — fast + cheap);
- * `intelligent` is the frontier pick (Claude Opus). a `null` model means the
+ * `intelligent` is the frontier pick (Claude Fable). a `null` model means the
  * tier hasn't been pinned: callers default by card status via `defaultAutoTier`.
  */
 export const AUTO_EFFICIENT = "auto/efficient";
@@ -637,7 +646,7 @@ export type AutoTier = typeof AUTO_EFFICIENT | typeof AUTO_INTELLIGENT;
 
 const AUTO_TIER_TARGET: Record<AutoTier, string> = {
   [AUTO_EFFICIENT]: "moonshotai/kimi-k2",
-  [AUTO_INTELLIGENT]: "anthropic/claude-opus",
+  [AUTO_INTELLIGENT]: "anthropic/claude-fable",
 };
 
 export function isAutoTier(slug: string | null | undefined): slug is AutoTier {
@@ -656,7 +665,7 @@ export function defaultAutoTier(hasCard: boolean): AutoTier {
 
 /**
  * the auto tier that actually runs for an account, enforcing the card gate:
- * the intelligent tier (Opus) requires a card on file, so a no-card account is
+ * the intelligent tier (Fable) requires a card on file, so a no-card account is
  * always clamped to efficient (Kimi) — whether intelligent was the card-based
  * default or an explicit pick made while a card was once present. keeps a trial
  * balance from being torched on a premium model before the user has a card.
