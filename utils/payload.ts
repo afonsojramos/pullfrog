@@ -11,6 +11,10 @@ import { validateCompatibility } from "./versioning.ts";
 // tool permission enum types for inputs
 const ShellPermissionInput = type.enumerated("disabled", "restricted", "enabled");
 const PushPermissionInput = type.enumerated("disabled", "restricted", "enabled");
+// opt-in toggle for posting `pullfrog` / `pullfrog-approval` commit-status
+// check-runs (branch protection). off by default — a new required-check
+// surface must not silently turn on.
+const StatusChecksInput = type.enumerated("disabled", "enabled");
 
 // schema for JSON payload passed via prompt (internal dispatch invocation)
 // note: permissions are intentionally NOT included here to prevent injection attacks
@@ -64,6 +68,7 @@ export const Inputs = type({
   "timeout?": type.string.or("undefined"),
   "push?": PushPermissionInput.or("undefined"),
   "shell?": ShellPermissionInput.or("undefined"),
+  "status_checks?": StatusChecksInput.or("undefined"),
   "cwd?": type.string.or("undefined"),
   "output_schema?": type.string.or("undefined"),
 });
@@ -140,10 +145,16 @@ function resolveNonPromptInputs() {
     cwd: core.getInput("cwd") || undefined,
     push: core.getInput("push") || undefined,
     shell: core.getInput("shell") || undefined,
+    status_checks: core.getInput("status_checks") || undefined,
   });
 }
 
-const isPullfrog = (actor: string | null | undefined): boolean => {
+/**
+ * true when `actor` is Pullfrog's own GitHub identity — the bot login
+ * (`pullfrog[bot]` / `pullfrogdev[bot]`) or the bare account. used to skip
+ * self-triggered events and to recognize Pullfrog-originated review threads.
+ */
+export const isPullfrog = (actor: string | null | undefined): boolean => {
   actor = actor?.replace("[bot]", "");
   return !!actor && (actor === "pullfrog" || actor === "pullfrogdev");
 };
@@ -214,6 +225,10 @@ export function resolvePayload(
     // permissions: inputs > repoSettings > fallbacks
     push: inputs.push ?? repoSettings.push ?? "restricted",
     shell: resolvedShell,
+
+    // opt-in commit-status check-runs (branch protection). workflow-level
+    // static input, off unless the repo's pullfrog.yml sets status_checks: enabled.
+    statusChecks: inputs.status_checks === "enabled",
 
     // set by proxy logic in main.ts when routing through OpenRouter
     proxyModel: undefined as string | undefined,

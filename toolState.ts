@@ -145,6 +145,14 @@ export interface ToolState {
     nodeId: string;
     reviewedSha: string | undefined;
   };
+  // approval verdict recorded by create_pull_request_review: whether Pullfrog
+  // would approve this PR (the agent's `approved` intent AND no outstanding
+  // unresolved Pullfrog-originated review threads). drives the opt-in
+  // `pullfrog-approval` commit-status check posted at run end. distinct from
+  // `review` (which postReviewCleanup deletes) so it survives to finalize.
+  // `sha` is the sha the agent reviewed, so the check anchors to it rather
+  // than to a head that may have moved mid-run.
+  approval?: { wouldApprove: boolean; sha: string | undefined };
   // dedupe key: parent review comment_id → most-recent reply written this
   // session by reply_to_review_comment. used by duplicateReplyDecision to
   // skip identical-body re-emissions of the same call (PR #610 root cause).

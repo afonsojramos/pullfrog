@@ -151,7 +151,10 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     contents: "write",
     pull_requests: "write",
     issues: "write",
-    checks: "read",
+    // write (not read) so the run can post `pullfrog` / `pullfrog-approval`
+    // commit-status check-runs for branch protection. the app already grants
+    // checks:write; this scopes the MCP token up to use it.
+    checks: "write",
     actions: "read",
   } as const;
   const mcpToken = await acquireNewToken({ repos: writeRepos, permissions: mcpPermissions });

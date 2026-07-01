@@ -24,6 +24,9 @@ inputs:
   shell:
     description: "Shell permission: disabled, restricted (filters secrets from env vars), or enabled. Public repos default to restricted for security; private repos default to enabled."
     required: false
+  status_checks:
+    description: "Post `pullfrog` (run completion) and `pullfrog-approval` (review verdict) commit-status checks on PR runs so they can be required by branch protection: disabled (default) or enabled."
+    required: false
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation. When provided, the action output becomes required and must conform to this schema."
     required: false

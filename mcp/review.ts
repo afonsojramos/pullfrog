@@ -12,6 +12,7 @@ import {
 } from "../utils/diffCoverage.ts";
 import { fixDoubleEscapedString } from "../utils/fixDoubleEscapedString.ts";
 import { patchWorkflowRunFields } from "../utils/patchWorkflowRunFields.ts";
+import { isPullfrog } from "../utils/payload.ts";
 import * as yes from "../yes/index.ts";
 import { deleteProgressComment } from "./comment.ts";
 import type { ToolContext } from "./server.ts";
@@ -114,6 +115,84 @@ export async function buildCommentableMap(
     map.set(file.filename, commentableLinesForFile(file.patch));
   }
   return map;
+}
+
+/**
+ * lightweight PAGINATED query for the approval gate: we only need each thread's
+ * resolved state and its ROOT author (oldest comment, hence `first: 1`) to count
+ * outstanding Pullfrog findings. distinct from REVIEW_THREADS_QUERY (a single
+ * page of 100 with full comment bodies) because the invariant must hold on PRs
+ * with >100 threads — a silent first-100 cap would let a finding beyond #100
+ * slip an approval through.
+ */
+const OUTSTANDING_THREADS_QUERY = `
+query ($owner: String!, $name: String!, $prNumber: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $prNumber) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved
+          comments(first: 1) { nodes { author { login } } }
+        }
+      }
+    }
+  }
+}
+`;
+
+type OutstandingThreadsResponse = {
+  repository: {
+    pullRequest: {
+      reviewThreads: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes:
+          | ({
+              isResolved: boolean;
+              comments: { nodes: ({ author: { login: string } | null } | null)[] | null } | null;
+            } | null)[]
+          | null;
+      } | null;
+    } | null;
+  } | null;
+};
+
+/**
+ * count unresolved review threads on a PR whose root comment was authored by
+ * Pullfrog's bot. this is the full set of open Pullfrog findings on the PR —
+ * the basis for both the never-approve-with-outstanding-issues invariant (the
+ * approval gate below) and the `pullfrog-approval` status verdict. it is a
+ * function of all open findings, NOT just the latest commit's delta.
+ *
+ * outdated-but-unresolved threads still count — GitHub marks a thread
+ * `[OUTDATED]` when the anchor line moved (reformat, rename, force-push), which
+ * is not the same as the concern being addressed. human-reviewer threads are
+ * excluded: they belong to those reviewers to resolve. walks every page so a
+ * long-lived PR with >100 threads can't hide an outstanding finding.
+ */
+export async function countOutstandingPullfrogThreads(
+  ctx: ToolContext,
+  pullNumber: number
+): Promise<number> {
+  let count = 0;
+  let cursor: string | null = null;
+  // bound the walk so a misbehaving cursor can't loop forever; 50 pages = 5000
+  // threads, orders of magnitude beyond any real PR.
+  for (let page = 0; page < 50; page += 1) {
+    const response: OutstandingThreadsResponse = await ctx.octokit.graphql(
+      OUTSTANDING_THREADS_QUERY,
+      { owner: ctx.repo.owner, name: ctx.repo.name, prNumber: pullNumber, cursor }
+    );
+    const conn = response.repository?.pullRequest?.reviewThreads;
+    for (const thread of conn?.nodes ?? []) {
+      if (!thread || thread.isResolved) continue;
+      const root = thread.comments?.nodes?.find((c) => c != null);
+      if (root && isPullfrog(root.author?.login)) count += 1;
+    }
+    if (!conn?.pageInfo.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+  }
+  return count;
 }
 
 export type ReviewCommentInput = NonNullable<
@@ -314,7 +393,7 @@ export const CreatePullRequestReview = type({
     .optional(),
   approved: type.boolean
     .describe(
-      "Set to true to submit as an approval. Use for `> ✅ No new issues found.` reviews where the PR is mergeable as-is and nothing in the body warrants code changes — approving also suppresses the Fix-button footer affordance so users don't dispatch a fix run on non-actionable feedback. Reserve approved: false for `> ℹ️ ...` (minor suggestions inline), `> [!IMPORTANT]` (recommended changes), and `> [!CAUTION]` (critical) reviews. Defaults to false (comment-only review). Mutually exclusive with request_changes."
+      "Set to true to submit as an approval. Use for `> ✅ No new issues found.` reviews where the PR is mergeable as-is and nothing in the body warrants code changes — approving also suppresses the Fix-button footer affordance so users don't dispatch a fix run on non-actionable feedback. Reserve approved: false for `> ℹ️ ...` (minor suggestions inline), `> [!IMPORTANT]` (recommended changes), and `> [!CAUTION]` (critical) reviews. Defaults to false (comment-only review). Mutually exclusive with request_changes. Approval is REJECTED while any unresolved Pullfrog review thread remains open on the PR (not just the latest commit's diff): resolve the threads the current code addresses (reply + resolve_review_thread) first, or submit a non-approving review if a real issue remains."
     )
     .optional(),
   request_changes: type.boolean
@@ -412,6 +491,36 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
             reviewId: dup.reviewId,
           };
         }
+
+        // invariant: Pullfrog must never approve a PR while ANY outstanding,
+        // unaddressed Pullfrog finding remains — even on an incremental commit
+        // that introduces no NEW issues. the approval verdict is otherwise just
+        // the agent's `approved` boolean with zero verification, and the
+        // incremental-review framing biases the agent toward the latest diff,
+        // so a prior unresolved thread outside the delta can slip an approval
+        // through. enforce it mechanically against the FULL set of open
+        // Pullfrog-originated review threads (see countOutstandingPullfrogThreads).
+        // applies regardless of prApproveEnabled — the downgrade to COMMENT
+        // still leaves a misleading "no issues" body and a would-approve verdict.
+        if (approved) {
+          const outstanding = await countOutstandingPullfrogThreads(ctx, pull_number);
+          if (outstanding > 0) {
+            const listRef = formatMcpToolRef(ctx.agentId, "get_review_comments");
+            const resolveRef = formatMcpToolRef(ctx.agentId, "resolve_review_thread");
+            throw new Error(
+              `cannot approve: ${outstanding} unresolved Pullfrog review thread(s) still open on this PR. ` +
+                `approval requires every prior Pullfrog finding to be resolved, not just the latest commits to be clean. ` +
+                `inspect them with \`${listRef}\`; for each thread the current code genuinely addresses, reply then call \`${resolveRef}\`, and retry this approval. ` +
+                `if any thread is a real outstanding issue, do NOT approve — submit a non-approving review (omit \`approved\`) that covers it instead.`
+            );
+          }
+        }
+        // gate above guarantees approved ⇒ no outstanding Pullfrog threads, so
+        // "would approve" is exactly the agent's intent. recorded here (not at
+        // finalize) so it survives postReviewCleanup deleting toolState.review;
+        // anchored to the reviewed sha so a mid-run push leaves the new head
+        // unapproved until the follow-up re-review reports.
+        ctx.toolState.approval = { wouldApprove: approved === true, sha: primary.checkoutSha };
 
         // skip empty COMMENT reviews before any GitHub call. see reviewSkipDecision
         // for the cases (no-issues vs empty-downgraded-approve) and why GitHub 422s
@@ -618,6 +727,12 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
           nodeId: reviewNodeId,
           reviewedSha: actuallyReviewedSha,
         };
+        // pin the approval verdict to the sha actually reviewed, so the
+        // pullfrog-approval check never anchors to a head the agent didn't
+        // review. the gate set a provisional checkoutSha, which is undefined
+        // for a review submitted without checkout_pr — without this, finalize
+        // would fall back to the (possibly moved) live head.
+        if (ctx.toolState.approval) ctx.toolState.approval.sha = actuallyReviewedSha;
 
         ctx.toolState.wasUpdated = true;
 

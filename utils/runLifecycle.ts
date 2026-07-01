@@ -33,6 +33,7 @@ import { persistLearnings } from "./learnings.ts";
 import { persistSummary } from "./prSummary.ts";
 import { postReviewCleanup } from "./reviewCleanup.ts";
 import { type RenderedRunError, renderRunError } from "./runErrorRenderer.ts";
+import { reportStatusChecks } from "./statusChecks.ts";
 
 /**
  * Best-effort cleanup shared by both run-end paths:
@@ -157,6 +158,11 @@ export async function finalizeSuccessRun(input: {
     log.info(`::pullfrog-output::${Buffer.from(input.toolState.output).toString("base64")}`);
     core.setOutput("result", input.toolState.output);
   }
+
+  // opt-in branch-protection check-runs. `runSucceeded` mirrors the run's
+  // own outcome so a harness-returned `{success: false}` posts `pullfrog`
+  // = failure, same as the catch path. own best-effort guard internally.
+  await reportStatusChecks(input.toolContext, { runSucceeded: input.result.success });
 }
 
 /**

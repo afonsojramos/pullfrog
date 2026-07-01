@@ -101,6 +101,8 @@ jobs:
 
 ```
 
+To gate merges on Pullfrog with branch protection, add `status_checks: enabled` under `with:`. Each PR run then posts a `pullfrog` check (run completion — success when the run finishes, failure on error/timeout) and a `pullfrog-approval` check (whether Pullfrog would approve the PR), both requireable as status checks. See [PR reviews → Required status checks](https://docs.pullfrog.dev/pr-reviews#required-status-checks-branch-protection).
+
 #### 2. Create `triggers.yml`
 
 Create a file at `.github/workflows/triggers.yml`. This workflow listens for GitHub events and calls the `pullfrog.yml` workflow with the event data.

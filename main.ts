@@ -66,6 +66,7 @@ import {
 import { logRunStartup } from "./utils/runStartupLog.ts";
 import { setEnvAllowlist } from "./utils/secrets.ts";
 import { createTempDirectory, setupGit, wipeRunnerLeakSurface } from "./utils/setup.ts";
+import { reportStatusChecks } from "./utils/statusChecks.ts";
 import { killTrackedChildren } from "./utils/subprocess.ts";
 import { resolveTimeoutMs, TIMEOUT_DISABLED } from "./utils/time.ts";
 import { Timer } from "./utils/timer.ts";
@@ -768,6 +769,9 @@ export async function main(): Promise<MainResult> {
     // a partial edit before the crash is still worth keeping.
     if (toolContext) {
       await persistRunArtifacts(toolContext);
+      // failed/timed-out run → post `pullfrog` = failure (and `pullfrog-approval`
+      // if a verdict landed before the crash). own best-effort guard internally.
+      await reportStatusChecks(toolContext, { runSucceeded: false });
     }
 
     return {
