@@ -101,17 +101,20 @@ export const providers = {
     displayName: "Anthropic",
     envVars: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
     models: {
-      // claude-fable-5 is held off recommendation/default — it's moving to
-      // usage-credits-only billing and isn't broadly available yet (not every
-      // account can run it), so it must not be the default anywhere (BYOK,
-      // Claude Code, or Router). the fallback redirects all resolution to opus
-      // and hides it from pickers; opus is the universally-available flagship,
-      // the AUTO_INTELLIGENT tier target, and the recommended pick. clear the
-      // fallback once fable ships on standard billing with broad access (#959).
+      // claude-fable-5 is selectable but not recommended/auto-selected — it's
+      // moving to usage-credits-only billing and isn't broadly available yet, so
+      // opus stays the universally-available flagship, the AUTO_INTELLIGENT tier
+      // target, and the recommended pick. an explicit fable pick hits the real
+      // API and is access-gated: it errors for accounts without access today and
+      // just works once usage credits are live — no silent opus fallback, the
+      // API is the source of truth (#959).
       "claude-fable": {
         displayName: "Claude Fable",
         resolve: "anthropic/claude-fable-5",
-        fallback: "anthropic/claude-opus",
+        // rolling alias: models.dev's OpenRouter mirror lags brand-new pinned
+        // versions (claude-fable-5 isn't indexed yet), so track ~…-latest to
+        // stay catalog-valid and auto-follow version bumps.
+        openRouterResolve: "openrouter/~anthropic/claude-fable-latest",
         subagentModel: "claude-sonnet",
       },
       "claude-opus": {
