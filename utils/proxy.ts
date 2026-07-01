@@ -182,8 +182,8 @@ async function resolveProxyModel(ctx: {
   // Router run with no model selected that landed on the cost-optimized
   // efficient default (Kimi K2) rather than a frontier model — nudge the user
   // to pick one. a card on file flips the auto default to the intelligent tier
-  // (Fable), so `proxyModel !== DEFAULT_PROXY_MODEL` and we stay quiet: nudging
-  // "pick a stronger model" while already on Fable would be nonsense. OSS
+  // (Opus), so `proxyModel !== DEFAULT_PROXY_MODEL` and we stay quiet: nudging
+  // "pick a stronger model" while already on Opus would be nonsense. OSS
   // deliberately forces the default (cost-bounded, picker hidden), so exclude it.
   ctx.toolState.unselectedProxyDefault =
     !ctx.oss && !ctx.payload.model && ctx.proxyModel === DEFAULT_PROXY_MODEL;
