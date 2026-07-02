@@ -425,7 +425,11 @@ export async function main(): Promise<MainResult> {
       get githubInstallationToken() {
         return getGitHubInstallationToken();
       },
-      gitToken: tokenRef.gitToken,
+      // live getter, same reason as #891 above — reads the current git token
+      // (canonical rationale on TokenRef.gitToken). see #964.
+      get gitToken() {
+        return tokenRef.gitToken;
+      },
       refreshGitToken: tokenRef.refreshGitToken,
       readToken: tokenRef.readToken,
       xrepo: payload.xrepo,

@@ -50,6 +50,11 @@ export function getJobToken(): string {
 }
 
 export type TokenRef = {
+  // live getter: after a mid-run re-mint (`refreshGitToken` on an auth-class
+  // push failure) the old token is revoked, so this reflects the CURRENT git
+  // token — push-class tools (push_branch, push_tags, delete_branch) that read
+  // it per call never reuse a stale/revoked snapshot. mirrors the #891
+  // githubInstallationToken live getter. see #964.
   gitToken: string;
   mcpToken: string;
   // contents:read token scoped to the cross-repo READ set (clone-for-reference
@@ -299,7 +304,9 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
   const removeSignalHandler = onExitSignal(dispose);
 
   return {
-    gitToken,
+    get gitToken() {
+      return currentGitToken;
+    },
     mcpToken,
     readToken,
     refreshGitToken,

@@ -38,6 +38,9 @@ op(fn, {
   ttl: 60_000,             // LRU cache TTL in ms (no cache without this)
   maxItems: 1000,          // max LRU entries (default: 1000)
   retries: [100, 500],     // retry delays in ms
+  retryAfter: true,        // honor a retry-after / x-ratelimit-reset header on retries
+                           // (true = built-in reader, or a (err) => number | undefined)
+  retryAfterCap: 20_000,   // cap (ms) on a honored retry-after hint (default: 20000)
   bail: (err) => boolean,  // return true to abort retries immediately
   skipCache: (result) => boolean, // return true to skip caching this result
   cacheHit: (key) => {},   // called on cache hit (null to silence)

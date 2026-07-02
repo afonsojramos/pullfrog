@@ -1,7 +1,9 @@
 import type { WriteablePayload } from "../external.ts";
 import { reportReviewNodeId } from "../mcp/review.ts";
 import type { ToolContext } from "../mcp/server.ts";
+import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
+import { isTransientOctokitError } from "./isTransientNetworkError.ts";
 
 const RE_REVIEW_PREAMBLE =
   "Incrementally re-review the new commits on this pull request. Use the IncrementalReview mode.";
@@ -85,13 +87,29 @@ async function dispatchFollowUpReReview(ctx: ToolContext, reviewedSha: string): 
     event,
   };
 
-  await ctx.octokit.rest.actions.createWorkflowDispatch({
-    owner: ctx.repo.owner,
-    repo: ctx.repo.name,
-    workflow_id: getCurrentWorkflowFilename(),
-    ref: pr.data.base.repo.default_branch,
-    inputs: { prompt: JSON.stringify(payload) },
-  });
+  // GitHub intermittently 500s on workflow_dispatch; retry the transient blip
+  // so this best-effort safety-net re-review isn't silently dropped (the caller
+  // swallows failures via bestEffort → log.debug). 4xx fails fast. same
+  // dispatch-hardening theme as the server's dispatchWithRetry (#838/#958).
+  // unlike dispatchReservedRun this dispatch carries no reservation suffix, so
+  // the downstream duplicate-cancel can't dedup a retry that fires after GitHub
+  // queued the first run — accepted tradeoff: both re-reviews are unbilled, and
+  // a rare cosmetic duplicate beats dropping the safety-net re-review.
+  await yes.op(
+    () =>
+      ctx.octokit.rest.actions.createWorkflowDispatch({
+        owner: ctx.repo.owner,
+        repo: ctx.repo.name,
+        workflow_id: getCurrentWorkflowFilename(),
+        ref: pr.data.base.repo.default_branch,
+        inputs: { prompt: JSON.stringify(payload) },
+      }),
+    {
+      name: "reReviewDispatch",
+      retries: [500, 2000],
+      bail: (error) => !isTransientOctokitError(error),
+    }
+  )();
 }
 
 /**

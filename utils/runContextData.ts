@@ -1,8 +1,10 @@
 import * as core from "@actions/core";
 import type { Octokit } from "@octokit/rest";
 import packageJson from "../package.json" with { type: "json" };
+import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
 import { type OctokitWithPlugins, parseRepoContext } from "./github.ts";
+import { isTransientOctokitError } from "./isTransientNetworkError.ts";
 import { type AccountPlan, fetchRunContext, type RepoSettings } from "./runContext.ts";
 
 export interface RunContextData {
@@ -66,8 +68,17 @@ export async function resolveRunContextData(
     // OIDC not available (local dev, non-actions environment, fork PRs)
   }
 
+  // the action octokit has no retry plugin (only a 401 re-mint), and this runs
+  // BEFORE the clean-error surface in main.ts — so a transient GitHub 5xx here
+  // would reject the Promise.all and hard-crash the run at startup (while its
+  // sibling fetchRunContext degrades to defaults). retry the transient blip.
+  // see #999.
   const [repoResponse, runContext] = await Promise.all([
-    params.octokit.repos.get({ owner: repoContext.owner, repo: repoContext.name }),
+    yes.op(() => params.octokit.repos.get({ owner: repoContext.owner, repo: repoContext.name }), {
+      name: "repos.get",
+      retries: [100, 500],
+      bail: (error) => !isTransientOctokitError(error),
+    })(),
     fetchRunContext({ token: params.token, repoContext, oidcToken }),
   ]);
 

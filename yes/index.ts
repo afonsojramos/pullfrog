@@ -40,6 +40,51 @@ export function schedule(fn: (i: number) => number, count: number): number[] {
   return Array.from({ length: count }, (_, i) => fn(i));
 }
 
+const DEFAULT_RETRY_AFTER_CAP_MS = 20_000;
+
+function getErrorResponseHeaders(error: unknown): Record<string, unknown> | undefined {
+  if (error === null || typeof error !== "object") return undefined;
+  const response = (error as { response?: unknown }).response;
+  if (response === null || typeof response !== "object") return undefined;
+  const headers = (response as { headers?: unknown }).headers;
+  if (headers === null || typeof headers !== "object") return undefined;
+  return headers as Record<string, unknown>;
+}
+
+/**
+ * read a retry delay (ms) from a thrown HTTP error's response headers, honoring
+ * GitHub's rate-limit backoff hints on octokit errors (`error.response.headers`):
+ *   - `retry-after` (RFC 9110 delta-seconds or an HTTP-date) — an explicit
+ *     backoff directive whenever present (covers secondary rate limits, which
+ *     carry it with `x-ratelimit-remaining > 0`).
+ *   - else `x-ratelimit-reset` (epoch seconds) but ONLY when
+ *     `x-ratelimit-remaining` is `"0"` — GitHub sends the reset header on ~every
+ *     response (~1h ahead), so it's a backoff hint only under actual primary
+ *     rate-limit exhaustion (matching octokit's throttling plugin). without this
+ *     gate a non-rate-limit retried error (e.g. a permissions 403) would be
+ *     wrongly delayed to the reset time.
+ * returns `undefined` when no applicable hint is present/parseable.
+ */
+export function retryAfterMs(error: unknown): number | undefined {
+  const headers = getErrorResponseHeaders(error);
+  if (!headers) return undefined;
+  const retryAfter = headers["retry-after"];
+  if (typeof retryAfter === "string" && retryAfter.trim() !== "") {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const dateMs = Date.parse(retryAfter);
+    if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+  }
+  if (headers["x-ratelimit-remaining"] === "0") {
+    const reset = headers["x-ratelimit-reset"];
+    if (typeof reset === "string" && reset.trim() !== "") {
+      const resetEpoch = Number(reset);
+      if (Number.isFinite(resetEpoch)) return Math.max(0, resetEpoch * 1000 - Date.now());
+    }
+  }
+  return undefined;
+}
+
 type InferInput<S> = S extends StandardSchemaV1<infer I, any> ? I : never;
 type InferOutput<S> = S extends StandardSchemaV1<any, infer O> ? O : never;
 
@@ -71,6 +116,17 @@ export interface OpOptions<TReturn = any> {
   ttl?: number;
   maxItems?: number;
   retries?: number[];
+  /**
+   * honor a server backoff hint on retries: when a retried error carries a
+   * `retry-after` / `x-ratelimit-reset` header, schedule the next retry from
+   * that value (clamped to `[fixed delay, retryAfterCap]`) instead of the fixed
+   * `retries[attempt]` backoff. `true` uses the built-in `retryAfterMs` reader;
+   * a function extracts a delay-ms from a custom error shape. errors without the
+   * header fall back to the fixed backoff.
+   */
+  retryAfter?: boolean | ((error: unknown) => number | undefined);
+  /** cap (ms) on a honored retry-after hint. default 20000. */
+  retryAfterCap?: number;
   cacheHit?: ((key: string) => void) | null;
   cacheMiss?: ((key: string) => void) | null;
   skipCache?: (result: TReturn) => boolean;
@@ -302,7 +358,21 @@ function _op(fn: AnyAsyncFn, options: OpOptions): OpFunction<AnyAsyncFn> {
               log.info({ key, error, attempt });
             }
           } else {
-            const delay = retries[attempt]!;
+            let delay = retries[attempt]!;
+            // honor a server backoff hint (GitHub Retry-After / rate-limit reset)
+            // over the fixed schedule when requested, clamped so a tiny hint
+            // can't shorten below the fixed delay and a long one can't hang.
+            if (options.retryAfter) {
+              const extract = options.retryAfter === true ? retryAfterMs : options.retryAfter;
+              const hint = extract(error);
+              if (hint !== undefined) {
+                // cap the hint first, then floor at the fixed delay — so a hint
+                // never shortens below `retries[attempt]`, even when the fixed
+                // delay itself exceeds the cap.
+                const cap = options.retryAfterCap ?? DEFAULT_RETRY_AFTER_CAP_MS;
+                delay = Math.max(delay, Math.min(cap, hint));
+              }
+            }
             if (namePrefix) {
               log.info(
                 `${namePrefix}attempt ${attempt + 1}/${retries.length + 1} failed, retrying in ${delay}ms`
