@@ -13,12 +13,12 @@ describe("deriveSubagentModels", () => {
   describe("anthropic family — opus → sonnet", () => {
     it("direct anthropic opus", () => {
       expect(deriveSubagentModels("anthropic/claude-opus-4-8")).toEqual({
-        reviewer: "anthropic/claude-sonnet-4-6",
+        reviewer: "anthropic/claude-sonnet-5",
       });
     });
     it("opencode-vendored opus stays on opencode prefix", () => {
       expect(deriveSubagentModels("opencode/claude-opus-4-8")).toEqual({
-        reviewer: "opencode/claude-sonnet-4-6",
+        reviewer: "opencode/claude-sonnet-5",
       });
     });
     it("openrouter-anthropic-opus-via-anthropic-direct hits anthropic alias's openRouterResolve", () => {
@@ -26,12 +26,12 @@ describe("deriveSubagentModels", () => {
       // openRouterResolve. first-match-wins by alias declaration order
       // (anthropic declared first in providers).
       expect(deriveSubagentModels("openrouter/anthropic/claude-opus-4.8")).toEqual({
-        reviewer: "openrouter/anthropic/claude-sonnet-4.6",
+        reviewer: "openrouter/anthropic/claude-sonnet-5",
       });
     });
     it("sonnet has no further downshift", () => {
-      expect(deriveSubagentModels("anthropic/claude-sonnet-4-6")).toEqual({ reviewer: undefined });
-      expect(deriveSubagentModels("opencode/claude-sonnet-4-6")).toEqual({ reviewer: undefined });
+      expect(deriveSubagentModels("anthropic/claude-sonnet-5")).toEqual({ reviewer: undefined });
+      expect(deriveSubagentModels("opencode/claude-sonnet-5")).toEqual({ reviewer: undefined });
     });
     it("haiku has no downshift", () => {
       expect(deriveSubagentModels("anthropic/claude-haiku-4-5")).toEqual({ reviewer: undefined });

@@ -179,7 +179,7 @@ function buildAgentsJson(): string {
         "Read-only review subagent for lens-based code review (correctness, security, billing-subsystem, etc.). " +
         "Reads only — no writes, no state-changing shell or MCP calls, no nested subagent dispatch.",
       prompt: REVIEWER_SYSTEM_PROMPT,
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
     },
   };
   return JSON.stringify(agents);
@@ -187,7 +187,7 @@ function buildAgentsJson(): string {
 
 // ── model helpers ─────────────────────────────────────────────────────────────
 
-// claude CLI expects bare model names (e.g. "claude-sonnet-4-6"), not provider-prefixed specifiers
+// claude CLI expects bare model names (e.g. "claude-sonnet-5"), not provider-prefixed specifiers
 function stripProviderPrefix(specifier: string): string {
   const slashIndex = specifier.indexOf("/");
   return slashIndex > 0 ? specifier.slice(slashIndex + 1) : specifier;

@@ -74,7 +74,7 @@ async function plan(slug: string): Promise<Plan> {
       executablePath: "bin/claude.exe",
       installDependencies: true,
     });
-    // claude expects a bare model id (e.g. "claude-sonnet-4-6"), not "anthropic/claude-sonnet-4-6"
+    // claude expects a bare model id (e.g. "claude-sonnet-5"), not "anthropic/claude-sonnet-5"
     const bareModel = cliModel.split("/").slice(1).join("/");
     // mirror production: claude.ts always passes `--effort high` (resolveEffort).
     // newer Opus (4.8+) rejects the CLI's default `thinking.type.enabled` shape
