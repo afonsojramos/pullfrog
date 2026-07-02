@@ -218,7 +218,10 @@ export async function runAgentStreaming(options: RunStreamingOptions): Promise<A
       GITHUB_OUTPUT: githubOutputFile,
     };
 
-    const child = spawn("node", ["play.ts", "--raw", JSON.stringify(fixture)], {
+    // spawn the real node binary (process.execPath), never "node" from PATH:
+    // under nub, PATH's node is a shim that infinitely recurses when HOME is
+    // overridden to testHome (shim re-provisions its runtime into the new HOME)
+    const child = spawn(process.execPath, ["play.ts", "--raw", JSON.stringify(fixture)], {
       cwd: actionDir,
       env: subEnv as Record<string, string>,
       stdio: "pipe",
