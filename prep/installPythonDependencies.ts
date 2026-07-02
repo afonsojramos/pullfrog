@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../utils/cli.ts";
 import { spawn } from "../utils/subprocess.ts";
@@ -13,6 +13,30 @@ interface PythonConfig {
   file: string;
   tool: PythonPackageManager;
   installCmd: string[];
+  /** extra applicability check beyond file existence (defaults to always applies). */
+  applies?: (path: string) => boolean;
+}
+
+/**
+ * heuristic proxy for "this pyproject.toml is a distributable package."
+ *
+ * `[build-system]` is NOT a pip requirement — pip treats a pyproject without it
+ * as the legacy `setuptools.build_meta:__legacy__` backend and proceeds. but
+ * modern scaffolds (hatchling/flit/poetry-core/setuptools>=61) all emit
+ * `[build-system]`, so its presence is a good signal. gating on it trades a rare
+ * false-negative (a hand-written PEP 621 package that omits `[build-system]` is
+ * skipped) to kill the common false-positive: a tooling-only pyproject (ruff/mypy,
+ * PEP 735 dependency groups under uv) where `pip install .` triggers setuptools
+ * flat-layout auto-discovery and hard-fails on a non-package repo like hey-api
+ * (root holds web/, packages/, node_modules/).
+ */
+function declaresBuildSystem(path: string): boolean {
+  return /^\s*\[\s*build-system\s*\]/m.test(readFileSync(path, "utf8"));
+}
+
+function configApplies(config: PythonConfig, cwd: string): boolean {
+  const path = join(cwd, config.file);
+  return existsSync(path) && (config.applies?.(path) ?? true);
 }
 
 // python dependency file patterns in priority order
@@ -26,6 +50,7 @@ const PYTHON_CONFIGS: PythonConfig[] = [
     file: "pyproject.toml",
     tool: "pip",
     installCmd: ["pip", "install", "."],
+    applies: declaresBuildSystem,
   },
   {
     file: "Pipfile",
@@ -98,16 +123,16 @@ export const installPythonDependencies: PrepDefinition = {
       return false;
     }
 
-    // check if any python config file exists
+    // check if any applicable python config file exists
     const cwd = process.cwd();
-    return PYTHON_CONFIGS.some((config) => existsSync(join(cwd, config.file)));
+    return PYTHON_CONFIGS.some((config) => configApplies(config, cwd));
   },
 
   run: async (options: PrepOptions): Promise<PythonPrepResult> => {
     const cwd = process.cwd();
 
-    // find the first matching config
-    const config = PYTHON_CONFIGS.find((c) => existsSync(join(cwd, c.file)));
+    // find the first applicable config
+    const config = PYTHON_CONFIGS.find((c) => configApplies(c, cwd));
     if (!config) {
       return {
         language: "python",
