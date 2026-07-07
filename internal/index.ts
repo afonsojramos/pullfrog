@@ -50,6 +50,7 @@ export {
   PULLFROG_DIVIDER,
   stripExistingFooter,
 } from "../utils/buildPullfrogFooter.ts";
+export { checkRunsGate, hasVerifiedCheck } from "../utils/checksGate.ts";
 export type { CodexAuthBody } from "../utils/codexOAuth.ts";
 export {
   decodeJwtExpMs,

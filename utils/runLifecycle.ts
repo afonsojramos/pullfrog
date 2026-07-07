@@ -28,6 +28,7 @@ import { deleteProgressComment } from "../mcp/comment.ts";
 import { approveAfterFix } from "../mcp/review.ts";
 import type { ToolContext } from "../mcp/server.ts";
 import type { ToolState } from "../toolState.ts";
+import { autoMergeAfterApprove } from "./autoMerge.ts";
 import { formatUsageSummary, log, writeSummary } from "./cli.ts";
 import { reportErrorToComment } from "./errorReport.ts";
 import { persistLearnings } from "./learnings.ts";
@@ -169,6 +170,21 @@ export async function finalizeSuccessRun(input: {
   if (input.result.success) {
     await approveAfterFix(input.toolContext).catch((error) => {
       log.debug(`fix auto-approval failed: ${error}`);
+    });
+    // bounded, experimental autonomous merge of any PR Pullfrog approved
+    // (contributor PRs included, not just its own). runs after approveAfterFix so
+    // it can consume the verdict that call (or create_pull_request_review) just
+    // recorded. re-verifies the full merge invariant against GitHub's own state;
+    // best-effort, never flips the outcome.
+    await autoMergeAfterApprove(input.toolContext).catch((error) => {
+      // 409 = the sha-pinned merge lost a TOCTOU race (a commit landed mid-merge)
+      // — the expected "don't merge" outcome, stays quiet. anything else is an
+      // unexpected merge failure on an armed repo; surface it at warn so on-call
+      // can tell "errored" from a normal skip (which logs at info inside autoMerge).
+      const raced =
+        typeof error === "object" && error !== null && "status" in error && error.status === 409;
+      if (raced) log.debug(`auto-merge skipped (head moved): ${error}`);
+      else log.warning(`auto-merge failed: ${error}`);
     });
   }
 

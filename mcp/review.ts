@@ -241,6 +241,10 @@ export async function approveAfterFix(ctx: ToolContext): Promise<void> {
   // never approve a PR that is closed/merged out from under the run.
   if (pr.data.state !== "open") return;
   const headSha = pr.data.head.sha;
+  // GitHub blocks approving your own PR, so a self-authored PR posts a COMMENT
+  // instead — the recorded verdict below is what drives the pullfrog-approval
+  // check + auto-merge, not the GitHub review event.
+  const selfAuthored = isPullfrog(pr.data.user?.login);
 
   // the agent's own end-of-run summary IS "the work done in this run"; reuse it
   // as the approval body, falling back to a concise statement when absent.
@@ -254,7 +258,7 @@ export async function approveAfterFix(ctx: ToolContext): Promise<void> {
     owner: ctx.repo.owner,
     repo: ctx.repo.name,
     pull_number: pullNumber,
-    event: "APPROVE",
+    event: selfAuthored ? "COMMENT" : "APPROVE",
     commit_id: headSha,
   };
   const result = await createAndSubmitWithFooter(ctx, params, {
@@ -594,6 +598,18 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
             );
           }
         }
+        // fetch the PR once up front: its author drives the self-approve
+        // downgrade below (GitHub blocks approving your own PR) and its head sha
+        // anchors the review — reused so a self-authored PR needs no second get.
+        const prSnapshot = (
+          await ctx.octokit.rest.pulls.get({
+            owner: ctx.repo.owner,
+            repo: ctx.repo.name,
+            pull_number,
+          })
+        ).data;
+        const selfAuthored = isPullfrog(prSnapshot.user?.login);
+
         // gate above guarantees approved ⇒ no outstanding Pullfrog threads, so
         // "would approve" is exactly the agent's intent. recorded here (not at
         // finalize) so it survives postReviewCleanup deleting toolState.review;
@@ -609,7 +625,11 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
           requestChanges: request_changes ?? false,
           body,
           hasComments: comments.length > 0,
-          prApproveEnabled: ctx.prApproveEnabled,
+          // a self-authored approve downgrades to COMMENT (GitHub blocks a
+          // self-APPROVE), so treat it as non-binding here — an empty self-
+          // approve is then skipped (the verdict is still recorded above)
+          // instead of POSTing an empty COMMENT that GitHub 422s.
+          prApproveEnabled: ctx.prApproveEnabled && !selfAuthored,
         });
         if (skip) {
           log.info(`skipping review submission: ${skip.reason}`);
@@ -626,9 +646,21 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
           : request_changes
             ? "REQUEST_CHANGES"
             : "COMMENT";
-        if ((event === "APPROVE" || event === "REQUEST_CHANGES") && !ctx.prApproveEnabled) {
-          log.info(`prApproveEnabled is disabled — downgrading ${event} to COMMENT`);
-          event = "COMMENT";
+        if (event === "APPROVE" || event === "REQUEST_CHANGES") {
+          if (!ctx.prApproveEnabled) {
+            log.info(`prApproveEnabled is disabled — downgrading ${event} to COMMENT`);
+            event = "COMMENT";
+          } else if (selfAuthored) {
+            // GitHub structurally rejects APPROVE/REQUEST_CHANGES on your own PR
+            // (422 "Can not approve your own pull request"). post a COMMENT; the
+            // internal approve verdict recorded above is what drives the
+            // pullfrog-approval check + auto-merge, not a GitHub review that
+            // cannot exist for a self-authored PR.
+            log.info(
+              `self-authored PR — downgrading binding ${event} to COMMENT (verdict recorded internally)`
+            );
+            event = "COMMENT";
+          }
         }
 
         const params: RestEndpointMethodTypes["pulls"]["createReview"]["parameters"] = {
@@ -641,12 +673,7 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
         if (commit_id) {
           params.commit_id = commit_id;
         } else {
-          const pr = await ctx.octokit.rest.pulls.get({
-            owner: ctx.repo.owner,
-            repo: ctx.repo.name,
-            pull_number,
-          });
-          latestHeadSha = pr.data.head.sha;
+          latestHeadSha = prSnapshot.head.sha;
           // anchor to checkout sha so line numbers match the diff the agent analyzed
           params.commit_id = primary.checkoutSha ?? latestHeadSha;
           if (primary.checkoutSha && latestHeadSha !== primary.checkoutSha) {
@@ -744,6 +771,10 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
             }
           )();
         } catch (err: unknown) {
+          // the "would approve" verdict was recorded before this POST; a failed
+          // submit must roll it back so a transient failure cannot fail-open into
+          // an auto-merge with no review actually posted. a later retry re-sets it.
+          if (ctx.toolState.approval) ctx.toolState.approval.wouldApprove = false;
           // GitHub's transient 422 "internal error" is distinct from anchor /
           // body-length / suggestion validation failures — framing it with the
           // generic "likely causes (1)(2)(3)" prompt sends the agent dropping

@@ -35,6 +35,10 @@ export interface RepoSettings {
   push: PushPermission;
   shell: ShellPermission;
   prApproveEnabled: boolean;
+  // already globally-gated server-side (run-context ANDs the per-repo toggle with
+  // the `isAutonomousMaintenanceEnabled()` kill switch), so the runtime treats it
+  // as the final "may auto-merge" verdict. see autoMergeAfterApprove.
+  autoMergeEnabled: boolean;
   signedCommits: boolean;
   modeInstructions: Record<string, string>;
   learnings: string | null;
@@ -74,6 +78,7 @@ const defaultSettings: RepoSettings = {
   push: "restricted",
   shell: "restricted",
   prApproveEnabled: false,
+  autoMergeEnabled: false,
   signedCommits: false,
   modeInstructions: {},
   learnings: null,

@@ -74,6 +74,11 @@ export interface ToolContext {
   postCheckoutScript: string | null;
   prepushScript: string | null;
   prApproveEnabled: boolean;
+  // globally-gated server-side (run-context ANDs the per-repo toggle with the
+  // `isAutonomousMaintenanceEnabled()` kill switch). gates the run-end
+  // autoMergeAfterApprove lifecycle action — there is deliberately NO
+  // agent-callable merge tool.
+  autoMergeEnabled: boolean;
   // commits are created via the GitHub API (server-side signed, Verified)
   // instead of local git commit + push_branch. see CommitChangesTool.
   signedCommits: boolean;
