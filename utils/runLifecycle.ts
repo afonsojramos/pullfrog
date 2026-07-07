@@ -174,13 +174,13 @@ export async function finalizeSuccessRun(input: {
     // bounded, experimental autonomous merge of any PR Pullfrog approved
     // (contributor PRs included, not just its own). runs after approveAfterFix so
     // it can consume the verdict that call (or create_pull_request_review) just
-    // recorded. re-verifies the full merge invariant against GitHub's own state;
-    // best-effort, never flips the outcome.
+    // recorded. enables GitHub native auto-merge (or direct-merges an already-
+    // mergeable PR); best-effort, never flips the outcome.
     await autoMergeAfterApprove(input.toolContext).catch((error) => {
-      // 409 = the sha-pinned merge lost a TOCTOU race (a commit landed mid-merge)
-      // — the expected "don't merge" outcome, stays quiet. anything else is an
-      // unexpected merge failure on an armed repo; surface it at warn so on-call
-      // can tell "errored" from a normal skip (which logs at info inside autoMerge).
+      // 409 = the direct-merge fallback lost a TOCTOU race (a commit landed
+      // mid-merge) — the expected "don't merge" outcome, stays quiet. anything
+      // else is an unexpected enable/merge failure on an armed repo; surface it at
+      // warn so on-call can tell "errored" from a normal skip (info in autoMerge).
       const raced =
         typeof error === "object" && error !== null && "status" in error && error.status === 409;
       if (raced) log.debug(`auto-merge skipped (head moved): ${error}`);

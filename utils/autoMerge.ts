@@ -1,29 +1,22 @@
 import { addFooter } from "../mcp/comment.ts";
 import { countOutstandingPullfrogThreads } from "../mcp/review.ts";
 import type { ToolContext } from "../mcp/server.ts";
-import { checkRunsGate, hasVerifiedCheck } from "./checksGate.ts";
+import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
+import { isTransientOctokitError } from "./isTransientNetworkError.ts";
 import { isPullfrog } from "./payload.ts";
 
 /** narrow view of a PR review — the only fields the blocking-verdict logic reads. */
 type ReviewVerdict = { user: { login: string } | null; state: string };
 
 /**
- * `mergeable_state` values that mean "GitHub itself says this is not cleanly
- * mergeable right now": `dirty` (conflicts), `behind` (branch out of date under
- * strict protection), `blocked` (a required review/status/branch-protection rule
- * is unmet). `clean` and `unstable` (only non-required checks pending/failing)
- * are permitted — the CI gate below (`checkRunsGate`) independently refuses
- * red/in-flight CI, so `unstable` no longer leaks a red merge.
- */
-const NON_MERGEABLE_STATES = new Set(["dirty", "behind", "blocked"]);
-
-/**
  * true when some non-Pullfrog reviewer's latest binding verdict is
  * CHANGES_REQUESTED. GitHub returns reviews in chronological order; a later
  * APPROVED or DISMISSED from the same reviewer clears an earlier
  * CHANGES_REQUESTED, and COMMENTED/PENDING never change standing. pure so the
- * blocking-verdict logic is inspectable without the merge round-trip.
+ * blocking-verdict logic is inspectable without the merge round-trip. still
+ * load-bearing on a CI-only-protected repo, which won't otherwise honor a human
+ * CHANGES_REQUESTED as a required review.
  */
 function hasBlockingHumanReview(reviews: ReviewVerdict[]): boolean {
   const latestByReviewer = new Map<string, "APPROVED" | "CHANGES_REQUESTED">();
@@ -42,40 +35,68 @@ function hasBlockingHumanReview(reviews: ReviewVerdict[]): boolean {
   return false;
 }
 
+const ENABLE_AUTO_MERGE = /* GraphQL */ `
+  mutation ($pullRequestId: ID!, $headSha: GitObjectID!) {
+    enablePullRequestAutoMerge(input: {
+      pullRequestId: $pullRequestId
+      mergeMethod: SQUASH
+      expectedHeadOid: $headSha
+    }) { clientMutationId }
+  }`;
+
 /**
- * Run-end lifecycle action: merge ANY open PR that this run mechanically
- * approved on its current head — Pullfrog acting as a full repo maintainer,
- * contributor PRs included, not just merging its own work. There is deliberately
- * NO agent-callable merge tool — the merge is a pure, deterministic consequence
- * of the runtime observing a clean approved state, so a prompt-injected agent has
- * no merge surface to reach for. Every clause is fail-closed and re-verified
- * against GitHub's own state at merge time; any failure logs why and returns
- * without merging. Best-effort — the caller wraps this in a `.catch`, and a
- * merge/comment failure can never flip the run's outcome.
+ * GitHub 422 `Pull request is in clean status` — nothing left for native
+ * auto-merge to wait on, so the PR is immediately mergeable → merge directly.
+ */
+const isAlreadyMergeable = (error: unknown): boolean =>
+  error instanceof Error && /clean status/i.test(error.message);
+
+/**
+ * GitHub rejects `enablePullRequestAutoMerge` when `expectedHeadOid` no longer
+ * matches the head — a commit landed in the read→enable window, so we'd arm a
+ * head we never reviewed. benign: the same "don't merge an unreviewed head"
+ * outcome the direct-merge 409 guards, not a failure. it surfaces as a GraphQL
+ * error (HTTP 200, no `.status`), so the caller's status===409 quieting can't
+ * see it — classify it here as a skip.
+ */
+const isHeadChanged = (error: unknown): boolean =>
+  error instanceof Error && /head has changed|expected head/i.test(error.message);
+
+/**
+ * GitHub rejects `enablePullRequestAutoMerge` with "Auto merge is not allowed
+ * for this repository" when the repo-level `Allow auto-merge` setting is off
+ * (Settings > General > Pull Requests, off by default). not the `clean status`
+ * 422, so it would otherwise surface only as a server-side warn — classify it so
+ * the caller can post an actionable PR comment instead.
+ */
+const isAutoMergeDisallowed = (error: unknown): boolean =>
+  error instanceof Error && /not allowed/i.test(error.message);
+
+/**
+ * Run-end lifecycle action: hand any PR this run mechanically approved on its
+ * current head to GitHub's NATIVE auto-merge — Pullfrog acting as a full repo
+ * maintainer, contributor PRs included. There is deliberately NO agent-callable
+ * merge tool — the merge is a deterministic consequence of the recorded approval
+ * verdict, so a prompt-injected agent has no merge surface to reach for.
  *
- * There is NO self-authorship restriction: the approval verdict IS the trust
- * decision (Pullfrog reviewed it and would approve), exactly like a human
- * maintainer merging a contributor PR. The population of mergeable PRs is bounded
- * upstream by the review triggers (`prCreated` / `prCreatedAllowNonCollaborator`)
- * — Pullfrog can only merge what it was configured to review + approve — and the
- * whole capability is opt-in per repo (clause 1). The remaining clauses are the
- * maintainer's controls.
+ * Native auto-merge waits for all REQUIRED checks + reviews (un-fakeable by a
+ * fork), respects the human veto via branch protection, and requires branch
+ * protection to exist. We keep only the Pullfrog-specific pre-gates GitHub can't
+ * express: armed toggles, approved-THIS-head, zero outstanding Pullfrog threads,
+ * no human CHANGES_REQUESTED. Best-effort — the caller wraps this in `.catch`,
+ * and a merge/comment failure can never flip the run's outcome.
  *
  * The invariant (all must hold):
  *   1. `ctx.autoMergeEnabled` — the per-repo toggle ANDed with the global
  *      `isAutonomousMaintenanceEnabled()` kill switch, server-side (run-context).
  *   2. `ctx.prApproveEnabled` — cannot auto-merge what it may not approve.
- *   3. this run recorded an APPROVE verdict (`toolState.approval.wouldApprove`) —
- *      Pullfrog's review is the merge decision.
+ *   3. this run recorded an APPROVE verdict (`toolState.approval.wouldApprove`).
  *   4. the PR is open and not a draft.
- *   5. `toolState.approval.sha === <current head sha>` — approved THIS head, so a
- *      commit pushed after the review can't ride the approval in (409-safe below).
+ *   5. `toolState.approval.sha === <current head sha>` — approved THIS head.
  *   6. `countOutstandingPullfrogThreads === 0` — re-queried at merge time.
- *   7. no un-dismissed human CHANGES_REQUESTED — the human veto always wins.
- *   8. GitHub reports the PR mergeable and not blocked/dirty/behind.
- *   9. every external check-run/commit-status on the head is complete and
- *      non-failing (`checkRunsGate`) — red or in-flight CI never auto-merges,
- *      even on a repo without branch protection.
+ *   7. no un-dismissed human CHANGES_REQUESTED at handoff.
+ * The remaining wait-for-required-checks + wait-for-required-reviews semantics
+ * are GitHub's, via native auto-merge and branch protection.
  */
 export async function autoMergeAfterApprove(ctx: ToolContext): Promise<void> {
   if (!ctx.autoMergeEnabled) return;
@@ -92,6 +113,18 @@ export async function autoMergeAfterApprove(ctx: ToolContext): Promise<void> {
       `autoMerge: pr=#${pullNumber} approvalSha=${approval.sha?.slice(0, 7)} → skipped: ${reason}`
     );
 
+  // attributable audit comment carrying the standard Pullfrog run footer.
+  // best-effort — a failure must not undo the merge/enable or surface as a run error.
+  const comment = (body: string): Promise<unknown> =>
+    ctx.octokit.rest.issues
+      .createComment({
+        owner: ctx.repo.owner,
+        repo: ctx.repo.name,
+        issue_number: pullNumber,
+        body: addFooter(ctx, body),
+      })
+      .catch((err) => log.debug(`autoMerge comment failed: ${err}`));
+
   const pr = await ctx.octokit.rest.pulls.get({
     owner: ctx.repo.owner,
     repo: ctx.repo.name,
@@ -100,6 +133,7 @@ export async function autoMergeAfterApprove(ctx: ToolContext): Promise<void> {
 
   if (pr.data.state !== "open") return skip("pr not open");
   if (pr.data.draft) return skip("pr is draft");
+  if (pr.data.auto_merge) return skip("auto-merge already enabled");
 
   const headSha = pr.data.head.sha;
   if (approval.sha !== headSha) return skip(`approval sha != head ${headSha.slice(0, 7)}`);
@@ -115,36 +149,56 @@ export async function autoMergeAfterApprove(ctx: ToolContext): Promise<void> {
   });
   if (hasBlockingHumanReview(reviews)) return skip("human changes requested");
 
-  if (pr.data.mergeable !== true) return skip(`not mergeable (mergeable=${pr.data.mergeable})`);
-  if (pr.data.mergeable_state && NON_MERGEABLE_STATES.has(pr.data.mergeable_state)) {
-    return skip(`mergeable_state=${pr.data.mergeable_state}`);
+  // hand off to GitHub. enable native auto-merge (waits for required checks +
+  // reviews, honors branch protection, expectedHeadOid rejects the enable if the
+  // head moved since our read (guards the read→enable window, not the eventual
+  // merged head)). a 422 `clean status` means nothing is left to wait on → merge
+  // now. any other enable failure (e.g. a push-restricted branch that also blocks
+  // the app) surfaces at warn via the caller's `.catch`.
+  try {
+    await yes.op(
+      () =>
+        ctx.octokit.graphql(ENABLE_AUTO_MERGE, {
+          pullRequestId: pr.data.node_id,
+          headSha,
+        }),
+      {
+        name: "enablePullRequestAutoMerge",
+        retries: [500, 2000],
+        bail: (error) => !isTransientOctokitError(error),
+      }
+    )();
+    log.info(`autoMerge: pr=#${pullNumber} @ ${headSha.slice(0, 7)} → native auto-merge enabled`);
+    await comment(
+      "> ✅ Approved — auto-merge enabled; GitHub will merge once required checks pass."
+    );
+    return;
+  } catch (error) {
+    if (isHeadChanged(error)) return skip("head moved during enable");
+    if (isAutoMergeDisallowed(error)) {
+      await comment(
+        "> ⚠️ Approved, but auto-merge is off for this repo. Enable `Allow auto-merge` in Settings > General > Pull Requests."
+      );
+      return;
+    }
+    if (!isAlreadyMergeable(error)) throw error;
   }
 
-  // CI gate: refuse red or in-flight external checks on the head, independent of
-  // branch protection (which the invariant otherwise leans on via `blocked`).
-  // PAGINATED so a red check past page one can't hide. check-runs only — the app
-  // holds no `statuses` permission (see checksGate.ts), so the legacy Commit
-  // Statuses API is unreadable; required legacy statuses are caught by branch
-  // protection via the `blocked` mergeable_state clause above.
-  const checkRuns = await ctx.octokit.paginate(ctx.octokit.rest.checks.listForRef, {
-    owner: ctx.repo.owner,
-    repo: ctx.repo.name,
-    ref: headSha,
-    per_page: 100,
-  });
-  const gate = checkRunsGate({ checkRuns });
-  if (!gate.ok) return skip(`ci: ${gate.reason}`);
-  // require positive verification, not merely "no red seen": a head with zero
-  // check-runs passes the gate above, but since the app can't read legacy commit
-  // statuses that is indistinguishable from a repo whose only (red) signal is a
-  // status. auto-merge is now opt-in for any repo (no org allowlist), so refuse to
-  // merge a head we can't confirm green.
-  if (!hasVerifiedCheck({ checkRuns })) return skip("no completed external check-run to verify");
+  // `clean status` = immediately mergeable, which is EITHER a protected branch
+  // whose requirements are already met (safe) OR an UNPROTECTED branch with no CI
+  // gate at all. a direct merge on the latter would be CI-ungated — the regression
+  // native auto-merge exists to avoid, and exactly what the UI/docs promise
+  // against. so only direct-merge when the base branch is protected; else refuse
+  // (native auto-merge needs branch protection anyway). fail-closed if the
+  // metadata read fails.
+  const base = await ctx.octokit.rest.repos
+    .getBranch({ owner: ctx.repo.owner, repo: ctx.repo.name, branch: pr.data.base.ref })
+    .catch(() => null);
+  if (!base?.data.protected) return skip("base branch not protected — refusing CI-ungated merge");
 
-  // `sha` pins the merge to the exact head we verified above: GitHub returns
-  // 409 (absorbed by the caller's `.catch` → no merge) if a commit landed in
-  // the read→merge window, so the merge is atomic with the approved sha and a
-  // TOCTOU push of an unapproved head cannot slip through.
+  // `sha` pins the merge to the reviewed head — GitHub 409s (absorbed by the
+  // caller's `.catch`) if a commit landed in the read→merge window, so a TOCTOU
+  // push can't slip in.
   const merge = await ctx.octokit.rest.pulls.merge({
     owner: ctx.repo.owner,
     repo: ctx.repo.name,
@@ -152,24 +206,11 @@ export async function autoMergeAfterApprove(ctx: ToolContext): Promise<void> {
     sha: headSha,
     merge_method: "squash",
     commit_title: `${pr.data.title} (#${pullNumber})`,
-    commit_message: "merged autonomously by Pullfrog after a clean approval.",
   });
   log.info(
-    `autoMerge: pr=#${pullNumber} approvalSha=${headSha.slice(0, 7)} outstanding=0 → merged ${merge.data.sha?.slice(0, 7)}`
+    `autoMerge: pr=#${pullNumber} @ ${headSha.slice(0, 7)} → merged directly ${merge.data.sha?.slice(0, 7)}`
   );
-
-  // attributable merge comment (carries the standard Pullfrog run footer) is the
-  // durable audit artifact. best-effort — a comment failure must not undo a
-  // successful merge or surface as a run error.
-  await ctx.octokit.rest.issues
-    .createComment({
-      owner: ctx.repo.owner,
-      repo: ctx.repo.name,
-      issue_number: pullNumber,
-      body: addFooter(
-        ctx,
-        "> ✅ Merged autonomously after Pullfrog approved this PR and resolved all of its own review threads."
-      ),
-    })
-    .catch((err) => log.debug(`autoMerge comment failed: ${err}`));
+  await comment(
+    "> ✅ Merged autonomously after Pullfrog approved this PR and resolved all of its own review threads."
+  );
 }
