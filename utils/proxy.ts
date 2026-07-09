@@ -16,6 +16,7 @@
  *
  *   - 402 → `BillingError` (card declined, balance empty, 3DS, etc.)
  *   - 503 → `TransientError` (transient sync issue — retry next dispatch)
+ *   - 404 → `TransientError` (stale repo↔account link — re-homes on next webhook)
  */
 
 import * as core from "@actions/core";
@@ -71,6 +72,16 @@ async function mintProxyKey(ctx: {
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       throw new TransientError(
         body?.error ?? "billing service temporarily unavailable — retry shortly"
+      );
+    }
+
+    // 404 = the server can't match this repo↔account pair. run-context set
+    // `proxyModel` at dispatch, so this is stale linkage on our side (rename/
+    // transfer race) — never a missing BYOK key. falling through to the no-key
+    // error would misdirect the user to add a provider key (the ccusage churn).
+    if (response.status === 404) {
+      throw new TransientError(
+        "Pullfrog couldn't match this repository to its account — it may have just been renamed or transferred. The link refreshes automatically on the next run; if it keeps failing, reinstall the GitHub App on the repo's current owner."
       );
     }
 
