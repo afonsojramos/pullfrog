@@ -4,6 +4,7 @@ import pc from "picocolors";
 import { runCli as runAuthCli } from "./commands/auth.ts";
 import { runCli as runGhaCli } from "./commands/gha.ts";
 import { runCli as runInitCli } from "./commands/init.ts";
+import { runCli as runWatchCli } from "./commands/watch.ts";
 
 const VERSION = process.env.CLI_VERSION ?? "0.0.0";
 const bin = basename(process.argv[1] || "");
@@ -15,6 +16,7 @@ function printMainUsage(stream: typeof console.log): void {
   stream("commands:");
   stream("  init        set up pullfrog on the current repository");
   stream("  auth        manage provider credentials for the current repository");
+  stream("  watch       stream a PR's activity as one JSON line per event");
   stream("");
   stream("global options:");
   stream("  -h, --help      show help");
@@ -89,6 +91,15 @@ async function run(): Promise<void> {
 
   if (command === "auth") {
     await runAuthCli({
+      args: commandArgs,
+      prog: PROG,
+      showHelp: globalParsed["--help"] === true,
+    });
+    return;
+  }
+
+  if (command === "watch") {
+    await runWatchCli({
       args: commandArgs,
       prog: PROG,
       showHelp: globalParsed["--help"] === true,
