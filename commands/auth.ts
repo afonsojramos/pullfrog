@@ -1,14 +1,21 @@
 // `pullfrog auth <provider>` — manage credentials for a configured repo
 // without going through the full `init` flow. currently supports:
 //
-//   pullfrog auth codex   mint a Codex subscription credential and save it
-//                         as the `CODEX_AUTH_JSON` Pullfrog secret
+//   pullfrog auth codex    mint a Codex subscription credential and save it
+//                          as the `CODEX_AUTH_JSON` Pullfrog secret
+//   pullfrog auth claude   save a Claude Code subscription OAuth token as
+//                          the `CLAUDE_CODE_OAUTH_TOKEN` Pullfrog secret
 //
 // the `codex` subcommand runs `codex login --device-auth` against an
 // isolated `CODEX_HOME` (so the user's existing ~/.codex/auth.json is never
 // touched), validates the resulting auth.json, and posts it to the Pullfrog
 // secrets API. used both for first-time setup of a Codex subscription on a
 // repo and for rotating a stale credential.
+//
+// the `claude` subcommand prompts the user to paste the long-lived OAuth
+// token printed by `claude setup-token` and posts it to the same secrets
+// API. unlike Codex, the token is static (no refresh chain), so there's no
+// post-run write-back — see wiki/codex-auth.md "Claude sibling".
 
 import { spawn } from "node:child_process";
 import * as p from "@clack/prompts";
@@ -28,6 +35,12 @@ import {
 } from "./_shared.ts";
 
 const CODEX_AUTH_SECRET = "CODEX_AUTH_JSON";
+const CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN";
+
+/** prefix on `claude setup-token` OAuth tokens (`sk-ant-oat01-…`). used only
+ * for a warn-on-mismatch paste sanity check, not enforced — a wrong token
+ * fails the run's subscription preflight, not here. */
+const CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat";
 
 /** strip CSI ANSI escapes (color, cursor) from a string so callers can re-style
  * the visible text without inheriting the source's formatting. covers what
@@ -86,7 +99,8 @@ function printAuthUsage(params: { stream: typeof console.log; prog: string }): v
   params.stream("manage provider credentials for the current repository.");
   params.stream("");
   params.stream("providers:");
-  params.stream("  codex   mint a Codex (ChatGPT) subscription credential");
+  params.stream("  codex    mint a Codex (ChatGPT) subscription credential");
+  params.stream("  claude   save a Claude Code subscription OAuth token");
   params.stream("");
   params.stream("options:");
   params.stream("  -h, --help   show help");
@@ -95,6 +109,14 @@ function printAuthUsage(params: { stream: typeof console.log; prog: string }): v
 function printCodexUsage(params: { stream: typeof console.log; prog: string }): void {
   params.stream(`usage: ${params.prog} auth codex [options]\n`);
   params.stream("mint a Codex subscription credential and save it as CODEX_AUTH_JSON.");
+  params.stream("");
+  params.stream("options:");
+  params.stream("  -h, --help   show help");
+}
+
+function printClaudeUsage(params: { stream: typeof console.log; prog: string }): void {
+  params.stream(`usage: ${params.prog} auth claude [options]\n`);
+  params.stream("save a Claude Code subscription OAuth token as CLAUDE_CODE_OAUTH_TOKEN.");
   params.stream("");
   params.stream("options:");
   params.stream("  -h, --help   show help");
@@ -119,6 +141,11 @@ export async function runCli(params: AuthCliParams): Promise<void> {
 
   if (subcommand === "codex") {
     await runCodex({ args: rest, prog: params.prog });
+    return;
+  }
+
+  if (subcommand === "claude") {
+    await runClaude({ args: rest, prog: params.prog });
     return;
   }
 
@@ -308,6 +335,151 @@ async function runCodexAuth(): Promise<void> {
       process.exit(1);
     }
     spin.stop(`saved ${pc.cyan(CODEX_AUTH_SECRET)} to Pullfrog (${scope})`);
+
+    setActiveSpin(null);
+    p.outro("done.");
+  } catch (error) {
+    // mirror what `bail` does: stop the spinner with a red "failed" glyph
+    // before clearing it, otherwise an in-flight spinner keeps animating
+    // above the error message we're about to print.
+    spin.stop(pc.red("failed"));
+    setActiveSpin(null);
+    const message = error instanceof Error ? error.message : String(error);
+    p.log.error(message);
+    process.exit(1);
+  }
+}
+
+interface ClaudeCliParams {
+  args: string[];
+  prog: string;
+}
+
+function parseClaudeArgs(args: string[]) {
+  return arg(
+    {
+      "--help": Boolean,
+      "-h": "--help",
+    },
+    { argv: args }
+  );
+}
+
+async function runClaude(params: ClaudeCliParams): Promise<void> {
+  let parsed: ReturnType<typeof parseClaudeArgs>;
+  try {
+    parsed = parseClaudeArgs(params.args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${message}\n`);
+    printClaudeUsage({ stream: console.error, prog: params.prog });
+    process.exit(1);
+  }
+
+  if (parsed["--help"]) {
+    printClaudeUsage({ stream: console.log, prog: params.prog });
+    return;
+  }
+
+  await runClaudeAuth();
+}
+
+async function runClaudeAuth(): Promise<void> {
+  p.intro(pc.bgGreen(pc.black(" pullfrog auth claude ")));
+
+  const spin = p.spinner();
+  setActiveSpin(spin);
+
+  try {
+    spin.start("authenticating with github");
+    const token = getGhToken();
+    spin.stop("github authenticated");
+
+    spin.start("detecting repository");
+    const remote = parseGitRemote();
+    spin.stop(`detected repo ${pc.cyan(`${remote.owner}/${remote.repo}`)}`);
+
+    spin.start("checking pullfrog app installation");
+    const status = await fetchStatus({ token, owner: remote.owner, repo: remote.repo });
+    if (!status.installed) {
+      spin.stop(pc.red("pullfrog app not installed on this repo"));
+      bail(
+        `install pullfrog on ${pc.bold(`${remote.owner}/${remote.repo}`)} before configuring auth.\n` +
+          `  ${pc.dim("run:")} ${pc.cyan(`npx pullfrog init`)}`
+      );
+    }
+    spin.stop(`pullfrog app is installed on ${pc.cyan(`@${remote.owner}`)}`);
+
+    if (status.pullfrogSecrets.includes(CLAUDE_OAUTH_SECRET)) {
+      const overwrite = await p.select({
+        message: `${pc.cyan(CLAUDE_OAUTH_SECRET)} is already configured — overwrite?`,
+        options: [
+          { value: true, label: "overwrite", hint: "replace with a freshly minted token" },
+          { value: false, label: "cancel" },
+        ],
+      });
+      handleCancel(overwrite);
+      if (!overwrite) {
+        p.cancel("canceled.");
+        return;
+      }
+    }
+
+    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
+    // store for user accounts), so we never bother prompting. on org-owned
+    // repos, prompt interactively — matches `init`'s behavior.
+    const scope = status.isOrg
+      ? await promptScope({ owner: remote.owner, repo: remote.repo })
+      : "account";
+
+    p.log.info(
+      [
+        `mint a long-lived Claude Code OAuth token, then paste it below.`,
+        ``,
+        `${pc.dim("run:")} ${pc.cyan("claude setup-token")}`,
+        `it opens your browser, works with Pro/Max subscriptions, and prints a`,
+        `token starting with ${pc.cyan("sk-ant-oat…")}. copy that token.`,
+      ].join("\n")
+    );
+
+    const oauthToken = await p.password({
+      message: `paste your Claude Code OAuth token ${pc.dim("(Enter to cancel)")}`,
+      mask: "*",
+    });
+    handleCancel(oauthToken);
+
+    if (!oauthToken) {
+      p.cancel("canceled.");
+      return;
+    }
+
+    // trim defensively — a trailing newline from a terminal copy breaks GitHub
+    // Actions' line-based log masking downstream. the API trims too, but doing
+    // it here keeps the prefix sanity check honest.
+    const value = oauthToken.trim();
+    if (!value.startsWith(CLAUDE_OAUTH_TOKEN_PREFIX)) {
+      p.log.warn(
+        `that doesn't look like a ${pc.cyan("claude setup-token")} token (expected ${pc.cyan(`${CLAUDE_OAUTH_TOKEN_PREFIX}…`)}). saving it anyway.`
+      );
+    }
+
+    spin.start(`saving ${pc.cyan(CLAUDE_OAUTH_SECRET)} to Pullfrog`);
+    const result = await setPullfrogSecret({
+      token,
+      owner: remote.owner,
+      repo: remote.repo,
+      name: CLAUDE_OAUTH_SECRET,
+      value,
+      scope,
+    });
+    if (!result.saved) {
+      spin.stop(pc.red("could not save secret"));
+      p.log.warn(
+        `${result.error}\n  ${pc.dim("set it manually at:")} ${PULLFROG_API_URL}/console/${remote.owner}`
+      );
+      process.exit(1);
+    }
+    spin.stop(`saved ${pc.cyan(CLAUDE_OAUTH_SECRET)} to Pullfrog (${scope})`);
 
     setActiveSpin(null);
     p.outro("done.");
