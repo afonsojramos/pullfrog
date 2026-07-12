@@ -21,10 +21,13 @@ export function deriveSubagentModels(orchestratorSpec: string | undefined): {
 } {
   if (!orchestratorSpec) return { reviewer: undefined };
 
-  // Reverse-lookup. The same resolve string appears in only one alias
-  // (within its provider), so first match wins. We track which field
-  // matched (resolve vs openRouterResolve) so we can pick the same field
-  // off the subagent target — keeping the orchestrator's route consistent.
+  // Reverse-lookup by resolved spec. A resolve string usually maps to one alias
+  // per provider; the exception is gpt/gpt-pro, which share the direct `…-sol`
+  // resolve (gpt-pro has no distinct -pro id on models.dev/Zen, so on BYOK it
+  // runs as plain Sol). first-match-wins by declaration order (gpt precedes
+  // gpt-pro) yields the canonical gpt downshift; gpt-pro's distinct sol-pro
+  // OpenRouter route still resolves its own subagent. We track which field
+  // matched (resolve vs openRouterResolve) to pick the same field off the target.
   for (const source of modelAliases) {
     const matchedDirect = source.resolve === orchestratorSpec;
     const matchedOR = source.openRouterResolve === orchestratorSpec;

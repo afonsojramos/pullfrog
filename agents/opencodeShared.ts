@@ -49,7 +49,7 @@ export function geminiHighThinkingOverrides(): Record<string, { options: object 
  *
  * Per-subagent `model:` override is driven by the registry in
  * `action/models.ts` via each alias's `subagentModel` field. Currently wired:
- * Anthropic opus → sonnet, OpenAI gpt-pro → gpt and gpt → gpt-5.4, Google
+ * Anthropic opus → sonnet, OpenAI gpt-pro → gpt and gpt → gpt-terra, Google
  * gemini-pro → gemini-flash. Other providers inherit (no override).
  */
 export function buildReviewerAgentConfig(

@@ -32,6 +32,9 @@ export interface ModelAlias {
   provider: string;
   /** human-readable name shown in dropdowns */
   displayName: string;
+  /** optional one-line picker sub-label clarifying what the alias is (e.g.
+   * gpt-pro = "Maximum reasoning effort"). undefined for most aliases. */
+  description: string | undefined;
   /** concrete models.dev specifier, e.g. "anthropic/claude-opus-4-6". sentinel for routing entries — never passed to a CLI directly. */
   resolve: string;
   /** full models.dev specifier for the OpenRouter equivalent (undefined for free models and routing entries) */
@@ -52,13 +55,15 @@ export interface ModelAlias {
    * use as its lens-fanout subagent. e.g. claude-opus → "claude-sonnet". */
   subagentModel: string | undefined;
   /** hide from selectable lists (UI dropdowns, CLI pickers). does NOT affect
-   * resolution — for that use `fallback`. used for internal-only tier targets
-   * (e.g. gpt-5.4 as a subagent target without exposing it to users). */
+   * resolution — for that use `fallback`. used to keep a redundant alias out of
+   * pickers (e.g. the free `minimax-m2.5-free` duplicate). */
   hidden: boolean;
 }
 
 interface ModelDef {
   displayName: string;
+  /** optional one-line picker sub-label (e.g. "Maximum reasoning effort"). */
+  description?: string;
   /** concrete models.dev specifier, e.g. "anthropic/claude-opus-4-6" */
   resolve: string;
   /** full models.dev specifier for the OpenRouter equivalent, e.g. "openrouter/anthropic/claude-opus-4.6" */
@@ -142,37 +147,40 @@ export const providers = {
     managedCredentials: ["CODEX_AUTH_JSON"],
     models: {
       gpt: {
-        displayName: "GPT",
-        resolve: "openai/gpt-5.5",
-        openRouterResolve: "openrouter/openai/gpt-5.5",
+        displayName: "GPT Sol",
+        resolve: "openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         preferred: true,
-        subagentModel: "gpt-5.4",
+        subagentModel: "gpt-terra",
       },
+      // Sol served at reasoning.mode=pro — same $/token as Sol, just more tokens
+      // burned; not a pricier premium tier. models.dev has no -pro id, so direct-key
+      // (BYOK) resolves to plain Sol; only the Router/OpenRouter path gets sol-pro.
       "gpt-pro": {
-        displayName: "GPT Pro",
-        resolve: "openai/gpt-5.5-pro",
-        openRouterResolve: "openrouter/openai/gpt-5.5-pro",
+        displayName: "GPT Sol Pro",
+        description: "Maximum reasoning effort",
+        resolve: "openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
         subagentModel: "gpt",
       },
-      // hidden subagent target — `gpt` lenses run against this. surfacing
-      // it in the picker would just confuse users (it's the prior-flagship,
-      // and they already have `gpt` and `gpt-mini` to choose from).
-      "gpt-5.4": {
-        displayName: "GPT 5.4",
-        resolve: "openai/gpt-5.4",
-        openRouterResolve: "openrouter/openai/gpt-5.4",
-        hidden: true,
+      // gpt-5.6's balanced mid-tier (Sol/Terra/Luna are durable capability tiers,
+      // not version bumps). selectable on its own and doubles as `gpt`'s cheaper
+      // lens-fanout subagent — replaces the old hidden gpt-5.4 subagent target.
+      "gpt-terra": {
+        displayName: "GPT Terra",
+        resolve: "openai/gpt-5.6-terra",
+        openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
       "gpt-mini": {
-        displayName: "GPT Mini",
-        resolve: "openai/gpt-5.4-mini",
-        openRouterResolve: "openrouter/openai/gpt-5.4-mini",
+        displayName: "GPT Luna",
+        resolve: "openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
       // legacy aliases — openai unified the codex line into the main GPT family
       // and is shutting down every "-codex" snapshot on 2026-07-23. transparently
       // upgrade existing users via the fallback chain. UI display sites resolve
       // to the terminal alias's label (so dropdown trigger + PR footers show
-      // "GPT" / "GPT Mini", not the historical name).
+      // "GPT Sol" / "GPT Luna", not the historical name).
       "gpt-codex": {
         displayName: "GPT Codex",
         resolve: "openai/gpt-5.3-codex",
@@ -184,6 +192,13 @@ export const providers = {
         resolve: "openai/gpt-5.1-codex-mini",
         openRouterResolve: "openrouter/openai/gpt-5.1-codex-mini",
         fallback: "openai/gpt-mini",
+      },
+      // dropped hidden subagent tier — folds stored pins forward to gpt (Sol).
+      "gpt-5.4": {
+        displayName: "GPT 5.4",
+        resolve: "openai/gpt-5.4",
+        openRouterResolve: "openrouter/openai/gpt-5.4",
+        fallback: "openai/gpt",
       },
       o3: {
         displayName: "O3",
@@ -314,28 +329,29 @@ export const providers = {
         openRouterResolve: "openrouter/anthropic/claude-haiku-4.5",
       },
       gpt: {
-        displayName: "GPT",
-        resolve: "opencode/gpt-5.5",
-        openRouterResolve: "openrouter/openai/gpt-5.5",
-        subagentModel: "gpt-5.4",
+        displayName: "GPT Sol",
+        resolve: "opencode/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        subagentModel: "gpt-terra",
       },
+      // see openai/gpt-pro — Zen has no -pro id, so direct resolves to plain Sol.
       "gpt-pro": {
-        displayName: "GPT Pro",
-        resolve: "opencode/gpt-5.5-pro",
-        openRouterResolve: "openrouter/openai/gpt-5.5-pro",
+        displayName: "GPT Sol Pro",
+        description: "Maximum reasoning effort",
+        resolve: "opencode/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
         subagentModel: "gpt",
       },
-      // hidden subagent target — see openai provider above for context.
-      "gpt-5.4": {
-        displayName: "GPT 5.4",
-        resolve: "opencode/gpt-5.4",
-        openRouterResolve: "openrouter/openai/gpt-5.4",
-        hidden: true,
+      // gpt-5.6 balanced mid-tier — selectable + `gpt`'s subagent. see openai above.
+      "gpt-terra": {
+        displayName: "GPT Terra",
+        resolve: "opencode/gpt-5.6-terra",
+        openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
       "gpt-mini": {
-        displayName: "GPT Mini",
-        resolve: "opencode/gpt-5.4-mini",
-        openRouterResolve: "openrouter/openai/gpt-5.4-mini",
+        displayName: "GPT Luna",
+        resolve: "opencode/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
       // legacy aliases — see openai provider above for context.
       "gpt-codex": {
@@ -349,6 +365,13 @@ export const providers = {
         resolve: "opencode/gpt-5.1-codex-mini",
         openRouterResolve: "openrouter/openai/gpt-5.1-codex-mini",
         fallback: "opencode/gpt-mini",
+      },
+      // dropped hidden subagent tier — folds stored pins forward to gpt (Sol).
+      "gpt-5.4": {
+        displayName: "GPT 5.4",
+        resolve: "opencode/gpt-5.4",
+        openRouterResolve: "openrouter/openai/gpt-5.4",
+        fallback: "opencode/gpt",
       },
       "gemini-pro": {
         displayName: "Gemini Pro",
@@ -466,29 +489,34 @@ export const providers = {
         resolve: "openrouter/~anthropic/claude-haiku-latest",
         openRouterResolve: "openrouter/~anthropic/claude-haiku-latest",
       },
+      // pinned to the explicit gpt-5.6 tiers (not the ~openai/gpt-latest rolling
+      // alias): after the Sol/Terra/Luna rename, ~gpt-mini-latest no longer maps
+      // to Luna, so rolling aliases would silently diverge `gpt`/`gpt-mini` from
+      // the chosen tiers across funding paths.
       gpt: {
-        displayName: "GPT",
-        resolve: "openrouter/~openai/gpt-latest",
-        openRouterResolve: "openrouter/~openai/gpt-latest",
-        subagentModel: "gpt-5.4",
+        displayName: "GPT Sol",
+        resolve: "openrouter/openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        subagentModel: "gpt-terra",
       },
+      // see openai/gpt-pro. openrouter serves sol-pro directly on both routes.
       "gpt-pro": {
-        displayName: "GPT Pro",
-        resolve: "openrouter/openai/gpt-5.5-pro",
-        openRouterResolve: "openrouter/openai/gpt-5.5-pro",
+        displayName: "GPT Sol Pro",
+        description: "Maximum reasoning effort",
+        resolve: "openrouter/openai/gpt-5.6-sol-pro",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
         subagentModel: "gpt",
       },
-      // hidden subagent target — see openai provider above for context.
-      "gpt-5.4": {
-        displayName: "GPT 5.4",
-        resolve: "openrouter/openai/gpt-5.4",
-        openRouterResolve: "openrouter/openai/gpt-5.4",
-        hidden: true,
+      // gpt-5.6 balanced mid-tier — selectable + `gpt`'s subagent. see openai above.
+      "gpt-terra": {
+        displayName: "GPT Terra",
+        resolve: "openrouter/openai/gpt-5.6-terra",
+        openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
       "gpt-mini": {
-        displayName: "GPT Mini",
-        resolve: "openrouter/~openai/gpt-mini-latest",
-        openRouterResolve: "openrouter/~openai/gpt-mini-latest",
+        displayName: "GPT Luna",
+        resolve: "openrouter/openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
       // legacy aliases — see openai provider for context.
       "gpt-codex": {
@@ -502,6 +530,13 @@ export const providers = {
         resolve: "openrouter/openai/gpt-5.1-codex-mini",
         openRouterResolve: "openrouter/openai/gpt-5.1-codex-mini",
         fallback: "openrouter/gpt-mini",
+      },
+      // dropped hidden subagent tier — folds stored pins forward to gpt (Sol).
+      "gpt-5.4": {
+        displayName: "GPT 5.4",
+        resolve: "openrouter/openai/gpt-5.4",
+        openRouterResolve: "openrouter/openai/gpt-5.4",
+        fallback: "openrouter/gpt",
       },
       "o4-mini": {
         displayName: "O4 Mini",
@@ -610,6 +645,7 @@ export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
       slug: `${providerKey}/${modelId}`,
       provider: providerKey,
       displayName: def.displayName,
+      description: def.description,
       resolve: def.resolve,
       openRouterResolve: def.openRouterResolve,
       preferred: def.preferred ?? false,

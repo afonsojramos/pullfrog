@@ -39,30 +39,34 @@ describe("deriveSubagentModels", () => {
   });
 
   describe("openai family", () => {
-    it("gpt-pro → gpt (direct)", () => {
-      expect(deriveSubagentModels("openai/gpt-5.5-pro")).toEqual({ reviewer: "openai/gpt-5.5" });
-    });
-    it("gpt → gpt-5.4 (direct)", () => {
-      expect(deriveSubagentModels("openai/gpt-5.5")).toEqual({ reviewer: "openai/gpt-5.4" });
-    });
-    it("gpt → gpt-5.4 (opencode-vendored)", () => {
-      expect(deriveSubagentModels("opencode/gpt-5.5")).toEqual({ reviewer: "opencode/gpt-5.4" });
-    });
-    it("gpt-pro → gpt (openrouter)", () => {
-      expect(deriveSubagentModels("openrouter/openai/gpt-5.5-pro")).toEqual({
-        reviewer: "openrouter/openai/gpt-5.5",
+    it("gpt → gpt-terra (direct)", () => {
+      expect(deriveSubagentModels("openai/gpt-5.6-sol")).toEqual({
+        reviewer: "openai/gpt-5.6-terra",
       });
     });
-    it("gpt → gpt-5.4 (openrouter)", () => {
-      expect(deriveSubagentModels("openrouter/openai/gpt-5.5")).toEqual({
-        reviewer: "openrouter/openai/gpt-5.4",
+    it("gpt → gpt-terra (opencode-vendored)", () => {
+      expect(deriveSubagentModels("opencode/gpt-5.6-sol")).toEqual({
+        reviewer: "opencode/gpt-5.6-terra",
       });
     });
-    it("gpt-5.4 itself (the hidden subagent target) has no further downshift", () => {
-      expect(deriveSubagentModels("openai/gpt-5.4")).toEqual({ reviewer: undefined });
+    it("gpt → gpt-terra (openrouter)", () => {
+      expect(deriveSubagentModels("openrouter/openai/gpt-5.6-sol")).toEqual({
+        reviewer: "openrouter/openai/gpt-5.6-terra",
+      });
+    });
+    // gpt-pro's direct-key resolve is plain Sol (no -pro id on models.dev), so it
+    // collides with `gpt` and downshifts to Terra like Sol; only the OpenRouter
+    // sol-pro route is distinct, and its subagent is the flagship Sol.
+    it("gpt-pro → gpt (openrouter sol-pro route)", () => {
+      expect(deriveSubagentModels("openrouter/openai/gpt-5.6-sol-pro")).toEqual({
+        reviewer: "openrouter/openai/gpt-5.6-sol",
+      });
+    });
+    it("gpt-terra itself (the subagent target) has no further downshift", () => {
+      expect(deriveSubagentModels("openai/gpt-5.6-terra")).toEqual({ reviewer: undefined });
     });
     it("gpt-mini has no downshift", () => {
-      expect(deriveSubagentModels("openai/gpt-5.4-mini")).toEqual({ reviewer: undefined });
+      expect(deriveSubagentModels("openai/gpt-5.6-luna")).toEqual({ reviewer: undefined });
     });
   });
 
