@@ -5,11 +5,7 @@ import { type CommentableLines, primaryRepoState } from "../toolState.ts";
 import { getApiUrl } from "../utils/apiUrl.ts";
 import { buildPullfrogFooter } from "../utils/buildPullfrogFooter.ts";
 import { log } from "../utils/cli.ts";
-import {
-  countLinesInRanges,
-  getDiffCoverageBreakdown,
-  renderDiffCoverageBreakdown,
-} from "../utils/diffCoverage.ts";
+import { countLinesInRanges, getDiffCoverageBreakdown } from "../utils/diffCoverage.ts";
 import { fixDoubleEscapedString } from "../utils/fixDoubleEscapedString.ts";
 import { patchWorkflowRunFields } from "../utils/patchWorkflowRunFields.ts";
 import { isPullfrog } from "../utils/payload.ts";
@@ -931,10 +927,6 @@ function runDiffCoveragePreflight(params: { ctx: ToolContext }): void {
     unread.push({ path: file.filename, ranges: rangesText, unreadLines: fileUnreadLines });
     unreadLines += fileUnreadLines;
   }
-  coverageState.lastBreakdown = renderDiffCoverageBreakdown({
-    diffPath: coverageState.diffPath,
-    breakdown,
-  });
   log.debug(
     `diff coverage pre-flight breakdown: coveredLines=${breakdown.coveredLines}, unreadLines=${unreadLines}`
   );
@@ -956,8 +948,7 @@ function runDiffCoveragePreflight(params: { ctx: ToolContext }): void {
       `you are NOT obligated to read generated artifacts (lockfiles like pnpm-lock.yaml / package-lock.json / yarn.lock / Cargo.lock; codegen output like *.gen.*, *.pb.go, *.generated.*; snapshot/fixture dirs like __snapshots__/; migration metadata like drizzle/meta/, prisma migration SQL). ` +
       `if every unread region is generated, retry immediately without reading. ` +
       `this pre-flight will not block again in this review session.\n\n` +
-      `unread TOC regions:\n${unreadText}\n\n` +
-      `${coverageState.lastBreakdown}`
+      `unread TOC regions:\n${unreadText}`
   );
 }
 

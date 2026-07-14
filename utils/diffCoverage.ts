@@ -37,7 +37,6 @@ export type DiffCoverageState = {
   tocEntries: DiffTocEntry[];
   coveredRanges: DiffLineRange[];
   coveragePreflightRan: boolean;
-  lastBreakdown?: string | undefined;
 };
 
 type ReadTarget = {
@@ -161,33 +160,6 @@ export function getDiffCoverageBreakdown(params: {
     unreadRanges,
     files,
   };
-}
-
-export function renderDiffCoverageBreakdown(params: {
-  diffPath: string;
-  breakdown: DiffCoverageBreakdown;
-}): string {
-  const breakdown = params.breakdown;
-  const lines: string[] = [];
-  lines.push(`diff coverage report for \`${params.diffPath}\``);
-  lines.push(
-    `overall: ${breakdown.coveredLines}/${breakdown.totalLines} lines read (${breakdown.coveragePercent}%), unread: ${breakdown.unreadLines}`
-  );
-  lines.push(`covered ranges: ${formatRanges({ ranges: breakdown.coveredRanges })}`);
-  lines.push(`unread ranges: ${formatRanges({ ranges: breakdown.unreadRanges })}`);
-  lines.push("");
-  lines.push("per-file TOC coverage:");
-  for (const file of breakdown.files) {
-    const filePercent = file.totalLines
-      ? Number(((file.coveredLines / file.totalLines) * 100).toFixed(2))
-      : 100;
-    lines.push(
-      `- ${file.filename} (toc lines ${file.startLine}-${file.endLine}): ${file.coveredLines}/${file.totalLines} lines read (${filePercent}%)`
-    );
-    lines.push(`  read: ${formatRanges({ ranges: file.coveredRanges })}`);
-    lines.push(`  unread: ${formatRanges({ ranges: file.unreadRanges })}`);
-  }
-  return lines.join("\n");
 }
 
 function resolveOffsetBase(params: { toolName: string }): OffsetBase {
@@ -371,11 +343,6 @@ export function countLinesInRanges(params: { ranges: DiffLineRange[] }): number 
     total += range.endLine - range.startLine + 1;
   }
   return total;
-}
-
-function formatRanges(params: { ranges: DiffLineRange[] }): string {
-  if (params.ranges.length === 0) return "none";
-  return params.ranges.map((range) => `${range.startLine}-${range.endLine}`).join(", ");
 }
 
 function clampLine(params: { value: number; totalLines: number }): number {
