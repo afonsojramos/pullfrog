@@ -598,7 +598,7 @@ ${PR_SUMMARY_FORMAT}`,
 
 1. **task list**: create your task list for this run as your first action.
 
-2. Analyze the task. For simple operations (labeling, commenting, answering questions, running a single command), handle directly — but your answer only reaches the user through \`${t("report_progress")}\` (step 4); raw assistant text is discarded.
+2. Analyze the task. For simple operations (labeling, answering questions, running a single command), handle directly — but your answer only reaches the user through \`${t("report_progress")}\` (step 4); raw assistant text is discarded. If a standalone comment on the current issue/PR is the task's sole requested deliverable, create that comment directly and skip \`${t("report_progress")}\`.
 
 3. For substantial work — code changes across multiple files, multi-step investigations:
    - plan your approach before starting
@@ -608,8 +608,8 @@ ${PR_SUMMARY_FORMAT}`,
 
 4. Finalize:
    - if code changes were made, get them onto a pull request (new or existing) using ${signedCommits ? `\`${t("commit_changes")}\`` : `\`${t("push_branch")}\``} and \`${t("create_pull_request")}\` as needed. \`git status\` must be clean before you finish (see *SYSTEM* Git rules if this fails).
-   - call \`${t("report_progress")}\` once with results — include exact tool errors if push or PR creation failed
-   - if the task involved labeling, commenting, or other GitHub operations, perform those directly`,
+   - call \`${t("report_progress")}\` once with results — include exact tool errors if push or PR creation failed. skip this only when a standalone comment on the current target was the task's sole requested deliverable
+   - if the task involved labeling or other GitHub operations, perform those directly`,
     },
   ];
 }

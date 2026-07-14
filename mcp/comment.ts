@@ -67,7 +67,9 @@ export const Comment = type({
   body: type.string.describe("the comment body content"),
   type: type
     .enumerated("Plan", "Comment")
-    .describe("Plan: record as the plan for this run. Comment: regular comment (default).")
+    .describe(
+      "Plan: standalone plan comment on another target. Comment: regular comment (default)."
+    )
     .optional(),
 });
 
@@ -78,7 +80,7 @@ export function CreateCommentTool(ctx: ToolContext) {
     description:
       "Create a comment on a GitHub issue or PR. " +
       'Example: `create_issue_comment({ issueNumber: 1234, body: "Thanks for the report." })`. ' +
-      "For progress/plan updates on the current run use report_progress instead — plan output (initial post AND revisions) is always posted via report_progress, never via this tool.",
+      "For the current run's answer, progress, or plan use report_progress instead. Use this on the current target only when the task explicitly requests a standalone comment. Skip report_progress only when that current-target comment is the task's sole requested deliverable.",
     parameters: Comment,
     execute: execute(async ({ issueNumber, body, type: commentType }) => {
       const bodyWithFooter = addFooter(ctx, body);
@@ -92,15 +94,6 @@ export function CreateCommentTool(ctx: ToolContext) {
 
       ctx.toolState.wasUpdated = true;
       log.info(`» created comment ${result.data.id}`);
-
-      // a standalone answer comment on the run's OWN target makes the sticky
-      // progress comment redundant — record it so run-end cleanup deletes the
-      // progress comment even after report_progress finalized (see runLifecycle).
-      // scoped to the target so commenting on a DIFFERENT issue/PR doesn't trip it,
-      // and excludes Plan comments (their own deliberate deliverable, not chrome).
-      if (commentType !== "Plan" && issueNumber === ctx.payload.event.issue_number) {
-        ctx.toolState.answerCommentPosted = true;
-      }
 
       if (commentType === "Plan") {
         if (result.data.node_id) {
