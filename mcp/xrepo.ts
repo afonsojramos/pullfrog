@@ -34,6 +34,7 @@ export const ListRepos = type({});
 export function ListReposTool(ctx: ToolContext) {
   return tool({
     name: "list_repos",
+    annotations: { readOnlyHint: true },
     description:
       "List the repositories available for cross-repo (`--xrepo`) work in this run, with each repo's access tier (primary, write, or read) and whether it's already checked out. " +
       "Use this before `checkout_repo` to discover what you can reference or edit. Returns an empty set on single-repo runs.",

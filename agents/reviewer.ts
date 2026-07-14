@@ -84,6 +84,12 @@ export const REVIEWER_SYSTEM_PROMPT =
   `commit then re-dispatch\` and stop. Do NOT guess PR numbers (e.g. by extrapolating ` +
   `from \`git log\` output), do NOT check out other PRs, do NOT fetch from forks. ` +
   `The empty diff is the diagnosis — surface it; do not work around it.\n` +
+  `- Once the mandatory first diff read returns a non-empty scope, batch each next ` +
+  `dependency layer: emit all independent read-only file reads, greps, globs, and ` +
+  `directory listings together in one assistant turn before awaiting their results. ` +
+  `Include MCP queries only when their contract explicitly guarantees they are ` +
+  `read-only; a \`get_*\` or \`list_*\` name alone is not proof. Keep dependent calls ` +
+  `in later turns, after the results they depend on are available.\n` +
   `- Read-only tools only. Do NOT write or edit files. Do NOT run shell commands ` +
   `that have side effects (read-only commands like \`git diff\`, \`git log\`, \`cat\`, \`ls\` ` +
   `are fine; anything that mutates the working tree, the remote, the filesystem, or ` +
@@ -91,9 +97,9 @@ export const REVIEWER_SYSTEM_PROMPT =
   `- Do NOT call any state-changing MCP tool. State-changing means: posts a comment, ` +
   `pushes a branch, creates/updates a PR or issue, changes labels, resolves review ` +
   `threads, persists learnings, sets workflow output, installs dependencies, uploads ` +
-  `files, kills processes, etc. Read-only MCP queries (\`get_*\`, \`list_*\`, the ` +
-  `\`git\` tool for read-only subcommands like \`diff\`/\`log\`/\`merge-base\`, log ` +
-  `inspection, diff retrieval) are fine.\n` +
+  `files, kills processes, etc. MCP tool names are not evidence of safety: only use ` +
+  `queries whose contract explicitly guarantees no side effects. The \`git\` tool is ` +
+  `fine only for read-only subcommands like \`diff\`/\`log\`/\`merge-base\`.\n` +
   `- Do NOT spawn further subagents. You are a leaf reviewer; recursive dispatch ` +
   `pre-aggregates findings through an intermediate model and defeats the design.\n` +
   `- Test for any tool call before invoking it: would this still be a no-op if ` +

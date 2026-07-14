@@ -17,7 +17,9 @@ export function getHttpStatus(err: unknown): number | undefined {
  * the single source of truth the subagent deny list derives from (see
  * action/agents/subagentToolGates.ts). general-purpose execution tools (`git`,
  * `shell`) are deliberately left unmarked: they can mutate but are allowed for
- * subagents and gated by command-arg validation instead.
+ * subagents and gated by command-arg validation instead. `readOnlyHint` is
+ * independent scheduler metadata and must only follow an implementation audit;
+ * the absence of `mutates` does not imply that a tool is read-only.
  */
 export type PullfrogTool = Tool<any, any> & { mutates?: boolean };
 
