@@ -1151,6 +1151,9 @@ export const claude = agent({
       ...homeEnv,
       PWD: repoDir,
     };
+    // Claude Code caps this at its detected model window: 200K stays 200K, while 1M uses 500K.
+    // Keep operator overrides; revalidate this when the pinned CLI or model windows change.
+    env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ||= "500000";
     if (isBedrockRoute) {
       env.CLAUDE_CODE_USE_BEDROCK = "1";
     }
