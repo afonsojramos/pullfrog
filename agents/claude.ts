@@ -445,7 +445,8 @@ export async function runClaude(params: RunParams): Promise<ClaudeRunResult> {
           }
         } else if (block.type === "tool_use") {
           const toolName = block.name || "unknown";
-          if (params.onToolUse) {
+          // specialist reads cannot satisfy the primary reviewer's diff coverage.
+          if (params.onToolUse && label === ORCHESTRATOR_LABEL) {
             params.onToolUse({
               toolName,
               input: block.input,

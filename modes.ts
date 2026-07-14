@@ -282,20 +282,15 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
      - **immediately** call \`${t("resolve_review_thread")}\` with that thread's \`thread=\` value as \`thread_id\`. Resolve every thread where you (a) made the requested code change in full — partial fixes leave the thread open — OR (b) replied with a substantive answer the user explicitly asked for. Do NOT resolve threads where you pushed back on the request and the disagreement is unresolved; leave those open for the human to mediate.
    - call \`${t("report_progress")}\` with a brief summary`,
     },
-    // Review and IncrementalReview use a 0-or-2+ lens pattern. The default is
-    // 0 lenses (orchestrator handles the review solo). Multi-lens (2+
-    // reviewfrog subagents in parallel) only fires for substantive PRs or
-    // high-stakes-subsystem touches — and when it fires, ALL lenses must
-    // dispatch in a single assistant turn or the parallelism win disappears.
-    // We never dispatch exactly one lens: a single lens is just a worse,
-    // slower version of doing the work yourself.
+    // Review and IncrementalReview route the minimum reviewfrog specialists
+    // needed to cover unresolved, disposition-changing hypotheses. Most runs
+    // use zero or one; multiple orthogonal hypotheses dispatch in parallel.
     //
     // Build mode self-review is a different problem shape: the orchestrator
     // wrote the code, so bias-mitigation comes from delegating to one
     // fresh-eyes subagent that doesn't share the implementation context. A
-    // single subagent there is appropriate; the 0-or-2+ rule applies only to
-    // the Review/IncrementalReview lens fan-out where independence between
-    // perspectives is what's being purchased.
+    // single subagent there is appropriate. Review-mode specialist routing
+    // instead scales with the unresolved hypotheses in someone else's diff.
     //
     // Severity categorization is split across two surfaces: the opening
     // callout (CAUTION/IMPORTANT/ℹ️/✅) sets the review's overall tier, and
@@ -311,11 +306,11 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 
 1. **task list**: create your task list for this run as your first action.
 
-2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata and a \`diffPath\`. read the diff TOC end-to-end and treat its file line ranges as your coverage checklist.
+2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata and a \`diffPath\`. read the complete raw diff end-to-end, beginning with the TOC and using its file line ranges as your coverage checklist.
 
 3. **triage**: orient yourself on the PR — identify *what kind of thing this is* (domain it touches, seams it crosses, external contracts it depends on, user-facing surfaces it changes). pull as much context as you need to render a confident, well-grounded review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths, fetch related GitHub state. **you are the synthesizer** — never delegate understanding to subagents.
 
-   if the PR is **genuinely trivial**, skip the fan-out entirely and submit a \`No new issues found.\` review per step 7.
+   if the PR is **genuinely trivial**, skip specialists entirely and submit a \`No new issues found.\` review per step 7.
 
    "Genuinely trivial" (skip):
    - single-word doc typo, whitespace/format-only, comment-only across any number of files
@@ -334,22 +329,24 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
    - any "typo fix" in user-facing copy that changes meaning ("approved" → "denied")
    - mixed diffs where a semantic 1-liner is buried in whitespace/formatting changes
 
-4. **lens decision — 0 or 2+, NEVER 1**.
+4. **specialist decision — minimum hypothesis coverage**.
 
-   The default is **0 lenses**: handle the review yourself end-to-end. Most PRs land here.
+   After full-diff coverage and triage, identify the load-bearing questions you still cannot resolve confidently yourself. A specialist hypothesis is load-bearing only when its answer could yield an actionable finding that changes the review disposition and warrants independent investigation, and falsifiable only when the specialist can return evidence that supports or refutes it. Generic requests for extra confidence, polish, or "another look" do not qualify.
 
-   Dispatch **2+ \`${REVIEWER_AGENT_NAME}\` lenses in parallel** ONLY when ALL of the following are true:
-   - the PR is substantive (>5 files changed AND >200 net lines), OR touches a high-stakes subsystem (auth, billing, payments, schema migration, webhooks, secrets, RBAC, multi-tenant isolation, cron/scheduling)
-   - you can name 2+ distinct concrete failure modes that warrant independent lenses (one lens per failure mode; orthogonal, not overlapping)
-   - parallel-orchestrated independent perspectives meaningfully outperform what you'd find solo
+   Route the **minimum number of \`${REVIEWER_AGENT_NAME}\` specialists** needed to cover those unresolved hypotheses. Most reviews need **0 or 1**:
+   - dispatch 0 when you can resolve every disposition-changing question directly
+   - dispatch 1 when exactly one falsifiable, load-bearing hypothesis warrants independent investigation
+   - dispatch 2+ in parallel when multiple orthogonal load-bearing hypotheses remain, or when the user explicitly requests an exhaustive or multi-angle review
 
-   **NEVER dispatch exactly one lens.** A single lens is just a more expensive version of doing the work yourself with a worse model — it adds wall time and a context-handoff for no orthogonality benefit. Either you have at least two genuinely independent failure-mode hypotheses (dispatch all in one turn), or you don't (do the review yourself).
+   **There is NO one-specialist cap or fixed maximum.** Cover every orthogonal load-bearing hypothesis that remains; do not collapse multiple real questions into one broad prompt just to reduce the count. There is also no file-count, line-count, schema, quota, or hard-budget threshold — diff size is not a proxy for review uncertainty.
 
-   When you do go multi-lens, lens framings come in two flavors:
+   The primary reviewer remains responsible for reading the complete raw diff, investigating surrounding code, validating every returned finding, and synthesizing the final review. Specialist reads supplement that work; they never replace it or satisfy the primary's diff-coverage obligation.
+
+   Specialist hypotheses can draw on two kinds of framing:
    - **themed lenses** — a perspective applied across the whole diff (correctness, security, user-journey, performance, etc.).
    - **subsystem lenses** — a domain-scoped frame for high-stakes subsystems the PR touches (e.g. "the auth lens", "the billing lens", "the schema-migration lens"). **for high-stakes domains, lead with the subsystem lens rather than the generic themed equivalent** — "billing-subsystem" outperforms "correctness on billing code" because the framing primes the subagent to remember domain-specific failure modes (double-charges, refund races, currency rounding, dispute flows) the generic lens misses.
 
-   starter menu (combine, omit, or invent your own):
+   starter menu for identifying hypotheses (combine, omit, or invent your own; do not dispatch a bare menu label without a falsifiable question):
    - **correctness & invariants** — bugs, races, error handling, edge cases, state-machine boundaries
    - **impact** — stale references in code/tests/docs/configs/UI after rename/remove
    - **research-validated assumptions** — third-party API contracts, SDK semantics, framework directives, version-gated behavior. **only pick when the PR's correctness depends on the contract behaving a specific way** — not when the API is merely used. The bar is "if the third-party contract differs from what the diff assumes, the PR is incorrect." When dispatched, the subagent must verify load-bearing claims via web search and quote source URLs.
@@ -364,30 +361,27 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 
    The only subagent type is \`${REVIEWER_AGENT_NAME}\` — used for lens judgment work ("is this safe / correct / well-tested?"), runs on a mid-tier model.
 
-5. **fan out (only if step 4 said 2+ lenses)**: dispatch every \`${REVIEWER_AGENT_NAME}\` subagent for this run **IN A SINGLE ASSISTANT TURN, AS MULTIPLE PARALLEL TASK TOOL_USE BLOCKS IN ONE MESSAGE.**
+5. **dispatch specialists (only if step 4 found unresolved hypotheses)**: dispatch one \`${REVIEWER_AGENT_NAME}\` for one hypothesis. For 2+ hypotheses, emit every Task tool_use block **IN A SINGLE ASSISTANT TURN** before reading any result so the investigations run in parallel rather than serially.
 
-   ⚠️  CRITICAL — PARALLELISM IS THE ONLY REASON LENSES EXIST. ⚠️
-   The default tool-call behavior of Claude Code (and most agent runtimes) is **serial dispatch**: emit one Task call, await result, emit next, await, etc. This collapses your fan-out into a sequential review where each lens adds N × (orchestrator-think-time + lens-execution-time) to wall time. **YOU MUST OVERRIDE THIS DEFAULT.** Emit ALL of your Task tool_use blocks in the SAME assistant message, BEFORE you read ANY result from ANY of them. If you find yourself emitting one Task call, then thinking about the result, then emitting another — STOP and re-issue them all together. The whole point of going multi-lens is the wall-clock speedup from parallel execution; serial dispatch defeats it entirely.
-
-   ✅ Right pattern: one assistant turn with N Task tool_use blocks → wait → N results arrive together → aggregate.
-   ❌ Wrong pattern: turn 1 = Task(lens A) → turn 2 (after A's result) = Task(lens B) → turn 3 (after B's result) = Task(lens C). This is the failure mode. Do not do this.
+   ✅ Right multi-specialist pattern: one assistant turn with N Task tool_use blocks → wait → N results arrive together → aggregate.
+   ❌ Wrong multi-specialist pattern: Task(hypothesis A) → wait for A → Task(hypothesis B).
 
    You can also include your own \`read\` / \`grep\` / \`webfetch\` calls in the SAME turn as the parallel \`${REVIEWER_AGENT_NAME}\` dispatches — concurrent context-pulling on the orchestrator side runs in parallel with the lens fan-out and costs zero extra wall time.
 
-   if a subagent errors out, times out, or returns nothing usable, retry once with the same lens; if it still fails, proceed with partial coverage and note the missing lens in the review body — do not skip the fan-out entirely on a single subagent failure. each subagent gets:
+   if a specialist errors out, times out, or returns nothing usable, retry it once with the same hypothesis. if it still fails, attempt to resolve the hypothesis yourself; if it remains disposition-changing and unresolved, surface the limitation and do not approve. each specialist gets:
    - **the absolute \`diffPath\` (and \`incrementalDiffPath\` if available) from step 2's \`${t("checkout_pr")}\` return, named verbatim in the dispatch prompt** (e.g. \`diffPath: /tmp/pullfrog-XXXX/pr-NNN-SHA.diff\`). the reviewer's baked-in system prompt selects its FIRST action on this token — paraphrasing ("review the diff", "look at this PR") sends it down the \`git diff origin/<base>\` fallback, which fails on shallow GHA checkouts. the subagent \`read\`s those files for scope; it must NOT re-derive the diff via \`git diff\` (bare \`git diff origin/<base>\` is symmetric and pulls in the inverse of any commits that landed on \`<base>\` since the branch forked — pure noise, and the git tool rejects it). reading and codebase exploration are still its job.
-   - **only one lens** — never a multi-section "review for X, Y, and Z" prompt
-   - **a Task \`description\` set to the lens name** (e.g. \`"security"\`, \`"correctness"\`, \`"billing-subsystem"\`) — the harness reads this field to label the subagent's log lines so parallel runs can be told apart in CI output. without it, every subagent shows up as \`subagent#N\`.
+   - **exactly one falsifiable hypothesis with explicit scope boundaries** — ask for evidence that supports or refutes it, never a broad "review for X, Y, and Z" prompt
+   - **a Task \`description\` set to a short hypothesis label** (e.g. \`"webhook-replay"\`, \`"billing-rounding"\`) — the harness reads this field to label the subagent's log lines so parallel runs can be told apart in CI output. without it, every subagent shows up as \`subagent#N\`.
    - if the lens touches external contracts, instruct the subagent to verify load-bearing claims via web search rather than trust training data, and to quote source URLs in its reasoning. action runs are non-interactive — there's no human in the loop to catch "I'm pretty sure Stripe does X."
-   - ask the subagent to report findings with file paths and NEW line numbers from the diff so you can anchor inline comments without re-reading the entire diff.
+   - ask the subagent to report findings with file paths and NEW line numbers from the diff so you can validate and anchor them. you must still read the complete diff yourself.
 
    delegation discipline:
-   - do NOT summarize the PR for them (biases toward a validation frame)
+   - do NOT summarize the PR for them (a lossy summary biases toward a validation frame; the raw diff is the source)
    - do NOT hand them a curated reading list (let them discover scope)
    - do NOT pre-shape their output with a finding schema
    - do NOT mention the other lenses (independence is the point — overlapping findings are a strong signal)
 
-6. **aggregate & draft**: when the fan-out lands, merge findings; de-dup overlaps (two lenses catching the same issue = higher-confidence signal); trace each finding yourself before accepting it. drop praise, style preferences, speculative/unverified claims, findings about pre-existing code unrelated to the PR (heuristic: if the finding's root cause lives in lines this PR added or modified, it's in scope; otherwise drop unless the PR plausibly introduced or amplified the regression), and anything not actionable. also drop **bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. subagents are fallible and bias toward recommending changes; the bar for an actionable inline comment is sound + correct + elegant. recommending a change that improves only one of the three (or worse, degrades elegance to nominally improve correctness) makes the codebase worse, not better.
+6. **aggregate & draft**: when specialist results land, merge findings; de-dup overlaps (two specialists catching the same issue = higher-confidence signal); trace each finding yourself before accepting it. drop praise, style preferences, speculative/unverified claims, findings about pre-existing code unrelated to the PR (heuristic: if the finding's root cause lives in lines this PR added or modified, it's in scope; otherwise drop unless the PR plausibly introduced or amplified the regression), and anything not actionable. also drop **bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. subagents are fallible and bias toward recommending changes; the bar for an actionable inline comment is sound + correct + elegant. recommending a change that improves only one of the three (or worse, degrades elegance to nominally improve correctness) makes the codebase worse, not better.
 
    **Hunt for non-anchored concerns before drafting.** After collecting your anchored findings, deliberately scan for concerns that have no specific line to point at — typically: deletion / cleanup plans for code the diff replaces or shadows; rollout sequencing (what happens to in-flight state during deploy / revert?); coverage gaps the diff implies but doesn't add; scope questions that only the human can answer (e.g. is the legacy path going away or is this a long-term dual track?); architectural risks the diff opens up that aren't a single-line bug. On substantial PRs (migrations, refactors, multi-file rewrites, version bumps that change runtime semantics), at least one such concern almost always exists; if you can't think of any, your bar is probably too high.
 
@@ -421,10 +415,10 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 
 ${PR_SUMMARY_FORMAT}`,
     },
-    // IncrementalReview shares Review's 0-or-2+ lens pattern AND its body
-    // format (PR_SUMMARY_FORMAT), scoped to the incremental delta against the
-    // prior pullfrog review. The "issues must be NEW since the last Pullfrog
-    // review" filter lives at aggregation time (step 8), NOT in the subagent
+    // IncrementalReview shares Review's minimum hypothesis-covering specialist
+    // routing and body format, scoped to the incremental delta against the
+    // prior Pullfrog review. The "issues must be NEW since the last Pullfrog
+    // review" filter lives at aggregation time, NOT in the subagent
     // prompt — pushing the filter into subagents matches the canonical anneal
     // anti-pattern of "list known pre-existing failures — don't flag these"
     // and suppresses signal on regressions the new commits amplified. A
@@ -440,7 +434,7 @@ ${PR_SUMMARY_FORMAT}`,
 
 1. **task list**: create your task list for this run as your first action.
 
-2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata, \`diffPath\` (full diff), and \`incrementalDiffPath\` (changes since last reviewed version, if available). read the diff TOC first and use its line ranges as your coverage checklist.
+2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata, \`diffPath\` (full diff), and \`incrementalDiffPath\` (changes since last reviewed version, if available). read the complete raw full diff end-to-end, beginning with the TOC and using its line ranges as your coverage checklist.
 
 3. **incremental scope**: if \`incrementalDiffPath\` is present, read it to see what changed since the last review. this is a range-diff that isolates the net changes, filtering out base branch noise. if not present, fall back to reviewing the full PR diff and determine what changed since Pullfrog's most recent review.
 
@@ -456,49 +450,48 @@ ${PR_SUMMARY_FORMAT}`,
 
 5. **triage**: orient on the *incremental* changes — domain, seams, external contracts, user-facing surfaces. pull as much context as you need to render a confident review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths. **you are the synthesizer.**
 
-   if the incremental changes are **genuinely trivial**, skip the fan-out entirely and jump to step 10's non-substantive path (do NOT submit a review).
+   if the incremental changes are **genuinely trivial**, skip specialists entirely and jump to step 10's non-substantive path (do NOT submit a review).
 
    "Genuinely trivial" (skip): formatting/comment tweaks, import reordering, lockfile regen, mechanical rename of import paths, whitespace-only.
    "Looks trivial but isn't" (do NOT skip — same anti-patterns as Review mode): 1-line changes to SQL/regex/auth/billing/permissions/signature-verification code; flipping feature-flag defaults or retry/timeout constants; money/tax/HTTP-method/redirect changes; tightening or loosening a comparison operator; mixed diffs with a semantic line buried in formatting.
    When unsure, treat as non-trivial.
 
-6. **lens decision — 0 or 2+, NEVER 1**.
+6. **specialist decision — minimum hypothesis coverage**.
 
-   The default is **0 lenses**: handle the re-review yourself end-to-end. Most incremental reviews land here — especially thread-reply re-reviews where the user is asking "did you address X?" rather than "review the diff again."
+   After full-diff coverage and triage, identify the load-bearing questions about the incremental changes that you still cannot resolve confidently yourself. A specialist hypothesis is load-bearing only when its answer could yield an actionable new finding that changes the review disposition and warrants independent investigation, and falsifiable only when the specialist can return evidence that supports or refutes it. Generic requests for extra confidence, polish, or "another look" do not qualify.
 
-   Dispatch **2+ \`${REVIEWER_AGENT_NAME}\` lenses in parallel** ONLY when ALL of the following are true:
-   - the incremental changes are substantive (>5 files changed AND >200 net new lines), OR touch a high-stakes subsystem (auth, billing, payments, schema migration, webhooks, secrets, RBAC, multi-tenant isolation, cron/scheduling)
-   - you can name 2+ distinct concrete failure modes the new commits plausibly introduce that warrant independent lenses
-   - parallel-orchestrated independent perspectives meaningfully outperform what you'd find solo
+   Route the **minimum number of \`${REVIEWER_AGENT_NAME}\` specialists** needed to cover those unresolved hypotheses. Most incremental reviews need **0 or 1**, especially thread-reply re-reviews:
+   - dispatch 0 when you can resolve every disposition-changing question directly
+   - dispatch 1 when exactly one falsifiable, load-bearing hypothesis warrants independent investigation
+   - dispatch 2+ in parallel when multiple orthogonal load-bearing hypotheses remain, or when the user explicitly requests an exhaustive or multi-angle review
 
-   **NEVER dispatch exactly one lens.** Single-lens dispatch adds wall time and cost for no orthogonality benefit. Either go multi-lens (≥2 in parallel) or do the re-review yourself.
+   **There is NO one-specialist cap or fixed maximum.** Cover every orthogonal load-bearing hypothesis that remains; do not collapse multiple real questions into one broad prompt just to reduce the count. There is also no file-count, line-count, schema, quota, or hard-budget threshold — diff size is not a proxy for review uncertainty.
 
-   Lens framing follows Review mode: themed lenses (correctness, security, etc.) and subsystem lenses (auth, billing, schema-migration, etc.) — for high-stakes domains lead with the subsystem lens.
+   The primary reviewer remains responsible for reading the complete raw full diff plus the incremental diff, investigating surrounding code, validating every returned finding, and synthesizing the final review. Specialist reads supplement that work; they never replace it or satisfy the primary's diff-coverage obligation.
 
-7. **fan out (only if step 6 said 2+ lenses)**: dispatch every \`${REVIEWER_AGENT_NAME}\` subagent for this run **IN A SINGLE ASSISTANT TURN, AS MULTIPLE PARALLEL TASK TOOL_USE BLOCKS IN ONE MESSAGE.**
+   Specialist hypotheses can draw on Review mode's themed or subsystem framings, but every dispatch must turn the framing into one falsifiable question with explicit scope boundaries.
 
-   ⚠️  CRITICAL — PARALLELISM IS THE ONLY REASON LENSES EXIST. ⚠️
-   Default tool-call behavior is **serial dispatch**: emit one Task call, await result, emit next, await, etc. This collapses your fan-out into a sequential review where each lens adds N × (orchestrator-think-time + lens-execution-time) to wall time. **YOU MUST OVERRIDE THIS DEFAULT.** Emit ALL of your Task tool_use blocks in the SAME assistant message, BEFORE you read ANY result from ANY of them.
+7. **dispatch specialists (only if step 6 found unresolved hypotheses)**: dispatch one \`${REVIEWER_AGENT_NAME}\` for one hypothesis. For 2+ hypotheses, emit every Task tool_use block **IN A SINGLE ASSISTANT TURN** before reading any result so the investigations run in parallel rather than serially.
 
-   ✅ Right pattern: one assistant turn with N Task tool_use blocks → wait → N results arrive together → aggregate.
-   ❌ Wrong pattern: turn 1 = Task(lens A) → turn 2 (after A's result) = Task(lens B). This is the failure mode.
+   ✅ Right multi-specialist pattern: one assistant turn with N Task tool_use blocks → wait → N results arrive together → aggregate.
+   ❌ Wrong multi-specialist pattern: Task(hypothesis A) → wait for A → Task(hypothesis B).
 
    You can also include your own \`read\` / \`grep\` / \`webfetch\` calls in the SAME turn as the parallel \`${REVIEWER_AGENT_NAME}\` dispatches.
 
-   if a subagent errors out, times out, or returns nothing usable, retry once with the same lens; if it still fails, proceed with partial coverage and note the missing lens in the review body. each subagent gets:
+   if a specialist errors out, times out, or returns nothing usable, retry it once with the same hypothesis. if it still fails, attempt to resolve the hypothesis yourself; if it remains disposition-changing and unresolved, surface the limitation and do not approve. each specialist gets:
    - **the absolute diff path(s) from step 2's \`${t("checkout_pr")}\` return, named verbatim in the dispatch prompt.** when \`incrementalDiffPath\` is present, name BOTH (\`incrementalDiffPath: /tmp/.../pr-NNN-SHA-incremental.diff\` then \`diffPath: /tmp/.../pr-NNN-SHA.diff\`) — the reviewer's baked-in prompt reads incremental first and uses full for context; when only \`diffPath\` exists, name it alone. the subagent \`read\`s those files; it must NOT re-derive via \`git diff\` (bare \`git diff origin/<base>\` is symmetric and pulls in the inverse of base-branch progress — pure noise, and the git tool rejects it), and paraphrasing ("review the new commits") sends it down that fallback, which also fails on shallow GHA checkouts. do NOT tell them to skip pre-existing issues — that suppresses regressions the new commits amplified; the "issues must be NEW" filter lives at aggregation time (step 8), not in the subagent prompt.
-   - **only one lens** — never a multi-section "review for X, Y, and Z" prompt
-   - **a Task \`description\` set to the lens name** — the harness reads this field to label log lines so parallel runs can be told apart.
+   - **exactly one falsifiable hypothesis with explicit scope boundaries** — ask for evidence that supports or refutes it, never a broad "review for X, Y, and Z" prompt
+   - **a Task \`description\` set to a short hypothesis label** — the harness reads this field to label log lines so parallel runs can be told apart.
    - if the lens touches external contracts, instruct the subagent to verify load-bearing claims via web search and quote source URLs.
-   - ask the subagent to report findings with file paths and NEW line numbers from the full PR diff so you can anchor inline comments.
+   - ask the subagent to report findings with file paths and NEW line numbers from the full PR diff so you can validate and anchor them. you must still read the complete incremental and full diff scope yourself.
 
    delegation discipline:
-   - do NOT summarize the changes for them (biases toward validation frame)
+   - do NOT summarize the changes for them (a lossy summary biases toward a validation frame; the raw diff is the source)
    - do NOT hand them a curated reading list (let them discover scope)
    - do NOT pre-shape their output with a finding schema
    - do NOT mention the other lenses (independence is the point)
 
-8. **aggregate, draft, self-critique**: merge findings (yours + any subagent output if you went multi-lens); de-dup overlaps; trace each finding yourself. drop praise, style preferences, speculative/unverified claims, findings about pre-existing code unrelated to the new commits, anything not actionable, and anything that re-states prior review feedback (heuristic: if the finding's root cause lives in lines the *new commits* added or modified, it's in scope; otherwise drop). also drop **bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. subagents are fallible and bias toward recommending changes; the bar for an actionable inline comment is sound + correct + elegant. recommending a change that improves only one of the three (or degrades elegance to nominally improve correctness) makes the codebase worse, not better. To compute "lines the new commits added or modified": if \`incrementalDiffPath\` from step 2 is present, use it directly. Otherwise, take the prior Pullfrog review's \`commit_id\` (returned alongside each entry from \`${t("list_pull_request_reviews")}\` in step 4) and run \`git diff <prior-review-sha>..HEAD\` to isolate the lines added since that review.
+8. **aggregate, draft, self-critique**: merge findings (yours + output from every specialist you dispatched); de-dup overlaps; trace each finding yourself. drop praise, style preferences, speculative/unverified claims, findings about pre-existing code unrelated to the new commits, anything not actionable, and anything that re-states prior review feedback (heuristic: if the finding's root cause lives in lines the *new commits* added or modified, it's in scope; otherwise drop). also drop **bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. subagents are fallible and bias toward recommending changes; the bar for an actionable inline comment is sound + correct + elegant. recommending a change that improves only one of the three (or degrades elegance to nominally improve correctness) makes the codebase worse, not better. To compute "lines the new commits added or modified": if \`incrementalDiffPath\` from step 2 is present, use it directly. Otherwise, take the prior Pullfrog review's \`commit_id\` (returned alongside each entry from \`${t("list_pull_request_reviews")}\` in step 4) and run \`git diff <prior-review-sha>..HEAD\` to isolate the lines added since that review.
 
    **Hunt for non-anchored concerns before drafting.** After collecting your anchored findings, deliberately scan for concerns that have no specific line to point at — typically: deletion / cleanup plans for code the new commits replace or shadow; rollout sequencing (what happens to in-flight state during deploy / revert?); coverage gaps the new commits imply but don't add; scope questions that only the human can answer (e.g. is the legacy path going away or is this a long-term dual track?); architectural risks the new commits open up that aren't a single-line bug. On substantial incremental diffs (migrations, refactors, multi-file rewrites, version bumps that change runtime semantics), at least one such concern almost always exists; if you can't think of any, your bar is probably too high.
 

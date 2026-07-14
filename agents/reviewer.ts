@@ -1,7 +1,7 @@
 /**
  * Definition of the `reviewfrog` named subagent — the constrained
  * read-only worker dispatched by Build mode self-review and the in-Pullfrog
- * /anneal multi-lens review.
+ * /anneal and in-Pullfrog specialist review.
  *
  * The contract: non-mutative + non-recursive.
  *   allow: file reads, grep/glob, web search/fetch, read-only MCP queries
