@@ -23,12 +23,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { pullfrogMcpName } from "../external.ts";
-import {
-  BEDROCK_MODEL_ID_ENV,
-  isBedrockAnthropicId,
-  isVertexAnthropicId,
-  VERTEX_MODEL_ID_ENV,
-} from "../models.ts";
+import { BEDROCK_MODEL_ID_ENV, isVertexAnthropicId, VERTEX_MODEL_ID_ENV } from "../models.ts";
 
 import { AGENT_ACTIVITY_TIMEOUT_MS, getIdleMs, markActivity } from "../utils/activity.ts";
 import { preflightClaudeSubscription } from "../utils/claudeSubscription.ts";
@@ -1039,16 +1034,11 @@ export const claude = agent({
 
     const specifier = ctx.payload.proxyModel ?? ctx.resolvedModel;
     // claude-code on Bedrock takes the bare AWS model ID — no provider prefix
-    // to strip, since the ID is already in `provider.model` form (e.g.
-    // `us.anthropic.claude-opus-4-7`). detect via the env-var sentinel: if
-    // BEDROCK_MODEL_ID is set and matches the resolved specifier, this is a
-    // bedrock route. see `wiki/model-resolution.md` for the routing pattern.
+    // to strip. agent selection already decides whether the model is Anthropic;
+    // the env-var sentinel identifies the backend after that decision.
     const bedrockModelId = process.env[BEDROCK_MODEL_ID_ENV]?.trim();
     const isBedrockRoute =
-      specifier !== undefined &&
-      bedrockModelId !== undefined &&
-      bedrockModelId === specifier &&
-      isBedrockAnthropicId(specifier);
+      specifier !== undefined && bedrockModelId !== undefined && bedrockModelId === specifier;
     const vertexModelId = process.env[VERTEX_MODEL_ID_ENV]?.trim();
     const isVertexRoute =
       specifier !== undefined &&
