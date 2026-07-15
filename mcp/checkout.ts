@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Octokit, RestEndpointMethodTypes } from "@octokit/rest";
 import { type } from "arktype";
 import { primaryRepoState, type RepoToolState, requireRepoState } from "../toolState.ts";
+import { createChangeImpactArtifact } from "../utils/changeImpact.ts";
 import { log } from "../utils/cli.ts";
 import { countLines, createDiffCoverageState } from "../utils/diffCoverage.ts";
 import { $git, $gitFetchWithDeepen } from "../utils/gitAuth.ts";
@@ -156,6 +157,7 @@ export type CheckoutPrResult = {
   url: string;
   headRepo: string;
   diffPath: string;
+  impactPath?: string | undefined;
   incrementalDiffPath?: string | undefined;
   toc: string;
   commitCount: number;
@@ -675,16 +677,18 @@ export function CheckoutPrTool(ctx: ToolContext) {
       );
     }
 
-    const headShort = primary.checkoutSha!.slice(0, 7);
+    const checkoutSha = primary.checkoutSha;
+    if (!checkoutSha) throw new Error("checkout completed without a resolved HEAD SHA");
+    const headShort = checkoutSha.slice(0, 7);
 
     // compute incremental diff if we have a beforeSha to compare against
     let incrementalDiffPath: string | undefined;
-    if (primary.beforeSha && primary.checkoutSha) {
+    if (primary.beforeSha) {
       const beforeShort = primary.beforeSha.slice(0, 7);
       const incremental = computeIncrementalDiff({
         baseBranch: pr.baseRef,
         beforeSha: primary.beforeSha,
-        headSha: primary.checkoutSha,
+        headSha: checkoutSha,
       });
       if (incremental) {
         incrementalDiffPath = join(
@@ -715,6 +719,50 @@ export function CheckoutPrTool(ctx: ToolContext) {
       `» diff coverage initialized: diffPath=${diffPath}, totalLines=${primary.diffCoverage.totalLines}, tocEntries=${primary.diffCoverage.tocEntries.length}`
     );
 
+    let impactPath: string | undefined;
+    if (process.env.PULLFROG_DISABLE_CHANGE_IMPACT === "1") {
+      log.info("» change impact disabled by PULLFROG_DISABLE_CHANGE_IMPACT");
+    } else {
+      let revisionVerified = false;
+      let revisionFailure: string | undefined;
+      try {
+        const latest = await ctx.octokit.rest.pulls.get({
+          owner: ctx.repo.owner,
+          repo: ctx.repo.name,
+          pull_number,
+        });
+        revisionVerified =
+          latest.data.head.sha === checkoutSha && latest.data.base.sha === prResponse.data.base.sha;
+      } catch (error) {
+        revisionFailure = error instanceof Error ? error.message : String(error);
+      }
+
+      if (revisionFailure !== undefined) {
+        log.warning(
+          `» change impact skipped: PR revision could not be verified (${revisionFailure})`
+        );
+      } else if (!revisionVerified) {
+        log.warning("» change impact skipped: PR revision changed while the diff was fetched");
+      } else {
+        try {
+          const impact = await createChangeImpactArtifact(ctx, {
+            files: formatResult.files,
+            pullNumber: pull_number,
+            baseSha: prResponse.data.base.sha,
+            headSha: checkoutSha,
+          });
+          impactPath = impact.path;
+          log.info(
+            `» change impact: ${impact.candidateCount} candidate atom(s), ${impact.renderedAtomCount} detailed atom(s), ${impact.referenceCount} tracked reference(s), ${impact.bytes} bytes → ${impact.path}`
+          );
+        } catch (error) {
+          log.warning(
+            `» change impact skipped: generation failed (${error instanceof Error ? error.message : String(error)})`
+          );
+        }
+      }
+    }
+
     // cache commentable-lines snapshot so review-time validation matches what
     // GitHub will anchor to (commit_id=checkoutSha), even if the PR is updated
     // between checkout and review.
@@ -724,12 +772,18 @@ export function CheckoutPrTool(ctx: ToolContext) {
     }
     primary.commentableLinesByFile = cached;
     primary.commentableLinesPullNumber = pull_number;
-    primary.commentableLinesCheckoutSha = primary.checkoutSha;
+    primary.commentableLinesCheckoutSha = checkoutSha;
 
     const incrementalInstructions = incrementalDiffPath
-      ? ` IMPORTANT: incrementalDiffPath contains ONLY the changes since the last reviewed version ` +
+      ? `IMPORTANT: incrementalDiffPath contains ONLY the changes since the last reviewed version ` +
         `(computed via range-diff). you MUST read incrementalDiffPath FIRST to understand what changed, ` +
-        `then use diffPath for full PR context. do NOT skip the incremental diff.`
+        `then use diffPath for full PR context. do NOT skip the incremental diff. `
+      : "";
+
+    const impactInstructions = impactPath
+      ? ` impactPath contains bounded, deterministic reference leads for semantic atoms changed by the PR. ` +
+        `read the authoritative diff TOC and relevant raw diff lines FIRST; only then use impactPath as a supplemental, explicitly incomplete lead list. ` +
+        `impactPath never establishes review coverage and an empty artifact is not evidence of no wider impact.`
       : "";
 
     // commit metadata relative to the PR base (e.g. main). use origin/<base>
@@ -786,6 +840,7 @@ export function CheckoutPrTool(ctx: ToolContext) {
       url: prResponse.data.html_url,
       headRepo: pr.headRepoFullName,
       diffPath,
+      impactPath,
       incrementalDiffPath,
       toc: formatResult.toc,
       commitCount,
@@ -794,6 +849,7 @@ export function CheckoutPrTool(ctx: ToolContext) {
       commitLogUnavailable,
       hookWarning: checkoutResult.hookWarning,
       instructions:
+        incrementalInstructions +
         `the diff file at diffPath contains a table of contents (TOC) at the top listing every changed file with its line range. ` +
         `use the TOC line ranges as your checklist and read specific files from the diff instead of reading the entire file. ` +
         `for example, if the TOC says "src/foo.ts → lines 5-42", read lines 5-42 from diffPath to see that file's changes. ` +
@@ -805,7 +861,7 @@ export function CheckoutPrTool(ctx: ToolContext) {
         `retry the same create_pull_request_review call to proceed — optionally after reading the listed ranges. the pre-flight will not block again this session. ` +
         `the local branch is 'localBranch' (pr-{number}), not the remote branch name. ` +
         `when pushing, omit branchName to use the current branch. do not use remoteBranch as a local branch name.` +
-        incrementalInstructions +
+        impactInstructions +
         hookWarningInstructions +
         commitLogInstructions,
     } satisfies CheckoutPrResult;

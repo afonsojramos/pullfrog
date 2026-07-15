@@ -306,7 +306,7 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 
 1. **task list**: create your task list for this run as your first action.
 
-2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata and a \`diffPath\`. read the complete raw diff end-to-end, beginning with the TOC and using its file line ranges as your coverage checklist.
+2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata, a \`diffPath\`, and a supplemental \`impactPath\` when change-impact extraction is enabled. read the complete raw diff end-to-end, beginning with the TOC and using its file line ranges as your coverage checklist. only after that, use \`impactPath\` as an explicitly incomplete list of reference leads; it never replaces raw-diff reading or establishes coverage.
 
 3. **triage**: orient yourself on the PR — identify *what kind of thing this is* (domain it touches, seams it crosses, external contracts it depends on, user-facing surfaces it changes). pull as much context as you need to render a confident, well-grounded review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths, fetch related GitHub state. **you are the synthesizer** — never delegate understanding to subagents.
 
@@ -434,9 +434,9 @@ ${PR_SUMMARY_FORMAT}`,
 
 1. **task list**: create your task list for this run as your first action.
 
-2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata, \`diffPath\` (full diff), and \`incrementalDiffPath\` (changes since last reviewed version, if available). read the complete raw full diff end-to-end, beginning with the TOC and using its line ranges as your coverage checklist.
+2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata, \`diffPath\` (full diff), \`incrementalDiffPath\` (changes since last reviewed version, if available), and a supplemental \`impactPath\` when change-impact extraction is enabled.
 
-3. **incremental scope**: if \`incrementalDiffPath\` is present, read it to see what changed since the last review. this is a range-diff that isolates the net changes, filtering out base branch noise. if not present, fall back to reviewing the full PR diff and determine what changed since Pullfrog's most recent review.
+3. **incremental scope**: if \`incrementalDiffPath\` is present, read it FIRST to see what changed since the last review. this is a range-diff that isolates the net changes, filtering out base branch noise. then read the authoritative full diff end-to-end, beginning with the TOC and using its line ranges as your coverage checklist. if no incremental diff is present, start with the full-diff TOC, determine what changed since Pullfrog's most recent review, and complete the raw-diff read. only after establishing that authoritative scope and completing raw-diff coverage, use \`impactPath\` as an explicitly incomplete list of reference leads; it never replaces raw-diff reading or establishes coverage.
 
 4. **prior feedback — read AND retire it**: fetch previous reviews via \`${t("list_pull_request_reviews")}\`, then call \`${t("get_review_comments")}\` on each prior Pullfrog review. Each thread renders as a section whose first line is a fenced tag \`comment author=<login> id=<fullDatabaseId> review=<reviewId> thread=<graphqlId>\`; section headers carry \`[RESOLVED]\` / \`[OUTDATED]\` when relevant. For every **open, Pullfrog-originated** thread, decide and act:
 
