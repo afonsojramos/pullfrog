@@ -220,12 +220,24 @@ async function resolveProxyModel(ctx: {
   //     change the outcome, so don't ask for one. free picks never reach this
   //     branch: run-context skips the mint for them, so they run as picked.
   if (
-    !ctx.oss &&
     ctx.payload.model &&
     ctx.proxyModel === DEFAULT_PROXY_MODEL &&
     resolveOpenRouterModel(ctx.payload.model) !== DEFAULT_PROXY_MODEL
   ) {
-    if (isCardGatedModel(ctx.payload.model)) {
+    // OSS forces the efficient default regardless of `repo.model` to keep
+    // per-run subsidy spend bounded (see run-context route). that clamp is
+    // deliberate, but it was previously invisible: the footer rendered only
+    // "free via Pullfrog for OSS", so a maintainer who configured Opus saw
+    // Kimi with no indication their pick was overridden or how to opt out.
+    // 23 third-party OSS repos are running a model other than the one they
+    // configured. disclose it; the precedence itself stays as-is.
+    if (ctx.oss) {
+      ctx.toolState.modelClamped = { from: ctx.payload.model, reason: "oss" };
+      log.info(
+        `» ${ctx.payload.model} overridden — Pullfrog for OSS covers ${ctx.proxyModel}; ` +
+          "add a provider key in your Pullfrog settings to run your configured model."
+      );
+    } else if (isCardGatedModel(ctx.payload.model)) {
       ctx.toolState.modelClamped = { from: ctx.payload.model, reason: "card" };
       log.warning(
         `» ${ctx.payload.model} needs a card on file — using the efficient default ` +

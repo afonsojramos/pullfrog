@@ -243,7 +243,10 @@ describe("reviewSkipDecision", () => {
       prApproveEnabled: true,
     });
     expect(decision?.kind).toBe("no-issues");
-    expect(decision?.reason).toContain("nothing to post");
+    // the reason must name the omitted `body` parameter, not assert an empty
+    // verdict — the old "no issues found" wording read as success to a model
+    // that had dropped `body`, which drove the placeholder-review incident.
+    expect(decision?.reason).toContain("`body`");
   });
 
   it("treats null body the same as empty string", () => {

@@ -46,7 +46,7 @@ export interface BuildPullfrogFooterParams {
    * provider-key nudge — so the downgrade is visible rather than silently
    * presenting Kimi as the pick.
    */
-  clamped?: { from: string; reason: "card" | "noRouterPath" } | undefined;
+  clamped?: { from: string; reason: "card" | "noRouterPath" | "oss" } | undefined;
   /**
    * true when the run used the default proxy model only because no model was
    * selected (Router billing + "auto"). the footer appends a note nudging the
@@ -85,7 +85,7 @@ function providerDisplayName(slug: string): string {
 function formatModelLabel(params: {
   model: string;
   fallbackFrom?: string | undefined;
-  clamped?: { from: string; reason: "card" | "noRouterPath" } | undefined;
+  clamped?: { from: string; reason: "card" | "noRouterPath" | "oss" } | undefined;
   unselectedProxyDefault?: boolean | undefined;
   oss?: boolean | undefined;
 }): string {
@@ -98,9 +98,17 @@ function formatModelLabel(params: {
     modelAliases.find((a) => a.resolve === params.model || a.openRouterResolve === params.model);
   const displayName = alias?.displayName ?? params.model;
   // OSS runs have their model costs covered by the program — surface that
-  // (and link to the application) instead of the BYOK `(free)` note.
+  // (and link to the application) instead of the BYOK `(free)` note. an OSS
+  // run that overrode a configured pick must say so here: this branch returns
+  // before the generic clamp rendering below, so without this the maintainer
+  // sees a model they never chose with no indication their pick was ignored.
   if (params.oss) {
-    return `\`${displayName}\` (free via [Pullfrog for OSS](https://pullfrog.com/for-oss))`;
+    const ossBase = `\`${displayName}\` (free via [Pullfrog for OSS](https://pullfrog.com/for-oss))`;
+    if (params.clamped?.reason !== "oss") return ossBase;
+    const configured = isAutoTier(params.clamped.from)
+      ? "the intelligent tier"
+      : `\`${resolveDisplayAlias(params.clamped.from)?.displayName ?? params.clamped.from}\``;
+    return `${ossBase} (${configured} not used — the program covers this model; add its [provider key](https://docs.pullfrog.com/models) to run your pick)`;
   }
   const base = alias?.isFree ? `\`${displayName}\` (free)` : `\`${displayName}\``;
   if (params.fallbackFrom) {

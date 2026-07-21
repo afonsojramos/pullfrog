@@ -138,6 +138,11 @@ export interface ToolState {
   // while this is 0 and skips it once non-zero; never decremented within
   // a run.
   prepushFailureCount: number;
+  // consecutive create_pull_request_review calls this session that posted
+  // nothing (empty payload). bounded by MAX_CONSECUTIVE_NOOP_SUBMISSIONS so a
+  // model that cannot serialize `body` fails loudly instead of looping until it
+  // probes the tool with placeholder text. reset by any successful submission.
+  noopReviewSubmissions: number;
   backgroundProcesses: Map<string, BackgroundProcess>;
   browserDaemon?: BrowserDaemon | undefined;
   review?: {
@@ -240,7 +245,7 @@ export interface ToolState {
   // the card gate ("card") from a pick that has no openRouterResolve yet and
   // no stored provider key ("noRouterPath", a model OpenRouter doesn't serve
   // yet).
-  modelClamped?: { from: string; reason: "card" | "noRouterPath" } | undefined;
+  modelClamped?: { from: string; reason: "card" | "noRouterPath" | "oss" } | undefined;
   // true when the action is pinned to a full commit SHA (vs `@v0`). carried
   // into footers so the user sees the maintenance nudge in the PR, not just
   // the buried GHA log annotation — a SHA pin freezes the post-run cleanup
@@ -288,6 +293,7 @@ export function initToolState(params: InitToolStateParams): ToolState {
     progressComment: resolved,
     hadProgressComment: !!resolved,
     prepushFailureCount: 0,
+    noopReviewSubmissions: 0,
     backgroundProcesses: new Map(),
     usageEntries: [],
   };

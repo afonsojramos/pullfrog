@@ -402,6 +402,64 @@ export function duplicateReviewDecision(params: {
 }
 
 /**
+ * verdict markers the review prompt mandates as the first characters of a
+ * review body. their presence is the cheapest reliable proof that a body is a
+ * real review rather than a probe payload.
+ */
+const VERDICT_MARKERS = ["> ✅", "> ℹ️", "> [!IMPORTANT]", "> [!CAUTION]"];
+
+/**
+ * shortest body we accept without a verdict marker. calibrated against real
+ * data, and the margin is thin on purpose: the longest observed placeholder is
+ * `Simple review body` (18) and the shortest observed legitimate body is
+ * `No new issues found.` (20, emitted bare by GPT). a higher floor would refuse
+ * real reviews.
+ */
+const MIN_UNMARKED_BODY_LENGTH = 20;
+
+/**
+ * placeholder wording that clears the length floor — `test retry placeholder`
+ * is 22 chars. matched only against short unmarked bodies, so a real review
+ * discussing a test file is never at risk.
+ */
+const PLACEHOLDER_PATTERN = /\b(test|testing|placeholder|temp|foo|bar|asdf|dummy|sample)\b/i;
+
+/** bodies below this are placeholders regardless of wording. */
+const PLACEHOLDER_SCAN_LENGTH = 50;
+
+/**
+ * reject placeholder review bodies at the tool boundary.
+ *
+ * every successful create_pull_request_review call posts a permanent, publicly
+ * visible review that no Pullfrog tool can retract (`edit_issue_comment` 404s
+ * on a review id). a weak model that cannot get a real submission through
+ * eventually probes the tool with a minimal payload to test whether it works —
+ * `test`, `test body`, `placeholder`, `foo` — and that probe lands on a
+ * customer's PR. 27 such reviews reached 10 public repos between 2026-06-25 and
+ * 2026-07-18. the tool description already says "NEVER submit test or
+ * diagnostic reviews"; a prompt instruction is not a control.
+ *
+ * a body carrying a verdict marker is always accepted — `> ✅ No new issues
+ * found.` is a legitimate 24-char review. everything else must clear
+ * MIN_UNMARKED_BODY_LENGTH, which every observed placeholder fails and every
+ * observed real review passes.
+ */
+export function isDegenerateReviewBody(body: string): boolean {
+  const trimmed = body.trim();
+  if (VERDICT_MARKERS.some((marker) => trimmed.startsWith(marker))) return false;
+  if (trimmed.length < MIN_UNMARKED_BODY_LENGTH) return true;
+  return trimmed.length < PLACEHOLDER_SCAN_LENGTH && PLACEHOLDER_PATTERN.test(trimmed);
+}
+
+/**
+ * consecutive no-op submissions tolerated before the tool stops explaining and
+ * starts refusing. kimi-k2.7-code ran ~15 rounds of empty submissions against a
+ * misleading skip reason before probing with a placeholder; a bounded budget
+ * converts that unbounded loop into a run-visible failure.
+ */
+export const MAX_CONSECUTIVE_NOOP_SUBMISSIONS = 4;
+
+/**
  * decide whether to skip a review submission before any network call.
  *
  * GitHub rejects `event: "COMMENT"` reviews with no body and no inline comments
@@ -410,6 +468,15 @@ export function duplicateReviewDecision(params: {
  *   1. `!approved` + empty body/comments: agent's "no issues found" result.
  *      skipping preserves the agent's intent (nothing to post is a fine
  *      outcome for a review run) without a spurious 422.
+ *      this shape is AMBIGUOUS: it is equally the signature of a weak model
+ *      that meant to submit a real review but dropped `body` from the tool
+ *      call. the skip reason must therefore describe the empty PAYLOAD, not
+ *      assert an empty VERDICT — a reason reading "no issues found" reads as
+ *      success to the agent, so it retries blind. kimi-k2.7-code looped ~15
+ *      times against the old wording, then probed the tool with
+ *      `body: "test"` to check whether it worked at all; that probe posted
+ *      permanently to a customer PR (software-mansion/TypeGPU#2730), and
+ *      26 more like it across 10 repos. see wiki/review-approval.md.
  *   2. `approved` + `!prApproveEnabled` + empty body/comments: the runtime
  *      downgrades APPROVE to COMMENT when prApproveEnabled is off, and the
  *      resulting empty-COMMENT is exactly the shape GitHub 422s. skipping
@@ -433,7 +500,7 @@ export function reviewSkipDecision(params: {
       kind: "no-issues",
       reason: params.requestChanges
         ? "request_changes with no body or comments — nothing to block on"
-        : "no issues found — nothing to post",
+        : "this call carried neither `body` nor `comments`, so nothing was posted. if you found no issues, you are done — do not call this tool again. if you meant to submit a review, the `body` parameter was missing from your tool call: resend it with `body` set to the full review text. if a resend drops `body` again, do not keep retrying and do not probe with placeholder text — write the review into `create_issue_comment` instead, which takes the same text under a smaller schema and is editable after posting. every successful call here posts a permanent, publicly visible review.",
     };
   }
   if (!params.prApproveEnabled) {
@@ -465,11 +532,15 @@ export function formatDroppedCommentsNote(dropped: DroppedComment[]): string {
 // one-shot review tool
 export const CreatePullRequestReview = type({
   pull_number: type.number.describe("The pull request number to review"),
-  body: type.string
-    .describe(
-      "1-2 sentence high-level summary with urgency level, critical callouts, and feedback about code outside the diff. Specific feedback on diff lines goes in 'comments' array."
-    )
-    .optional(),
+  // REQUIRED on purpose, not because an empty review is invalid — pass "" for
+  // that. models that emit tool calls without schema-constrained decoding drop
+  // optional parameters and keep required ones; in the incident log every
+  // required parameter survived and this one, when optional, vanished ~15 times
+  // running. required-ness is the only pressure that empirically held.
+  // see wiki/review-approval.md.
+  body: type.string.describe(
+    "1-2 sentence high-level summary with urgency level, critical callouts, and feedback about code outside the diff. Specific feedback on diff lines goes in 'comments' array. ALWAYS pass this parameter — pass an empty string \"\" when approving with no commentary, never omit it."
+  ),
   approved: type.boolean
     .describe(
       "Set to true to submit as an approval. Use for `> ✅ No new issues found.` reviews where the PR is mergeable as-is and nothing in the body warrants code changes — approving also suppresses the Fix-button footer affordance so users don't dispatch a fix run on non-actionable feedback. Reserve approved: false for `> ℹ️ ...` (minor suggestions inline), `> [!IMPORTANT]` (recommended changes), and `> [!CAUTION]` (critical) reviews. Defaults to false (comment-only review). Mutually exclusive with request_changes. Approval is REJECTED while any unresolved Pullfrog review thread remains open on the PR (not just the latest commit's diff): resolve the threads the current code addresses (reply + resolve_review_thread) first, or submit a non-approving review if a real issue remains."
@@ -546,6 +617,19 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
           );
         }
         if (body) body = fixDoubleEscapedString(body);
+
+        // a review posts permanently and cannot be retracted by any tool we
+        // expose, so a placeholder probe is unrecoverable. see
+        // isDegenerateReviewBody. thrown (not skipped) so the agent sees a
+        // failure it can act on rather than a success it can repeat.
+        if (body && isDegenerateReviewBody(body)) {
+          throw new Error(
+            `refusing to submit a review whose body looks like placeholder text: ${JSON.stringify(body)}. ` +
+              `every submitted review is permanent and publicly visible on the contributor's PR — never probe this tool with test content. ` +
+              `if the tool has been rejecting your submissions, the cause is your payload, not the tool: re-send with \`body\` set to the full review text, ` +
+              `opening with a verdict marker (${VERDICT_MARKERS.join(", ")}).`
+          );
+        }
 
         // set issue context (PRs are issues)
         const primary = primaryRepoState(ctx.toolState);
@@ -628,9 +712,23 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
           prApproveEnabled: ctx.prApproveEnabled && !selfAuthored,
         });
         if (skip) {
+          ctx.toolState.noopReviewSubmissions += 1;
           log.info(`skipping review submission: ${skip.reason}`);
+          // an agent that keeps submitting nothing is not converging. refuse
+          // rather than let it keep guessing — the next thing it guesses is a
+          // placeholder body, which posts permanently. see
+          // MAX_CONSECUTIVE_NOOP_SUBMISSIONS.
+          if (ctx.toolState.noopReviewSubmissions >= MAX_CONSECUTIVE_NOOP_SUBMISSIONS) {
+            throw new Error(
+              `${ctx.toolState.noopReviewSubmissions} consecutive review submissions posted nothing — every one carried an empty payload. ` +
+                `stop calling this tool: the run will report the review as unsubmitted. ` +
+                `if you have review feedback, your tool calls are dropping the \`body\` parameter — write the review into \`create_issue_comment\` instead, ` +
+                `which takes the same text and is recoverable if it goes wrong.`
+            );
+          }
           return { success: true, skipped: true, reason: skip.reason };
         }
+        ctx.toolState.noopReviewSubmissions = 0;
 
         // prApproveEnabled gates binding verdicts: a repo that hasn't opted in gets
         // neither an APPROVE nor a blocking REQUEST_CHANGES from the bot — both

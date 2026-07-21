@@ -423,7 +423,7 @@ export const providers = {
     envVars: ["OPENCODE_API_KEY"],
     models: {
       "glm-5.1": {
-        displayName: "GLM 5.1",
+        displayName: "GLM 5.2",
         resolve: "opencode-go/glm-5.2",
         openRouterResolve: "openrouter/z-ai/glm-5.2",
         preferred: true,

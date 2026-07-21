@@ -9,6 +9,7 @@ function makeToolState(overrides: Partial<ToolState> = {}): ToolState {
     progressComment: undefined,
     hadProgressComment: true,
     prepushFailureCount: 0,
+    noopReviewSubmissions: 0,
     backgroundProcesses: new Map(),
     usageEntries: [],
     ...overrides,
