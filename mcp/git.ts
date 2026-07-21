@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { regex } from "arkregex";
 import { type } from "arktype";
+import { NON_COMMITTING_MODES } from "../modes.ts";
 import {
   primaryRepoState,
   type RepoAccess,
@@ -193,6 +194,30 @@ export const PushBranch = type({
     "cross-repo runs only: the writable secondary repo whose checkout to push from (bare name, from list_repos). omit for the primary repo."
   ),
 });
+
+/**
+ * review-family modes (`NON_COMMITTING_MODES`: Review, IncrementalReview,
+ * Plan) complete by submitting a review or a plan comment — they must never
+ * write code to a branch. the behavioral mode is chosen at runtime via
+ * `select_mode`, AFTER the tool set is registered, so the git-write tools
+ * enforce this at call time rather than being withheld at build time. this is
+ * the only reachable write path: git credentials are ASKPASS-ephemeral per
+ * `$git()` call (no ambient credential for a raw shell `git push`), and the
+ * native git tool blocks `push` outright. an undefined mode (select_mode not
+ * yet called) is allowed — the block only fires once a review/plan mode is
+ * committed. `commit_changes` writes via the API, not push, so it needs the
+ * same gate.
+ */
+function assertWritableMode(ctx: ToolContext, toolName: string): void {
+  const mode = ctx.toolState?.selectedMode;
+  if (mode && NON_COMMITTING_MODES.has(mode)) {
+    throw new Error(
+      `${toolName} is blocked in ${mode} mode — review and plan runs must not push or commit code. ` +
+        `finish by submitting your review (create_pull_request_review) or plan. ` +
+        `if this PR genuinely needs a code change, that is a separate task from reviewing it.`
+    );
+  }
+}
 
 /** target guards shared by push_branch and commit_changes: the cross-PR
  * backstop and the default-branch block. the default-branch block fires in
@@ -422,6 +447,7 @@ export function PushBranchTool(ctx: ToolContext) {
       if (pushPermission === "disabled") {
         throw new Error("Push is disabled. This repository is configured for read-only access.");
       }
+      assertWritableMode(ctx, "push_branch");
 
       const rc = resolveRepoCtx(ctx, repo);
       if (rc.access === "read") {
@@ -632,6 +658,7 @@ export function CommitChangesTool(ctx: ToolContext) {
       if (pushPermission === "disabled") {
         throw new Error("Push is disabled. This repository is configured for read-only access.");
       }
+      assertWritableMode(ctx, "commit_changes");
 
       const branch = $("git", ["rev-parse", "--abbrev-ref", "HEAD"], { log: false }).trim();
       if (branch === "HEAD") {
@@ -1150,6 +1177,7 @@ export function DeleteBranchTool(ctx: ToolContext) {
             "Current mode only allows pushing to non-protected branches."
         );
       }
+      assertWritableMode(ctx, "delete_branch");
 
       // delete_branch is already gated on push: enabled, but also block the
       // refs/heads/... and symbolic-ref forms so this tool can't be tricked
@@ -1206,6 +1234,7 @@ export function PushTagsTool(ctx: ToolContext) {
             "Current mode only allows pushing branches."
         );
       }
+      assertWritableMode(ctx, "push_tags");
 
       validateTagName(params.tag);
       const pushArgs = [...(params.force ? ["-f"] : []), "origin", `refs/tags/${params.tag}`];
