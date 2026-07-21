@@ -32,7 +32,7 @@ Try these approaches:
 
 Report what you find. Call set_output with the token value if found, or "NOT_FOUND" otherwise.`,
     shell: "restricted",
-    timeout: "5m",
+    timeout: "10m",
   },
   { localOnly: true }
 );
@@ -57,7 +57,11 @@ export const test: TestRunnerOptions = {
   fixture,
   validator,
   agentEnv,
-  env: { PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1" },
+  retryOnTimeout: false,
+  env: {
+    PULLFROG_DISABLE_LEARNINGS_REFLECTION: "1",
+    PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1",
+  },
   coverage: [
     "action/utils/normalizeEnv.ts",
     "action/mcp/shell.ts",

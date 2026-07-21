@@ -255,6 +255,10 @@ export async function runAgentStreaming(options: RunStreamingOptions): Promise<A
 
       for (const line of lines) {
         if (line.trim() && canLog()) {
+          if (line.startsWith("::add-mask::")) {
+            process.stdout.write(`${line}\n`);
+            continue;
+          }
           console.log(`${prefix} ${line}`);
         }
       }
@@ -324,6 +328,9 @@ export interface TestRunnerOptions {
   // if true, test passes when agent fails AND validation checks pass
   // (used for tests like timeout that expect the agent run to fail)
   expectFailure?: boolean;
+  // retry explicit fixture timeouts by default; disable when the timeout
+  // already represents one complete, expensive attempt.
+  retryOnTimeout?: boolean;
   // shell commands to run in the repo directory after cloning but before the
   // agent starts. used to simulate pre-existing repo state (e.g., malicious
   // symlinks from a PR). passed to play.ts via PULLFROG_TEST_REPO_SETUP env var.

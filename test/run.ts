@@ -214,7 +214,22 @@ function isRateLimited(output: string): boolean {
   return RATE_LIMIT_PATTERNS.some((p) => p.test(output));
 }
 
-function shouldRetry(result: AgentResult, validation: ValidationResult): RetryDecision {
+function shouldRetry(params: {
+  result: AgentResult;
+  validation: ValidationResult;
+  retryOnTimeout: boolean;
+}): RetryDecision {
+  const result = params.result;
+  const validation = params.validation;
+
+  if (
+    !params.retryOnTimeout &&
+    !result.success &&
+    result.output.includes("agent run timed out after")
+  ) {
+    return { retry: false };
+  }
+
   // rate limit / quota exhaustion: agent never got to run properly
   if (!result.success && isRateLimited(result.output)) {
     return { retry: true, reason: "rate limited", backoffMs: RATE_LIMIT_BACKOFF_MS };
@@ -369,7 +384,11 @@ async function runTestForAgent(ctx: RunContext): Promise<ValidationResult> {
 
     // check if we should retry
     if (attempt < MAX_RETRIES) {
-      const decision = shouldRetry(result, validation);
+      const decision = shouldRetry({
+        result,
+        validation,
+        retryOnTimeout: testConfig.retryOnTimeout ?? true,
+      });
       if (decision.retry) {
         console.log(
           `\n${prefix} ${decision.reason} — retrying in ${decision.backoffMs / 1000}s (retry ${attempt + 1}/${MAX_RETRIES})...\n`
