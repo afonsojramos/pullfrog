@@ -293,11 +293,20 @@ export const providers = {
     displayName: "Moonshot AI",
     envVars: ["MOONSHOT_API_KEY"],
     models: {
+      // Moonshot's premium 1M-context multimodal reasoning flagship — pricier
+      // than K2.7-code, so it's the preferred BYOK pick but NOT the subsidized
+      // efficient default (that stays K2 via AUTO_EFFICIENT).
+      "kimi-k3": {
+        displayName: "Kimi K3",
+        resolve: "moonshotai/kimi-k3",
+        openRouterResolve: "openrouter/moonshotai/kimi-k3",
+        preferred: true,
+        subagentModel: "kimi-k2",
+      },
       "kimi-k2": {
         displayName: "Kimi K2",
         resolve: "moonshotai/kimi-k2.7-code",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
-        preferred: true,
       },
     },
   }),
@@ -391,10 +400,11 @@ export const providers = {
         resolve: "opencode/kimi-k2.6",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
       },
+      // Zen serves m2.5; the funded OpenRouter path tracks the current m2.7.
       "minimax-m2.5": {
         displayName: "MiniMax M2",
         resolve: "opencode/minimax-m2.5",
-        openRouterResolve: "openrouter/minimax/minimax-m2.5",
+        openRouterResolve: "openrouter/minimax/minimax-m2.7",
       },
       "gpt-5-nano": {
         displayName: "GPT Nano",
@@ -582,10 +592,21 @@ export const providers = {
         resolve: "openrouter/moonshotai/kimi-k2.7-code",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
       },
+      "kimi-k3": {
+        displayName: "Kimi K3",
+        resolve: "openrouter/moonshotai/kimi-k3",
+        openRouterResolve: "openrouter/moonshotai/kimi-k3",
+      },
+      // slug pins the m2 line for DB stability; resolve tracks the current m2.7.
       "minimax-m2.5": {
         displayName: "MiniMax M2",
-        resolve: "openrouter/minimax/minimax-m2.5",
-        openRouterResolve: "openrouter/minimax/minimax-m2.5",
+        resolve: "openrouter/minimax/minimax-m2.7",
+        openRouterResolve: "openrouter/minimax/minimax-m2.7",
+      },
+      "minimax-m3": {
+        displayName: "MiniMax M3",
+        resolve: "openrouter/minimax/minimax-m3",
+        openRouterResolve: "openrouter/minimax/minimax-m3",
       },
     },
   }),
