@@ -43,6 +43,39 @@ export function geminiHighThinkingOverrides(): Record<string, { options: object 
   );
 }
 
+// OpenRouter sub-providers that serve Kimi K2 WITHOUT Moonshot's Enforcer
+// (schema-constrained decoding), so they silently drop optional tool-call
+// params after the reasoning phase (SGLang #12932). ignoring them keeps Kimi
+// on a good route (Fireworks, Novita, etc.). needs upkeep as OpenRouter's
+// roster shifts. see wiki/review-approval.md.
+const KIMI_ENFORCERLESS_PROVIDERS = ["siliconflow", "together"];
+
+/**
+ * Build the `provider.openrouter.models[id].options` map that pins every Kimi
+ * K2 OpenRouter alias away from the Enforcer-less providers via OpenRouter's
+ * `provider: {ignore:[...]}` routing directive. Sourced from the model registry
+ * so a Kimi alias/route change in `action/models.ts` flows through automatically.
+ *
+ * Wiring: the per-model `options` object merges into the request options
+ * (opencode `session/llm/request.ts` `mergeOptions(base, model.options)`),
+ * gets wrapped under `providerOptions.openrouter` (`provider/transform.ts`
+ * `sdkKey("@openrouter/ai-sdk-provider") === "openrouter"`), and the OpenRouter
+ * AI-SDK provider spreads everything under `providerOptions.openrouter` straight
+ * into the request body (`@openrouter/ai-sdk-provider` `doStream`/`doGenerate`),
+ * so `provider` lands as the top-level routing object OpenRouter expects.
+ */
+export function kimiOpenRouterProviderOverrides(): Record<string, { options: object }> {
+  return Object.fromEntries(
+    modelAliases
+      .map((a) => a.openRouterResolve)
+      .filter((r): r is string => r?.includes("kimi") ?? false)
+      .map((r) => [
+        r.replace(/^openrouter\//, ""),
+        { options: { provider: { ignore: KIMI_ENFORCERLESS_PROVIDERS } } },
+      ])
+  );
+}
+
 /**
  * Read-only `reviewfrog` subagent for lens-based review. Non-mutative +
  * non-recursive — enforced by the system prompt in reviewer.ts.

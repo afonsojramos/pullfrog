@@ -48,6 +48,7 @@ import {
   buildReviewerAgentConfig,
   geminiHighThinkingOverrides,
   installOpencodeCli,
+  kimiOpenRouterProviderOverrides,
   type OpenCodeConfig,
 } from "./opencodeShared.ts";
 import { buildReflectionPrompt, runPostRunRetryLoop } from "./postRun.ts";
@@ -129,7 +130,13 @@ function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): s
     // tools, so we lose only the batch wrapper, not parallelism.
     // gemini-3 thinking pinned to high for review depth; gpt and anthropic
     // effort set elsewhere (gpt: upstream default, anthropic: --effort flag in claude.ts).
-    provider: { google: { models: geminiHighThinkingOverrides() } },
+    // openrouter: pin Kimi K2 away from Enforcer-less providers (siliconflow /
+    // together) that drop optional tool-call params — per-model, so other
+    // OpenRouter models are unaffected. see opencodeShared.ts.
+    provider: {
+      google: { models: geminiHighThinkingOverrides() },
+      openrouter: { models: kimiOpenRouterProviderOverrides() },
+    },
   };
 
   if (model) {
