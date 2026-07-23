@@ -689,16 +689,18 @@ export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
  * concrete alias by `resolveDisplayAlias` below, so every downstream consumer
  * (CLI resolve, OpenRouter resolve, footer label) handles them transparently.
  *
- * `efficient` mirrors the OSS/default subsidy model (Kimi K2 — fast + cheap);
- * `intelligent` is the frontier pick (Claude Opus). a `null` model means the
- * tier hasn't been pinned: callers default by card status via `defaultAutoTier`.
+ * `efficient` mirrors the OSS/default subsidy model (DeepSeek V4 Pro — beats
+ * Kimi K2.7 on agentic-review quality at ~4-5x lower cost, run at high
+ * reasoning effort via `deepseekHighEffortOverrides`); `intelligent` is the
+ * frontier pick (Claude Opus). a `null` model means the tier hasn't been
+ * pinned: callers default by card status via `defaultAutoTier`.
  */
 export const AUTO_EFFICIENT = "auto/efficient";
 export const AUTO_INTELLIGENT = "auto/intelligent";
 export type AutoTier = typeof AUTO_EFFICIENT | typeof AUTO_INTELLIGENT;
 
 const AUTO_TIER_TARGET: Record<AutoTier, string> = {
-  [AUTO_EFFICIENT]: "moonshotai/kimi-k2",
+  [AUTO_EFFICIENT]: "deepseek/deepseek-pro",
   [AUTO_INTELLIGENT]: "anthropic/claude-opus",
 };
 

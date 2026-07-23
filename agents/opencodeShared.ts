@@ -77,6 +77,29 @@ export function kimiOpenRouterProviderOverrides(): Record<string, { options: obj
 }
 
 /**
+ * Build the `provider.openrouter.models[id].options` map that pins the
+ * efficient-tier DeepSeek model to high reasoning effort on the OpenRouter
+ * route — the funded/OSS default path. The shape must nest under `options`
+ * (opencode builds `Model.options` only from the entry's `options` sub-object —
+ * `provider.ts` `mergeDeep(existingModel.options, model.options)`) and use a
+ * `reasoning` record (the openrouter provider forwards only `usage`/`reasoning`/
+ * `promptCacheKey`); a bare `reasoningEffort` sibling is silently dropped.
+ * Sourced from the registry so a resolve bump carries the override forward.
+ * `high` is the ceiling OpenRouter's unified `reasoning.effort` exposes
+ * (low/medium/high); DeepSeek's native `max` is only reachable via a direct
+ * DeepSeek key, not the OpenRouter route.
+ */
+export function deepseekHighEffortOverrides(): Record<
+  string,
+  { options: { reasoning: { effort: string } } }
+> {
+  const orModel = modelAliases
+    .find((a) => a.slug === "deepseek/deepseek-pro")
+    ?.openRouterResolve?.replace(/^openrouter\//, "");
+  return orModel ? { [orModel]: { options: { reasoning: { effort: "high" } } } } : {};
+}
+
+/**
  * Read-only `reviewfrog` subagent for lens-based review. Non-mutative +
  * non-recursive — enforced by the system prompt in reviewer.ts.
  *

@@ -46,6 +46,7 @@ import {
 import {
   autoSelectModel,
   buildReviewerAgentConfig,
+  deepseekHighEffortOverrides,
   geminiHighThinkingOverrides,
   installOpencodeCli,
   kimiOpenRouterProviderOverrides,
@@ -128,14 +129,17 @@ function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): s
     // native parallel tool_use (multiple tool_use blocks per assistant
     // message) still works without batch_tool for both built-in and MCP
     // tools, so we lose only the batch wrapper, not parallelism.
-    // gemini-3 thinking pinned to high for review depth; gpt and anthropic
-    // effort set elsewhere (gpt: upstream default, anthropic: --effort flag in claude.ts).
-    // openrouter: pin Kimi K2 away from Enforcer-less providers (siliconflow /
-    // together) that drop optional tool-call params — per-model, so other
-    // OpenRouter models are unaffected. see opencodeShared.ts.
+    // gemini-3 thinking pinned to high for review depth; deepseek (funded
+    // efficient tier) pinned to high reasoning effort, and kimi pinned away
+    // from Enforcer-less openrouter providers (siliconflow / together) that
+    // drop optional tool-call params — both per-model on the openrouter route,
+    // so other models are unaffected. gpt/anthropic effort set elsewhere (gpt:
+    // upstream default, anthropic: --effort flag in claude.ts). see opencodeShared.ts.
     provider: {
       google: { models: geminiHighThinkingOverrides() },
-      openrouter: { models: kimiOpenRouterProviderOverrides() },
+      openrouter: {
+        models: { ...deepseekHighEffortOverrides(), ...kimiOpenRouterProviderOverrides() },
+      },
     },
   };
 
