@@ -85,7 +85,10 @@ export async function patchWorkflowRunFields(
       }
     )();
   } catch (error) {
-    log.warning(`patchWorkflowRunFields exhausted retries: ${error}`);
+    // not necessarily exhausted — an explicit HTTP status bails on the first
+    // attempt via the predicate above, so say "failed" rather than implying
+    // three attempts happened.
+    log.warning(`patchWorkflowRunFields failed: ${error}`);
   }
 }
 
