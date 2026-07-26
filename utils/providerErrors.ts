@@ -135,6 +135,13 @@ function extractExcerpt(text: string, matchIndex: number): string {
  * Sample:
  *   `APIError: This request requires more credits, or fewer max_tokens.
  *    You requested up to 32000 tokens, but can only afford 22800.`
+ *
+ * second shape (#1071): OpenRouter's cumulative-cap 403, `Key limit exceeded
+ * (total limit). Manage it using <keys url>`. same billing condition, different
+ * wire message. the parenthetical stays IN the match: this predicate runs first
+ * in `renderRunError`, so the bare phrase would outrank every other classifier
+ * on a BYOK user's own capped key. our mint hardcodes `limit_reset: null`
+ * (`utils/openrouter.ts`), so only the total-limit variant is producible.
  */
 // `/s` (dotAll) lets `.*?` cross newlines so we still detect the error if any
 // upstream layer reformats the message onto multiple lines. Without it, a
@@ -142,7 +149,7 @@ function extractExcerpt(text: string, matchIndex: number): string {
 // and the user would see the generic `❌ Pullfrog failed` dump instead of the
 // actionable top-up CTA.
 const ROUTER_KEYLIMIT_EXHAUSTED_PATTERN =
-  /requires more credits.*?fewer max_tokens|requested up to \d+ tokens.*?can only afford/is;
+  /requires more credits.*?fewer max_tokens|requested up to \d+ tokens.*?can only afford|Key limit exceeded \(total limit\)/is;
 
 export function isRouterKeylimitExhaustedError(text: string): boolean {
   return ROUTER_KEYLIMIT_EXHAUSTED_PATTERN.test(text);

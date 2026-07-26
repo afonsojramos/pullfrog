@@ -31,7 +31,9 @@ export type SubscriptionPreflight = { usable: true } | { usable: false; reason: 
  * per-model ("You've hit your Opus limit"), so a cheaper stand-in could pass
  * preflight and still leave the run dead on arrival.
  *
- * fail-open by design: only 401 (revoked/expired token) and 429
+ * fail-open by design: only 401 (revoked/expired token), 403 (Anthropic
+ * `permission_error` — the credential isn't entitled to serve this run, e.g.
+ * an org disabled Claude Code subscription access, #1072) and 429
  * (session/weekly/per-model limit) mark the token unusable. network errors,
  * 5xx, and request-shape drift (400) all keep today's subscription-first
  * behavior, so the preflight can never fail a run that would have worked —
@@ -66,7 +68,7 @@ export async function preflightClaudeSubscription(params: {
     // network failure / timeout says nothing about the credential
     return { usable: true };
   }
-  if (res.status !== 401 && res.status !== 429) return { usable: true };
+  if (res.status !== 401 && res.status !== 403 && res.status !== 429) return { usable: true };
   const body = await res.text().catch(() => "");
   return { usable: false, reason: `${res.status}: ${extractApiErrorMessage(body)}` };
 }

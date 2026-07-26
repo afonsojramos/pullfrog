@@ -317,7 +317,6 @@ interface TurnAccumulator {
    */
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   costUsd: number;
-  sessionError: string | null;
   /** populated when a tool_use part on the orchestrator session reports error. */
   lastToolError: string | null;
 }
@@ -327,7 +326,6 @@ function newTurn(): TurnAccumulator {
     finalText: "",
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     costUsd: 0,
-    sessionError: null,
     lastToolError: null,
   };
 }
@@ -421,7 +419,6 @@ async function dispatchEvent(ctx: RunnerContext, event: EventSubscribeResponse):
     if (sessionID !== ctx.orchestratorSessionID) return;
     const err = event.properties.error;
     const message = err ? extractErrorMessage(err) : "(no error payload)";
-    if (ctx.currentTurn) ctx.currentTurn.sessionError = message;
     log.info(`» ${ctx.label} session error: ${message}`);
     return;
   }
@@ -743,7 +740,8 @@ async function runPromptTurn(
   // failure modes, in order of authority:
   //   1. transport / SDK-side error (response.error or thrown)
   //   2. AssistantMessage.error set by the provider (auth, context overflow, etc.)
-  //   3. session.error event observed during the turn
+  // a bare `session.error` is deliberately NOT a third mode: opencode publishes
+  // it for conditions it recovers from, and sets (2) on the terminal ones (#1069).
   if (networkError) {
     // a watchdog-fired abort surfaces here as a caught `session.prompt`
     // rejection (or an aborted `response.error`), not a throw that escapes to
@@ -764,14 +762,6 @@ async function runPromptTurn(
       success: false,
       output: finalText,
       error: `provider error: ${extractErrorMessage(assistant.error)}`,
-      usage,
-    };
-  }
-  if (turn.sessionError) {
-    return {
-      success: false,
-      output: finalText,
-      error: `session error: ${turn.sessionError}`,
       usage,
     };
   }

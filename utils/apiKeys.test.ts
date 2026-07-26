@@ -254,6 +254,18 @@ describe("isApiKeyAuthError", () => {
       )
     ).toBe(true);
     expect(isApiKeyAuthError("» Pullfrog session error: Token refresh failed: 401")).toBe(true);
+    // #1041 server-side revocation ("been invalidated", not "expired")
+    expect(
+      isApiKeyAuthError(
+        "provider error: Your authentication token has been invalidated. Please try signing in again."
+      )
+    ).toBe(true);
+    // #1072 org-level entitlement denial carries no 401 and no auth keyword
+    expect(
+      isApiKeyAuthError(
+        "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access"
+      )
+    ).toBe(true);
   });
 
   it("ignores unrelated errors", () => {
@@ -302,5 +314,27 @@ describe("formatApiKeyErrorSummary", () => {
     expect(msg).toContain("OAuth credential has expired");
     expect(msg).toContain("pullfrog auth");
     expect(msg).not.toContain("settings/secrets/actions");
+    // #1072 — this shape rendered the rotate-your-repo-secret copy before
+    const claudeCli = formatApiKeyErrorSummary({
+      owner: "acme",
+      name: "repo",
+      raw: "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+    });
+    expect(claudeCli).toContain("OAuth credential has expired");
+    expect(claudeCli).not.toContain("settings/secrets/actions");
+  });
+
+  // see #1072 — an org admin disabled Claude Code access; re-authenticating
+  // can't clear an entitlement flag, so this shape gets its own remedy.
+  it("renders org-disabled subscription copy instead of the re-auth CTA", () => {
+    const msg = formatApiKeyErrorSummary({
+      owner: "acme",
+      name: "repo",
+      raw: "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access",
+    });
+    expect(msg).toContain("disabled Claude subscription access");
+    expect(msg).toContain("ANTHROPIC_API_KEY");
+    expect(msg).not.toContain("OAuth credential has expired");
+    expect(msg).not.toContain("was rejected");
   });
 });

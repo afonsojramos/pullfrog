@@ -206,6 +206,9 @@ export function validateAgentApiKey(params: {
  *     ****XXXX is invalid`. anchored to "Your api key: ... is invalid" so it
  *     can't collide with DeepSeek's already-handled `Insufficient balance`
  *     billing shape (which routes to formatProviderBillingExhausted).
+ *   - org-disabled Claude subscription (#1072): `Your organization has
+ *     disabled Claude subscription access for Claude Code`, an entitlement
+ *     denial with its own remedy — see isClaudeSubscriptionDisabledError.
  */
 export function isApiKeyAuthError(text: string): boolean {
   if (!text) return false;
@@ -220,6 +223,7 @@ export function isApiKeyAuthError(text: string): boolean {
     /API Error:\s*401/i.test(text) ||
     /Failed to authenticate\. API Error:/i.test(text) ||
     /Your api key:.*is invalid/i.test(text) ||
+    isClaudeSubscriptionDisabledError(text) ||
     isOAuthCredentialExpiredError(text)
   );
 }
@@ -231,9 +235,25 @@ export function isApiKeyAuthError(text: string): boolean {
  * distinct copy for these. Patterns are deliberately narrow:
  * "authentication token has expired" (not bare "token has expired") so a
  * GitHub installation-token expiry can't be misread as an LLM key problem.
+ * also covers server-side revocation ("authentication token has been
+ * invalidated", OpenAI `token_invalidated`, #1041) and the Claude CLI's
+ * "OAuth access token has expired" phrasing (#1072) — same remediation.
  */
 export function isOAuthCredentialExpiredError(text: string): boolean {
-  return /authentication token has expired/i.test(text) || /Token refresh failed/i.test(text);
+  return (
+    /authentication token has (expired|been invalidated)/i.test(text) ||
+    /OAuth access token has expired/i.test(text) ||
+    /Token refresh failed/i.test(text)
+  );
+}
+
+/**
+ * Anthropic entitlement denial for Claude Pro/Max subscription auth (#1072):
+ * an org admin turned off Claude Code subscription access. no credential the
+ * user controls fixes it, so it gets its own copy instead of the re-auth CTA.
+ */
+export function isClaudeSubscriptionDisabledError(text: string): boolean {
+  return /disabled Claude subscription access/i.test(text);
 }
 
 /**
@@ -258,13 +278,24 @@ export function formatApiKeyErrorSummary(params: {
   const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
   const settingsUrl = `${getApiUrl()}/console/${params.owner}/${params.name}`;
 
+  // an org admin disabled Claude Code subscription access — re-authenticating
+  // can't clear an entitlement flag, so name the two remedies the provider's
+  // own message spells out.
+  if (isClaudeSubscriptionDisabledError(params.raw)) {
+    return [
+      `**Your organization has disabled Claude subscription access for Claude Code.** Ask your Claude organization's admin to re-enable it in the Claude Console, or set an \`ANTHROPIC_API_KEY\` for this repo instead, then re-trigger the run.`,
+      "",
+      `[Add repo secret →](${githubSecretsUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    ].join("\n");
+  }
+
   // OAuth-connection credentials (Codex / provider OAuth) aren't repo
   // secrets — "rotate the key, update the GitHub secret" is wrong advice.
   if (isOAuthCredentialExpiredError(params.raw)) {
     return [
-      `**Your provider OAuth credential has expired.** Re-authenticate the provider connection (e.g. \`pullfrog auth codex\`), then re-trigger the run.`,
+      `**Your provider OAuth credential has expired or been revoked.** Re-authenticate the provider connection (e.g. \`pullfrog auth claude\` / \`pullfrog auth codex\`), then re-trigger the run.`,
       "",
-      `[Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+      `[Claude subscription →](https://docs.pullfrog.com/claude-auth) · [ChatGPT subscription →](https://docs.pullfrog.com/codex-auth) · [Model settings →](${settingsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
     ].join("\n");
   }
 

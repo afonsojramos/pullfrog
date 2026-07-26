@@ -274,6 +274,13 @@ describe("isRouterKeylimitExhaustedError", () => {
           "To increase, visit https://openrouter.ai/settings/keys and create a key with a higher total limit"
       )
     ).toBe(true);
+    // #1071 cumulative-cap shape
+    expect(
+      isRouterKeylimitExhaustedError(
+        "provider error: Key limit exceeded (total limit). Manage it using " +
+          "https://openrouter.ai/workspaces/default/keys/74b744277d302df1904d3f0d"
+      )
+    ).toBe(true);
   });
 
   it("matches the 'requires more credits' phrasing on its own", () => {
