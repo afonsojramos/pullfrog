@@ -117,7 +117,7 @@ export function formatBillingErrorSummary(error: BillingError, owner: string): s
     return [
       "**Your Pullfrog Router balance is exhausted.**",
       "",
-      "You have a card on file but auto-reload is disabled, so runs paused once your balance went past the overdraft buffer.",
+      "You have a payment method on file but auto-reload is disabled, so runs paused once your balance went past the overdraft buffer.",
       "",
       `[Top up balance →](${billingConsoleUrl(owner, "billing")}) · [Enable auto-reload →](${billingConsoleUrl(owner, "model-access")})`,
     ].join("\n");

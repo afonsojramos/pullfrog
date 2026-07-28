@@ -239,7 +239,7 @@ export interface ToolState {
   // set in proxy.ts when a no-card Router account had a model (or the
   // intelligent tier) selected and the server clamped it to the efficient
   // default — custom picks are card-gated wholesale. carried into footers so
-  // the PR shows "Using <Kimi K2> (<Claude Opus> needs a card on file)"
+  // the PR shows "Using <Kimi K2> (<Claude Opus> needs a payment method)"
   // rather than silently presenting Kimi as the user's pick. literal record
   // of an event — matches the ToolState design rule. `reason` distinguishes
   // the card gate ("card") from a pick that has no openRouterResolve yet and
