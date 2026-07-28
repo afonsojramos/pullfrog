@@ -112,7 +112,7 @@ describe("resolveAgent", () => {
 describe("resolveModel", () => {
   it("PULLFROG_MODEL override wins", () => {
     process.env.PULLFROG_MODEL = "anthropic/claude-opus";
-    expect(resolveModel({ slug: "openai/gpt" })).toBe("anthropic/claude-opus-4-8");
+    expect(resolveModel({ slug: "openai/gpt" })).toBe("anthropic/claude-opus-5");
   });
 
   it("PULLFROG_MODEL bypasses bedrock routing entirely", () => {

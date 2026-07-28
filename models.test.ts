@@ -71,7 +71,7 @@ describe("getModelEnvVars", () => {
 describe("resolveModelSlug", () => {
   it("resolves known alias to concrete specifier", () => {
     const resolved = resolveModelSlug("anthropic/claude-opus");
-    expect(resolved).toBe("anthropic/claude-opus-4-8");
+    expect(resolved).toBe("anthropic/claude-opus-5");
   });
 
   it("resolves openai alias", () => {
@@ -142,7 +142,7 @@ describe("resolveDisplayAlias", () => {
 describe("resolveOpenRouterModel", () => {
   it("returns the openrouter specifier for a non-deprecated alias", () => {
     expect(resolveOpenRouterModel("anthropic/claude-opus")).toBe(
-      "openrouter/anthropic/claude-opus-4.8"
+      "openrouter/anthropic/claude-opus-5"
     );
   });
 

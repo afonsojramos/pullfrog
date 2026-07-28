@@ -124,8 +124,8 @@ export const providers = {
       },
       "claude-opus": {
         displayName: "Claude Opus",
-        resolve: "anthropic/claude-opus-4-8",
-        openRouterResolve: "openrouter/anthropic/claude-opus-4.8",
+        resolve: "anthropic/claude-opus-5",
+        openRouterResolve: "openrouter/anthropic/claude-opus-5",
         preferred: true,
         subagentModel: "claude-sonnet",
       },
@@ -323,8 +323,8 @@ export const providers = {
       },
       "claude-opus": {
         displayName: "Claude Opus",
-        resolve: "opencode/claude-opus-4-8",
-        openRouterResolve: "openrouter/anthropic/claude-opus-4.8",
+        resolve: "opencode/claude-opus-5",
+        openRouterResolve: "openrouter/anthropic/claude-opus-5",
         subagentModel: "claude-sonnet",
       },
       "claude-sonnet": {

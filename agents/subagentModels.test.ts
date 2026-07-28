@@ -12,12 +12,12 @@ describe("deriveSubagentModels", () => {
 
   describe("anthropic family — opus → sonnet", () => {
     it("direct anthropic opus", () => {
-      expect(deriveSubagentModels("anthropic/claude-opus-4-8")).toEqual({
+      expect(deriveSubagentModels("anthropic/claude-opus-5")).toEqual({
         reviewer: "anthropic/claude-sonnet-5",
       });
     });
     it("opencode-vendored opus stays on opencode prefix", () => {
-      expect(deriveSubagentModels("opencode/claude-opus-4-8")).toEqual({
+      expect(deriveSubagentModels("opencode/claude-opus-5")).toEqual({
         reviewer: "opencode/claude-sonnet-5",
       });
     });
@@ -25,7 +25,7 @@ describe("deriveSubagentModels", () => {
       // both the anthropic alias and the opencode alias have the same
       // openRouterResolve. first-match-wins by alias declaration order
       // (anthropic declared first in providers).
-      expect(deriveSubagentModels("openrouter/anthropic/claude-opus-4.8")).toEqual({
+      expect(deriveSubagentModels("openrouter/anthropic/claude-opus-5")).toEqual({
         reviewer: "openrouter/anthropic/claude-sonnet-5",
       });
     });
