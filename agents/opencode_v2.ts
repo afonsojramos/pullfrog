@@ -186,17 +186,26 @@ function bootOpencodeServer(params: {
   env: NodeJS.ProcessEnv;
   cwd: string;
 }): Promise<ServerHandle> {
-  const proc = nodeSpawn(params.cliPath, ["serve", "--port", "0", "--hostname", "127.0.0.1"], {
-    cwd: params.cwd,
-    env: params.env,
-    stdio: ["ignore", "pipe", "pipe"],
-    // detached + killGroup so SIGKILL nukes the whole tree: node_modules/
-    // opencode-ai/bin/opencode is a Node shim that spawnSync's the native
-    // binary; without process-group kill the native binary is reparented
-    // to PID 1 and never dies. mirrors the same fix in runOpenCode's
-    // original spawn().
-    detached: true,
-  });
+  // --print-logs routes opencode's own logger to stderr (it otherwise writes
+  // only to a log file inside the throwaway per-run HOME, which nothing reads).
+  // that logger is the ONLY place the server records the cause behind a 500
+  // `UnknownError` + `ref` — without it `recentStderr` is empty and an invalid
+  // repo config is undiagnosable. ERROR level keeps the ring buffer signal-dense.
+  const proc = nodeSpawn(
+    params.cliPath,
+    ["serve", "--port", "0", "--hostname", "127.0.0.1", "--print-logs", "--log-level", "ERROR"],
+    {
+      cwd: params.cwd,
+      env: params.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      // detached + killGroup so SIGKILL nukes the whole tree: node_modules/
+      // opencode-ai/bin/opencode is a Node shim that spawnSync's the native
+      // binary; without process-group kill the native binary is reparented
+      // to PID 1 and never dies. mirrors the same fix in runOpenCode's
+      // original spawn().
+      detached: true,
+    }
+  );
   trackChild({ child: proc, killGroup: true });
 
   const recentStderr: string[] = [];
@@ -298,6 +307,18 @@ function bootOpencodeServer(params: {
     }, 30_000);
     bootTimeout.unref?.();
   });
+}
+
+/**
+ * Append the server's own stderr to a fatal harness error.
+ *
+ * opencode answers anything it cannot type as a bare 500 `UnknownError` plus a log
+ * `ref` we have no way to resolve, so `--print-logs` (see `bootOpencodeServer`) is
+ * what puts the underlying cause within reach at all.
+ */
+function withServerStderr(message: string, recentStderr: readonly string[]): string {
+  const tail = recentStderr.join("\n").trim();
+  return tail ? `${message}\nopencode server stderr:\n${tail}` : message;
 }
 
 // ── per-turn state ─────────────────────────────────────────────────────────────
@@ -882,9 +903,16 @@ function extractTextFromParts(parts: Part[] | undefined): string | undefined {
 function formatPromptError(error: unknown): string {
   if (typeof error === "string") return error;
   if (error && typeof error === "object") {
-    const obj = error as { message?: string; error?: { message?: string }; data?: unknown };
+    const obj = error as {
+      name?: string;
+      message?: string;
+      error?: { message?: string };
+      data?: unknown;
+    };
     if (obj.message) return obj.message;
     if (obj.error?.message) return obj.error.message;
+    const config = formatConfigError(obj.name, obj.data);
+    if (config) return config;
     try {
       return JSON.stringify(error);
     } catch {
@@ -892,6 +920,32 @@ function formatPromptError(error: unknown): string {
     }
   }
   return String(error);
+}
+
+/**
+ * Render opencode's typed config errors (`ConfigInvalidError`, `ConfigJsonError`,
+ * `ConfigFrontmatterError`, `ConfigDirectoryTypoError`).
+ *
+ * They name the offending file and the exact issues but carry no top-level
+ * `message`, so the generic branch above would JSON.stringify them. A repo config
+ * error is fatal at instance bootstrap — it fails the FIRST request, whatever it is
+ * — so this string is all a user with a bad `opencode.json` gets to act on.
+ */
+function formatConfigError(name: string | undefined, data: unknown): string | undefined {
+  if (!name?.startsWith("Config") || !data || typeof data !== "object") return undefined;
+  const at = "path" in data && typeof data.path === "string" ? ` at ${data.path}` : "";
+  // ConfigFrontmatterError / ConfigJsonError carry their detail here, not in `issues`.
+  const detail =
+    "message" in data && typeof data.message === "string" ? `${at}: ${data.message}` : at;
+  const issues = "issues" in data && Array.isArray(data.issues) ? data.issues : [];
+  const bullets = issues
+    .map((issue) =>
+      issue && typeof issue === "object" && "message" in issue && typeof issue.message === "string"
+        ? `\n↳ ${issue.message}`
+        : ""
+    )
+    .join("");
+  return `${name}${detail}${bullets}`;
 }
 
 // ── inner activity timer ───────────────────────────────────────────────────────
@@ -1032,6 +1086,13 @@ export const opencode = agent({
       GOOGLE_GENERATIVE_AI_API_KEY:
         process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY,
     };
+    // opencode 1.18 gates a code-mode `execute` tool — a script interpreter —
+    // behind either of these. the spawn env inherits the workflow's `env:` block,
+    // so leaving them set would let a repo-level variable hand the agent shell
+    // execution that sidesteps `bash: "deny"`. shell goes through pullfrog_shell,
+    // always. see wiki/sandbox-v2.md.
+    delete env.OPENCODE_EXPERIMENTAL;
+    delete env.OPENCODE_EXPERIMENTAL_CODE_MODE;
     if (codexAuth) {
       env.XDG_DATA_HOME = codexAuth.xdgDataHome;
       delete env.OPENAI_API_KEY;
@@ -1087,10 +1148,12 @@ export const opencode = agent({
         const msg = sessionResp.error
           ? formatPromptError(sessionResp.error)
           : "session.create returned no data";
+        // session.create is the first request to hit the server, so a failed
+        // instance bootstrap (an invalid repo config above all) surfaces here.
         return {
           success: false,
           output: "",
-          error: `opencode session.create failed: ${msg}`,
+          error: withServerStderr(`opencode session.create failed: ${msg}`, server.recentStderr),
         };
       }
       const sessionID = sessionResp.data.id;

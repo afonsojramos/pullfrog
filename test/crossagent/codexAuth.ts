@@ -9,8 +9,7 @@ import { defineFixture } from "../utils.ts";
  *
  * Pins the raw `openai/gpt-5.5` specifier — one of the ids in upstream
  * opencode's Codex `ALLOWED_MODELS` allow list — NOT the `openai/gpt` alias,
- * which now rolls to gpt-5.6-sol (opencode 1.16.2's Codex plugin does not yet
- * allow-list any gpt-5.6 tier). This test validates the model-agnostic
+ * which now rolls to gpt-5.6-sol. This test validates the model-agnostic
  * auth-refresh chain, so it stays on a stable allow-listed model rather than
  * following the flagship roll. Runs the full opencode harness against the
  * developer's / CI's `CODEX_AUTH_JSON`. Exercises:

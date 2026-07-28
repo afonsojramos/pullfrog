@@ -5,6 +5,7 @@ import {
   VERTEX_MODEL_ID_ENV,
 } from "../models.ts";
 import { getApiUrl } from "./apiUrl.ts";
+import { getModelsFailure } from "./openCodeModels.ts";
 import {
   GOOGLE_CLOUD_PROJECT_ENV,
   readProjectIdFromVertexServiceAccountJson,
@@ -165,6 +166,11 @@ export function validateAgentApiKey(params: {
 
     if (params.agent.name === "opencode") {
       if (params.authorized.has(params.model)) return;
+      // an empty authorized set means either "no auth" or "opencode couldn't
+      // start" — an unloadable repo config being the usual second case. prefer
+      // opencode's own reason over sending the user to their secrets page.
+      const reason = getModelsFailure();
+      if (reason) throw new Error(reason);
       throw new Error(
         buildMissingApiKeyError({ owner: params.owner, name: params.name, model: params.model })
       );
@@ -180,6 +186,10 @@ export function validateAgentApiKey(params: {
   // no model configured (auto-select path).
   if (params.agent.name === "opencode") {
     if (params.authorized.size > 0) return;
+    // same reasoning as the configured-model branch above: an unloadable repo
+    // config empties the model set, and it is the likelier cause here too.
+    const reason = getModelsFailure();
+    if (reason) throw new Error(reason);
     throw new Error(buildMissingApiKeyError({ owner: params.owner, name: params.name }));
   }
   if (hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")) return;

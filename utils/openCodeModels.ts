@@ -23,31 +23,52 @@
 // Memoized at module scope so the two consumers
 // (`validateAgentApiKey` + `autoSelectModel`) share one shell-out.
 
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { log } from "./cli.ts";
 
 let baseline: Set<string> | undefined;
 let authorized: Set<string> | undefined;
+let failure: string | undefined;
+
+// the CLI paints its errors; these get re-rendered into a PR comment where raw
+// SGR escapes read as literal `[91m` noise.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching SGR escapes is the point
+const ANSI_PATTERN = /\[[0-9;]*m/g;
 
 function readModels(cliPath: string): Set<string> {
-  try {
-    const output = execFileSync(cliPath, ["models"], {
-      encoding: "utf-8",
-      timeout: 30_000,
-      env: process.env,
-    });
-    return new Set(
-      output
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-    );
-  } catch (error) {
-    log.debug(
-      `» \`opencode models\` failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+  // spawnSync, not execFileSync: we want opencode's stderr as a value rather
+  // than a throw, and `stdio` keeps it out of the job log (execFileSync leaks
+  // it to the parent, so a config error printed once per capture).
+  const result = spawnSync(cliPath, ["models"], {
+    encoding: "utf-8",
+    timeout: 30_000,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0) {
+    failure = (result.stderr ?? "").replace(ANSI_PATTERN, "").trim() || undefined;
+    log.debug(`» \`opencode models\` failed (${result.status}): ${failure ?? result.error}`);
     return new Set();
   }
+  failure = undefined;
+  return new Set(
+    result.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+  );
+}
+
+/**
+ * Why the last `opencode models` came back empty, in opencode's own words.
+ *
+ * An unloadable repo config (`opencode.json`, `.opencode/**`) is the common cause
+ * and is fatal — opencode's schema is strict, so every later invocation fails the
+ * same way. Without this the empty set reaches `validateAgentApiKey` and the run
+ * dies telling the user to go add provider secrets, which is a false lead.
+ */
+export function getModelsFailure(): string | undefined {
+  return failure;
 }
 
 /** Snapshot the set of models OpenCode can serve from the current env, BEFORE

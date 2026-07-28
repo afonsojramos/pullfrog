@@ -27,7 +27,13 @@ config({ path: join(import.meta.dirname, "..", ".env") });
 config({ path: join(import.meta.dirname, "..", "..", ".env") });
 
 const PROMPT = "Reply with exactly OK and nothing else.";
-const MATCH = /\bOK\b/i;
+// leading `\b` only. it carries the whole guard — it rejects the "ok" inside
+// `broken` / `token` / `invoke` — while the trailing `\b` rejected nothing but
+// legitimate replies: `OKOK` (a model repeating itself) and `OKAY` both failed,
+// which is the recurring one-cell red in models-live. what this test validates
+// is alias → resolve mapping, agent classification and env wiring, not whether
+// a model obeys "and nothing else".
+const MATCH = /\bOK/i;
 // xai is the slowest provider in the matrix — winning xai/grok-4.3 jobs land
 // at 42-67s wall time (vs 23-41s for every other provider), brushing a 60s
 // ceiling and intermittently crossing it. 120s gives ~2x headroom on the
@@ -133,6 +139,12 @@ function runCli(p: Plan, env: NodeJS.ProcessEnv): Promise<SpawnResult> {
       }
       if (code !== 0) {
         resolve({ ok: false, output, reason: `exit ${code}` });
+        return;
+      }
+      // a mute model and a chatty one are different failures — "no OK in stdout"
+      // for both is what made three unrelated causes read as one flake.
+      if (stdout.trim().length === 0) {
+        resolve({ ok: false, output, reason: "model exited 0 but returned no output" });
         return;
       }
       if (!MATCH.test(stdout)) {

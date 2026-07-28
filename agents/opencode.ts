@@ -1208,6 +1208,13 @@ export const opencode = agent({
         process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY,
     };
 
+    // mirrors opencode_v2.ts — a revert hatch that silently drops the sandbox
+    // invariant is worse than none. opencode 1.18 gates a code-mode `execute`
+    // tool behind these, and the gating is version-level, so `opencode run`
+    // exposes it exactly like `serve` would. see wiki/opencode-version-skew.md.
+    delete env.OPENCODE_EXPERIMENTAL;
+    delete env.OPENCODE_EXPERIMENTAL_CODE_MODE;
+
     if (codexAuth) {
       // point OpenCode at the real-home XDG dir so it reads auth.json from
       // where we wrote it (not the tmpdir-redirected default).
