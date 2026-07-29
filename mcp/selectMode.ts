@@ -126,10 +126,41 @@ export function SelectModeTool(ctx: ToolContext) {
       'Example: `select_mode({ mode: "Review" })` or `select_mode({ mode: "Plan", issue_number: 1234 })`.',
     parameters: SelectModeParams,
     execute: execute(async (params) => {
-      if (ctx.toolState.selectedMode) {
+      const guidanceFor = (mode: Mode) => {
+        const base = buildOrchestratorGuidance(ctx, mode);
+        if (!SUMMARY_MODES.has(mode.name)) return base;
+        const addendum = buildSummaryAddendum(t, ctx);
+        if (addendum.length === 0) return base;
         return {
-          error: `mode already selected: "${ctx.toolState.selectedMode}". mode selection is final and cannot be changed. complete your current workflow within this mode.`,
+          ...base,
+          orchestratorGuidance: `${base.orchestratorGuidance}\n\n${addendum}`,
+          summaryFilePath: ctx.toolState.summaryFilePath,
         };
+      };
+
+      // a refused switch re-serves the ACTIVE mode's guidance rather than a bare
+      // error: the refusal arrives as an ordinary tool result, and an agent that
+      // reads it as "switched" keeps working under a mode it is not in — observed
+      // on a run that announced AddressReviews, stayed in Review, and submitted a
+      // review carrying none of Review's format.
+      if (ctx.toolState.selectedMode) {
+        const active = ctx.toolState.selectedMode;
+        const error = `mode already selected: "${active}". mode selection is final — this call changed NOTHING and you are still in "${active}". Do not proceed as though you switched modes. "${active}" guidance is repeated below; finish its steps. If the task genuinely belongs to another mode, do what you can within "${active}" and say so in your final summary.`;
+        const activeMode = resolveMode(ctx.modes, active);
+        if (!activeMode) return { error };
+        // a Plan run that already routed to PlanEdit must get PlanEdit back. the
+        // plain Plan checklist says "do NOT set target_plan_comment", the exact
+        // opposite of the override the agent is under, so re-serving it would
+        // hand over a newer, authoritative-looking instruction to revise the
+        // wrong comment.
+        if (activeMode.name === "Plan" && ctx.toolState.existingPlanCommentId !== undefined) {
+          return {
+            ...buildOrchestratorGuidance(ctx, activeMode, overrides.PlanEdit),
+            previousPlanBody: ctx.toolState.previousPlanBody,
+            error,
+          };
+        }
+        return { ...guidanceFor(activeMode), error };
       }
 
       const modeName = params.mode;
@@ -164,19 +195,7 @@ export function SelectModeTool(ctx: ToolContext) {
         }
       }
 
-      const summaryAddendum = SUMMARY_MODES.has(selectedMode.name)
-        ? buildSummaryAddendum(t, ctx)
-        : "";
-
-      const base = buildOrchestratorGuidance(ctx, selectedMode);
-      if (summaryAddendum.length > 0) {
-        return {
-          ...base,
-          orchestratorGuidance: `${base.orchestratorGuidance}\n\n${summaryAddendum}`,
-          summaryFilePath: ctx.toolState.summaryFilePath,
-        };
-      }
-      return base;
+      return guidanceFor(selectedMode);
     }),
   });
 }

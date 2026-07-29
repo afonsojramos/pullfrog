@@ -390,7 +390,13 @@ ${getStandaloneModeInstructions(ctx.payload.event.trigger, t, ctx.outputSchema)}
 ${byProfile(
   `### Efficiency
 
-Trust tool results — re-verify only after an actual error, or right before \`${t("push_branch")}\`, which rejects a dirty tree (tests you ran earlier often leave untracked output). Issue independent tool calls together in one turn rather than one per turn; sequence anything that depends on prior output. Commands run synchronously, so never \`sleep\` to wait for one.`,
+Trust tool results — re-verify only after an actual error, or right before \`${t("push_branch")}\`, which rejects a dirty tree (tests you ran earlier often leave untracked output). Commands run synchronously, so never \`sleep\` to wait for one.
+
+### Batch your tool calls
+
+If you can emit multiple tool calls in a single assistant turn, do it — aggressively, for every set of calls that does not depend on the others. Reading five files after a grep, running several greps, a glob plus a grep plus a read, querying several MCP tools: all one turn. The dominant waste is grep → read → read → read across separate turns when one round trip would do, and each extra turn re-sends your whole context, so turn count is what the run costs.
+
+Sequence only what genuinely needs prior output, and keep edits and ordered mutations sequential.`,
   `### Efficiency
 
 Trust the tools — do not repeatedly verify file contents or git status after operations. If a tool reports success, proceed to the next step. Only verify if you encounter an actual error. Exception: right before \`${t("push_branch")}\`, ensure the working tree is clean — that tool rejects dirty trees, and tests you ran earlier often leave untracked output.

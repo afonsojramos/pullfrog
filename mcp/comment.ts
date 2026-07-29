@@ -95,6 +95,12 @@ export function CreateCommentTool(ctx: ToolContext) {
       ctx.toolState.wasUpdated = true;
       log.info(`» created comment ${result.data.id}`);
 
+      // a standalone comment on the run's OWN target is the deliverable, so
+      // report_progress must not add a second one (see its guard).
+      if (issueNumber === ctx.payload.event.issue_number) {
+        ctx.toolState.standaloneCommentId = result.data.id;
+      }
+
       if (commentType === "Plan") {
         if (result.data.node_id) {
           await patchWorkflowRunFields(ctx, { planCommentNodeId: result.data.node_id });
@@ -384,6 +390,21 @@ export function ReportProgressTool(ctx: ToolContext) {
       "Call this at the end of every run with a brief final summary (1-3 sentences) unless the mode guidance instructs otherwise. The current task list is automatically appended in a collapsible section — do not restate individual steps.",
     parameters: ReportProgress,
     execute: execute(async (params) => {
+      // a standalone comment already delivered this run's answer to its own
+      // target. writing here too leaves two comments restating each other, and
+      // flipping finalSummaryWritten would also preserve the progress comment
+      // that run-end cleanup would otherwise remove. decline instead.
+      if (ctx.toolState.standaloneCommentId !== undefined && !params.target_plan_comment) {
+        // keep the composed body: runLifecycle falls back to raw agent output for
+        // the Actions job summary when lastProgressBody is unset.
+        ctx.toolState.lastProgressBody = params.body;
+        return {
+          success: true,
+          action: "skipped",
+          message: `standalone comment ${ctx.toolState.standaloneCommentId} already delivered this run's answer to this target — that comment IS the deliverable, so this call was a no-op rather than posting a second one. Nothing further is needed.`,
+        };
+      }
+
       let body = params.body;
 
       // for non-plan calls: stop auto-updates, wait for in-flight writes to settle,

@@ -53,7 +53,14 @@ export function getUnsubmittedReview(
   if (!expectsReviewOutput) return null;
   if (mode === "Review") return toolState.review ? null : "Review";
   if (mode === "IncrementalReview") {
-    return toolState.review || toolState.finalSummaryWritten ? null : "IncrementalReview";
+    // a standalone comment on this target counts as the visible signal this gate
+    // exists to guarantee — and it makes report_progress a declined no-op, so
+    // finalSummaryWritten alone would nag a run that did deliver output.
+    const delivered =
+      toolState.review ||
+      toolState.finalSummaryWritten ||
+      toolState.standaloneCommentId !== undefined;
+    return delivered ? null : "IncrementalReview";
   }
   return null;
 }
