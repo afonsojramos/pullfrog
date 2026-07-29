@@ -15,6 +15,10 @@ const PushPermissionInput = type.enumerated("disabled", "restricted", "enabled")
 // check-runs (branch protection). off by default — a new required-check
 // surface must not silently turn on.
 const StatusChecksInput = type.enumerated("disabled", "enabled");
+// opt-out for the temporary "Leaping into action..." comment + live task-list
+// updates. on by default; the repo setting is the only half the dispatcher can
+// see, so this input can suppress live updates but not a comment already seeded.
+const ProgressCommentsInput = type.enumerated("disabled", "enabled");
 
 // schema for JSON payload passed via prompt (internal dispatch invocation)
 // note: permissions are intentionally NOT included here to prevent injection attacks
@@ -69,6 +73,7 @@ export const Inputs = type({
   "push?": PushPermissionInput.or("undefined"),
   "shell?": ShellPermissionInput.or("undefined"),
   "status_checks?": StatusChecksInput.or("undefined"),
+  "progress_comments?": ProgressCommentsInput.or("undefined"),
   "cwd?": type.string.or("undefined"),
   "output_schema?": type.string.or("undefined"),
 });
@@ -146,6 +151,7 @@ function resolveNonPromptInputs() {
     push: core.getInput("push") || undefined,
     shell: core.getInput("shell") || undefined,
     status_checks: core.getInput("status_checks") || undefined,
+    progress_comments: core.getInput("progress_comments") || undefined,
   });
 }
 
@@ -229,6 +235,13 @@ export function resolvePayload(
     // opt-in commit-status check-runs (branch protection). workflow-level
     // static input, off unless the repo's pullfrog.yml sets status_checks: enabled.
     statusChecks: inputs.status_checks === "enabled",
+
+    // temporary progress chrome. the workflow input is the source of truth when
+    // set (mirrors `push`); otherwise the repo setting decides. defaults to true.
+    progressComments:
+      inputs.progress_comments === undefined
+        ? repoSettings.progressComments
+        : inputs.progress_comments === "enabled",
 
     // set by proxy logic in main.ts when routing through OpenRouter
     proxyModel: undefined as string | undefined,

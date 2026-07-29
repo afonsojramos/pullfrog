@@ -40,6 +40,9 @@ export interface RepoSettings {
   // as the final "may auto-merge" verdict. see autoMergeAfterApprove.
   autoMergeEnabled: boolean;
   signedCommits: boolean;
+  // false suppresses the "Leaping into action..." comment (server-side, before
+  // dispatch) and the live task-list updates. see mcp/comment.ts reportProgress.
+  progressComments: boolean;
   modeInstructions: Record<string, string>;
   learnings: string | null;
   learningsHeadings: LearningsHeading[];
@@ -80,6 +83,7 @@ const defaultSettings: RepoSettings = {
   prApproveEnabled: false,
   autoMergeEnabled: false,
   signedCommits: false,
+  progressComments: true,
   modeInstructions: {},
   learnings: null,
   learningsHeadings: [],

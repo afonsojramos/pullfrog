@@ -30,6 +30,9 @@ import {
  *
  * the gate is anchored to `hadProgressComment` so silent runs (non-issue
  * events, dispatcher skipped seeding) don't fire a nudge there's no UI for.
+ * `expectsReviewOutput` overrides that anchor for runs where the dispatcher
+ * deliberately skipped seeding under `progressComments: disabled` — those still
+ * owe a review, and reading "no comment" as "no UI" would silently retire the gate.
  *
  * `Review` and `IncrementalReview` have different valid exits:
  *   - Review: only `create_pull_request_review` counts. `report_progress` is
@@ -42,14 +45,28 @@ import {
  * `task`-dispatched `reviewfrog` lens) calls `report_progress` and silences
  * the gate even though the orchestrator never submitted a review.
  */
-export function getUnsubmittedReview(toolState: ToolState): "Review" | "IncrementalReview" | null {
+export function getUnsubmittedReview(
+  toolState: ToolState,
+  expectsReviewOutput = toolState.hadProgressComment
+): "Review" | "IncrementalReview" | null {
   const mode = toolState.selectedMode;
-  if (!toolState.hadProgressComment) return null;
+  if (!expectsReviewOutput) return null;
   if (mode === "Review") return toolState.review ? null : "Review";
   if (mode === "IncrementalReview") {
     return toolState.review || toolState.finalSummaryWritten ? null : "IncrementalReview";
   }
   return null;
+}
+
+/**
+ * whether this run owes visible review output. normally "a progress comment was
+ * seeded", but under `progressComments: disabled` nothing is seeded even though the
+ * run is user-facing — so fall back to the two facts seeding itself depends on.
+ */
+function expectsReviewOutput(ctx: AgentRunContext): boolean {
+  if (ctx.toolState.hadProgressComment) return true;
+  if (ctx.payload.progressComments) return false;
+  return ctx.payload.event.silent !== true && ctx.payload.event.issue_number !== undefined;
 }
 
 /**
@@ -222,7 +239,7 @@ export async function collectPostRunIssues(
     const stale = await isSummaryUnchanged(summaryFilePath, summarySeed);
     if (stale) issues.summaryStale = { filePath: summaryFilePath };
   }
-  const unsubmittedMode = getUnsubmittedReview(ctx.toolState);
+  const unsubmittedMode = getUnsubmittedReview(ctx.toolState, expectsReviewOutput(ctx));
   if (unsubmittedMode) issues.unsubmittedReview = unsubmittedMode;
   return issues;
 }

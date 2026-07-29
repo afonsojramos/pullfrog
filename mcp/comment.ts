@@ -210,6 +210,14 @@ export async function reportProgress(
     return { body, action: "skipped" };
   }
 
+  // progress comments opted out: drop the auto-rendered task-list writes, which are
+  // the whole cost (one `issue_comment.edited` webhook each for anything watching
+  // the PR). a deliberate report_progress still lands — it carries the run's actual
+  // answer, and posting it once at the end is not "progress chrome".
+  if (params.liveProgress && !ctx.payload.progressComments) {
+    return { body, action: "skipped" };
+  }
+
   const issueNumber = ctx.payload.event.issue_number ?? primaryRepoState(ctx.toolState).issueNumber;
   const isPlanMode = ctx.toolState.selectedMode === "Plan";
   const apiCtx = { octokit: ctx.octokit, owner: ctx.repo.owner, repo: ctx.repo.name };
@@ -430,6 +438,11 @@ export function ReportProgressTool(ctx: ToolContext) {
 export async function deleteProgressComment(ctx: ToolContext): Promise<boolean> {
   const existing = ctx.toolState.progressComment;
   if (!existing) {
+    // nothing to delete, but still close the surface. callers reach here once the
+    // run's durable artifact has landed (review submitted, fix approved), so a later
+    // report_progress must not open a fresh comment — which it otherwise would when
+    // the dispatcher never seeded one under `progressComments: disabled`.
+    ctx.toolState.progressComment = null;
     return false;
   }
 

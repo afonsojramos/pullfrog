@@ -200,6 +200,12 @@ export async function main(): Promise<MainResult> {
   toolState.model = payload.model;
   toolState.oss = runContext.oss;
   toolState.shaPinned = isActionPinnedToSha();
+  // seed the comment target up front. `reportErrorToComment` reads only this (not
+  // the payload), so without it a run with no pre-seeded progress comment — silent
+  // triggers, or `progressComments: disabled` — has nowhere to post a terminal error.
+  if (payload.event.issue_number !== undefined) {
+    primaryRepoState(toolState).issueNumber = payload.event.issue_number;
+  }
   if (payload.event.trigger === "pull_request_synchronize") {
     primaryRepoState(toolState).beforeSha = payload.event.before_sha;
   }
