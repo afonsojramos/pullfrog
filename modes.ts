@@ -1,6 +1,7 @@
 // changes to mode definitions should be reflected in docs/modes.mdx
 import { REVIEWER_AGENT_NAME } from "./agents/reviewer.ts";
 import { type AgentId, formatMcpToolRef, pullfrogMcpName } from "./external.ts";
+import { byProfile } from "./utils/promptProfile.ts";
 
 export interface Mode {
   name: string;
@@ -10,6 +11,69 @@ export interface Mode {
   prompt?: string | undefined;
 }
 
+const PR_SUMMARY_FORMAT_LEAN = `### Default format
+
+The body has at most three parts, in this order:
+
+1. **Reviewed changes preamble** — a bolded \`**Reviewed changes**\` lead-in with one sentence on what was reviewed in this run (for \`IncrementalReview\`: what changed since the prior pullfrog review), then a bullet list of the substantive changes — short bolded title, one sentence each. A reviewer should understand the full reviewed scope from this list alone. Close the preamble with the metadata comment below.
+2. **Cross-cutting issue sections** (zero or more) — one \`### {emoji} {what's wrong, not what to do}\` heading per concern.
+3. **\`### ℹ️ Nitpicks\`** at the very bottom, if any — a flat bullet list, no technical-details block.
+
+**Inline vs. body.** Concerns that anchor to a specific line go inline (the \`comments\` parameter), even when their implications are broad. Body \`### \` sections are reserved for concerns that have **no line to anchor to** — *absence* (something the diff should have done but didn't), *sequencing* (rollout / deletion / migration order), *design decisions only the human can make*, or *scope questions the diff raises but doesn't address*. With no non-anchorable concerns, the body is just the preamble + metadata.
+
+**Severity emoji** on every \`### \` heading, and nowhere else: 🚨 critical (blocks merge — data loss, security, broken core flow) · ⚠️ important (must address before merging) · ℹ️ informational (mergeable as-is).
+
+**Blank line between every block-level element.** GitHub's markdown parser requires one before and after HTML tags (\`<details>\`, \`<summary>\`, \`<sub>\`, \`<br/>\`) — without it GitHub treats what follows as a continuation of the HTML block and renders your markdown as literal text. This is a parser quirk, not a style preference, and it permanently breaks the posted review.
+
+## Metadata comment
+
+Fill every field from the \`checkout_pr\` response — never count files or commits by hand. For \`IncrementalReview\`, fill \`Prior pullfrog review\` from \`list_pull_request_reviews\`.
+
+\`\`\`
+<!--
+Pullfrog review metadata. These findings were written against {head_sha_short};
+if commits have landed on {head_ref} since, treat every specific bug, file, or
+line callout as POTENTIALLY STALE and re-diff before acting on it.
+
+- Mode: Review (initial)   or   IncrementalReview (delta against prior pullfrog review)
+- Files reviewed: {file_count}
+- Commits reviewed: {commit_count}
+- Base: {base_ref} ({base_sha_short})
+- Head: {head_ref} ({head_sha_short})
+- Reviewed commits:
+  - {sha_short} — {commit_subject}
+- Prior pullfrog review: none   or   {prior_sha_short} ({prior_review_html_url})
+- Submitted at: {iso_timestamp}
+-->
+\`\`\`
+
+## Technical details
+
+Every body \`### \` section carries one; an inline comment carries one when its fix is non-trivial or spans files. The visible part above it states the PROBLEM in 2-3 sentences — what's broken and what the blast radius is. Asks, fixes, and open questions live inside the block, which a downstream fix-agent pulls down as its brief, so \`file:line\` refs and identifier density belong here.
+
+\`\`\`
+<details><summary>Technical details</summary>
+
+\\\`\\\`\\\`\\\`markdown
+# {title}
+
+## Affected sites
+- {file path:line} — {what's wrong there}
+
+## Required outcome
+- {what the fix needs to achieve, not how to achieve it}
+
+## Suggested approach (optional)
+## Open questions for the human (optional)
+\\\`\\\`\\\`\\\`
+
+</details>
+\`\`\`
+
+The 4-backtick fence lets the block hold its own 3-backtick fences and stay one-click copyable. Skip the optional sections when they'd add nothing.
+
+Backtick-wrap identifiers and file names. Don't repeat diff content, don't include raw \`+123 / -45\` stats, no changelog, no horizontal rules, and no \`### Key changes\` / \`### Issues found\` / \`<b>TL;DR</b>\` heading — each \`### \` heading IS the issue.`;
+
 // Default user-facing summary format embedded in BOTH Review and
 // IncrementalReview review bodies. The two modes share the preamble +
 // cross-cutting + nitpicks shape; the only difference is scope (full PR for
@@ -17,7 +81,7 @@ export interface Mode {
 // Distinct from the agent-internal snapshot (action/utils/prSummary.ts) which
 // has its own stable scaffold and is never shaped by user instructions — see
 // selectMode.ts for the firewall.
-export const PR_SUMMARY_FORMAT = `### Default format
+const PR_SUMMARY_FORMAT_FULL = `### Default format
 
 The body has at most three parts in this exact order:
 
@@ -159,6 +223,14 @@ Inline comments use the same severity framing as body \`### \` sections, scaled 
 - **Pull file/commit counts from \`checkout_pr\` metadata** — never count manually.
 - **Legacy headings REMOVED.** Do not use \`### Key changes\`, \`### Issues found\`, \`<b>TL;DR</b>\`, or \`<sub><b>Summary</b>\`. The new structure subsumes them.`;
 
+/**
+ * Must stay a function, not a const: the profile is chosen from `process.env`
+ * inside `main()`, long after this module is imported.
+ */
+export function prSummaryFormat(): string {
+  return byProfile(PR_SUMMARY_FORMAT_LEAN, PR_SUMMARY_FORMAT_FULL);
+}
+
 export function computeModes(agentId: AgentId, signedCommits = false): Mode[] {
   const t = (toolName: string) => formatMcpToolRef(agentId, toolName);
   // signed-commits mode swaps the local-commit + push flow for the
@@ -189,7 +261,17 @@ export function computeModes(agentId: AgentId, signedCommits = false): Mode[] {
    - plan your approach before writing code: identify which files need to change, key design decisions, and edge cases. for non-trivial changes, consider whether there's a more elegant approach.
    - run relevant tests/lints before committing
 
-5. **self-review**: judgment call — does YOUR diff warrant a fresh-eyes pass?
+5. **self-review**: ${byProfile(
+        `unless the diff has no behavioral surface at all — docs, comments, whitespace, import reordering, lockfile or generated-code regeneration, a mechanical rename, a trusted dep patch bump — dispatch the \`${REVIEWER_AGENT_NAME}\` subagent to review it with fresh eyes against YOUR TASK. Line count is not the signal: a one-line change to auth, money, SQL, a comparison operator, a redirect, or a config default earns a pass. When in doubt, run it — a false-positive dispatch costs cents, a missed bug costs much more.
+
+   Before dispatching, make \`origin/<base>\` available: \`git fetch --no-tags --deepen=1000 origin <base>:refs/remotes/origin/<base>\`. The explicit destination refspec is required — a shallow single-branch checkout otherwise only updates \`FETCH_HEAD\` and never creates the tracking ref. The reviewer is read-only by contract, so fetching is your job.
+
+   In the dispatch prompt: say this is a PRE-COMMIT self-review whose work is uncommitted in the working tree, give the branch and base, name \`git diff --merge-base origin/<base>\` as the canonical diff command, paste YOUR TASK, and summarize any build-phase failures. If that diff comes back empty, there is nothing to review — stop.
+
+   Give it the diff and the task, nothing else. Do not summarize what you implemented, curate a reading list of files, or pre-shape the output with a severity schema — each biases the reviewer toward validating your solution instead of questioning it. Where the diff rests on third-party API, SDK, framework, or DB-engine semantics, tell it to verify load-bearing claims by web search and quote sources.
+
+   Treat what comes back as hypotheses, not directives: verify each against the code before applying, and reject findings that would add ceremony without correctness — defensive checks for cases that cannot happen, single-use abstractions, comments restating code, tautological tests. After applying what you accept, re-read your own diff and revert anything that turned out to be bloat. Then ${commitStep}.`,
+        `judgment call — does YOUR diff warrant a fresh-eyes pass?
 
    Skip self-review (commit directly) when the diff is **genuinely trivial**:
    - doc typos, comment-only edits, whitespace/format-only, import reordering
@@ -240,7 +322,8 @@ export function computeModes(agentId: AgentId, signedCommits = false): Mode[] {
    - Do NOT defect-hunt the diff yourself in parallel with the subagent. Your role is dispatch + evaluation; doing the review yourself reintroduces the implementation bias the subagent is meant to mitigate.
    - For diffs that rely on third-party API contracts, SDK semantics, framework directives, or DB engine specifics, instruct the subagent to verify load-bearing claims via web search and quote source URLs rather than trust training data — this is the single most common review-quality failure mode.
 
-   Be **discerning** about what comes back. The reviewer is an AI subagent and is fallible — treat every finding as a hypothesis, not a directive, and **verify each one yourself** against the diff and the code before deciding whether to apply. You are searching for a solution that is **complete, minimal, and elegant** — you may need to think hard to find it. Do not over-engineer, do not be over-defensive, **do not write AI slop**. Reviewers bias toward *recommending additions*, and that bias has a recognizable slop texture: defensive checks for cases that cannot happen, extra logging, new abstractions used once, comments restating code, tests asserting tautologies, "just-in-case" guards, error handlers for cases the type system already rules out. Reject those. For each surviving finding, ask: would applying it leave the code more sound, correct, AND elegant? Two-out-of-three means look harder for a fix that gets all three before settling. After applying the fixes you accept, re-read your diff and be discerning about what *you just changed*: if any fix turned out to be bloat in context, revert it. Then verify only intended changes are present, no debug artifacts or commented-out code remain, no unrelated files were modified. Then ${commitStep}.
+   Be **discerning** about what comes back. The reviewer is an AI subagent and is fallible — treat every finding as a hypothesis, not a directive, and **verify each one yourself** against the diff and the code before deciding whether to apply. You are searching for a solution that is **complete, minimal, and elegant** — you may need to think hard to find it. Do not over-engineer, do not be over-defensive, **do not write AI slop**. Reviewers bias toward *recommending additions*, and that bias has a recognizable slop texture: defensive checks for cases that cannot happen, extra logging, new abstractions used once, comments restating code, tests asserting tautologies, "just-in-case" guards, error handlers for cases the type system already rules out. Reject those. For each surviving finding, ask: would applying it leave the code more sound, correct, AND elegant? Two-out-of-three means look harder for a fix that gets all three before settling. After applying the fixes you accept, re-read your diff and be discerning about what *you just changed*: if any fix turned out to be bloat in context, revert it. Then verify only intended changes are present, no debug artifacts or commented-out code remain, no unrelated files were modified. Then ${commitStep}.`
+      )}
 
 6. **finalize**:
    - ${finalizeStep} (see *SYSTEM* Git rules if this fails — prepush errors are usually the repo's tests/lint, not infra timeouts)
@@ -294,7 +377,7 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
     //
     // Severity categorization is split across two surfaces: the opening
     // callout (CAUTION/IMPORTANT/ℹ️/✅) sets the review's overall tier, and
-    // per-bullet emoji prefixes (🚨/⚠️/ℹ️ in PR_SUMMARY_FORMAT) tag
+    // per-bullet emoji prefixes (🚨/⚠️/ℹ️ in prSummaryFormat()) tag
     // individual points inside summary sections — scoping severity to the
     // specific bullet rather than the whole section keeps a section that
     // mixes a 🚨 and an ℹ️ from being mislabeled by either of them.
@@ -308,7 +391,30 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 
 2. **checkout**: call \`${t("checkout_pr")}\` — this returns PR metadata, a \`diffPath\`, and a supplemental \`impactPath\` when change-impact extraction is enabled. read the complete raw diff end-to-end, beginning with the TOC and using its file line ranges as your coverage checklist. only after that, use \`impactPath\` as an explicitly incomplete list of reference leads; it never replaces raw-diff reading or establishes coverage.
 
-3. **triage**: orient yourself on the PR — identify *what kind of thing this is* (domain it touches, seams it crosses, external contracts it depends on, user-facing surfaces it changes). pull as much context as you need to render a confident, well-grounded review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths, fetch related GitHub state. **you are the synthesizer** — never delegate understanding to subagents.
+${byProfile(
+  `3. **triage**: orient yourself on the PR — identify *what kind of thing this is* (domain it touches, seams it crosses, external contracts it depends on, user-facing surfaces it changes). pull as much context as you need to render a confident, well-grounded review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths, fetch related GitHub state. **you are the synthesizer** — never delegate understanding to subagents.
+
+   skip the deeper pass and submit a \`No new issues found.\` review per step 7 only when the diff has **no behavioral surface at all** — doc typos, whitespace/formatting, lockfile or generated-code regeneration, a mechanical rename whose only effect is import-path updates. line count is not the signal: a one-line change to auth, money, SQL, a comparison operator, a redirect, or a config default is not trivial.
+
+4. **specialist decision**: after reading the complete diff, name the questions you still cannot answer confidently yourself, and dispatch one \`${REVIEWER_AGENT_NAME}\` specialist per question. a question qualifies only when a specialist could return evidence that **changes your disposition** on the PR — generic requests for another look, extra confidence, or polish do not. most reviews need zero or one; some need several.
+
+   **There is NO one-specialist cap or fixed maximum.** cover every orthogonal question that remains; do not collapse several real questions into one broad prompt just to reduce the count. there is no file-count, line-count, or budget threshold either — diff size is not a proxy for review uncertainty.
+
+   frame each question through the lens that primes the right failure modes. for high-stakes subsystems, lead with the **domain** ("the billing lens", "the auth lens", "the schema-migration lens") rather than the generic equivalent ("correctness on billing code") — the domain framing makes the subagent recall double-charges, refund races, currency rounding, and dispute flows that a generic lens misses.
+
+   you remain the synthesizer: reading the complete raw diff, investigating surrounding code, validating every returned finding, and writing the review are yours. specialist reads supplement that work; they never satisfy your own coverage obligation.
+
+5. **dispatch specialists (only if step 4 found unresolved questions)**: for 2+ questions, emit every Task tool_use block **IN A SINGLE ASSISTANT TURN** before reading any result, so the investigations run in parallel rather than serially. your own \`read\` / \`grep\` / \`webfetch\` calls can ride in that same turn at zero extra wall time.
+
+   if a specialist errors out, times out, or returns nothing usable, retry it once. if it still fails, resolve the question yourself; if it remains disposition-changing and unresolved, surface the limitation and do not approve. each dispatch carries:
+   - **the absolute \`diffPath\` (and \`incrementalDiffPath\` if available) from step 2's \`${t("checkout_pr")}\` return, named verbatim in the dispatch prompt** (e.g. \`diffPath: /tmp/pullfrog-XXXX/pr-NNN-SHA.diff\`). the reviewer's baked-in system prompt selects its FIRST action on this token — paraphrasing ("review the diff", "look at this PR") sends it down a \`git diff origin/<base>\` fallback that fails on shallow GHA checkouts. it \`read\`s those files for scope and must NOT re-derive the diff itself; reading and codebase exploration are still its job.
+   - **exactly one falsifiable question with explicit scope boundaries** — ask for evidence that supports or refutes it, never a broad "review for X, Y, and Z" prompt.
+   - **a Task \`description\` set to a short hypothesis label** (e.g. \`"webhook-replay"\`, \`"billing-rounding"\`) — the harness reads this field to label the subagent's log lines so parallel runs can be told apart. without it, every subagent shows up as \`subagent#N\`.
+   - if the question touches third-party API, SDK, or framework contracts, instruct the subagent to verify load-bearing claims via web search and quote source URLs rather than trust training data. action runs are non-interactive — nobody is in the loop to catch "I'm pretty sure Stripe does X."
+   - ask for findings with file paths and NEW line numbers from the diff so you can validate and anchor them.
+
+   delegation discipline: do NOT summarize the PR for them (a lossy summary biases toward a validation frame; the raw diff is the source), do NOT hand them a curated reading list, do NOT pre-shape their output with a finding schema, and do NOT mention the other specialists — independence is the point, and overlapping findings are a strong signal.`,
+  `3. **triage**: orient yourself on the PR — identify *what kind of thing this is* (domain it touches, seams it crosses, external contracts it depends on, user-facing surfaces it changes). pull as much context as you need to render a confident, well-grounded review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths, fetch related GitHub state. **you are the synthesizer** — never delegate understanding to subagents.
 
    if the PR is **genuinely trivial**, skip specialists entirely and submit a \`No new issues found.\` review per step 7.
 
@@ -379,7 +485,8 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
    - do NOT summarize the PR for them (a lossy summary biases toward a validation frame; the raw diff is the source)
    - do NOT hand them a curated reading list (let them discover scope)
    - do NOT pre-shape their output with a finding schema
-   - do NOT mention the other lenses (independence is the point — overlapping findings are a strong signal)
+   - do NOT mention the other lenses (independence is the point — overlapping findings are a strong signal)`
+)}
 
 6. **aggregate & draft**: when specialist results land, merge findings; de-dup overlaps (two specialists catching the same issue = higher-confidence signal); trace each finding yourself before accepting it. drop praise, style preferences, speculative/unverified claims, findings about pre-existing code unrelated to the PR (heuristic: if the finding's root cause lives in lines this PR added or modified, it's in scope; otherwise drop unless the PR plausibly introduced or amplified the regression), and anything not actionable. also drop **bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. subagents are fallible and bias toward recommending changes; the bar for an actionable inline comment is sound + correct + elegant. recommending a change that improves only one of the three (or worse, degrades elegance to nominally improve correctness) makes the codebase worse, not better.
 
@@ -413,7 +520,7 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
    - **no actionable issues**:
      \`approved: true\`. Body opens with \`> ✅ No new issues found.\\n\\n\` followed by the PR summary.
 
-${PR_SUMMARY_FORMAT}`,
+${prSummaryFormat()}`,
     },
     // IncrementalReview shares Review's minimum hypothesis-covering specialist
     // routing and body format, scoped to the incremental delta against the
@@ -448,7 +555,30 @@ ${PR_SUMMARY_FORMAT}`,
 
    The remaining open threads feed step 8's dedup filter — anything already flagged and unchanged by the new commits should not be re-raised. The rolling PR summary snapshot is the durable record of retire activity; you don't need to surface it in the review body.
 
-5. **triage**: orient on the *incremental* changes — domain, seams, external contracts, user-facing surfaces. pull as much context as you need to render a confident review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths. **you are the synthesizer.**
+${byProfile(
+  `5. **triage**: orient on the *incremental* changes — domain, seams, external contracts, user-facing surfaces. pull as much context as you need to render a confident review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths. **you are the synthesizer.**
+
+   skip the deeper pass and jump to step 10's non-substantive path (do NOT submit a review) only when the incremental changes have **no behavioral surface at all** — formatting, comment tweaks, import reordering, lockfile regen, a mechanical rename of import paths. line count is not the signal: a one-line change to auth, money, SQL, a comparison operator, a redirect, or a config default is not trivial.
+
+6. **specialist decision**: after covering the incremental and full diffs, name the questions about the new changes that you still cannot answer confidently yourself, and dispatch one \`${REVIEWER_AGENT_NAME}\` specialist per question. a question qualifies only when a specialist could return evidence that **changes your disposition** on the PR — generic requests for another look, extra confidence, or polish do not. most incremental reviews need zero or one, especially thread-reply re-reviews; some need several.
+
+   **There is NO one-specialist cap or fixed maximum.** cover every orthogonal question that remains; do not collapse several real questions into one broad prompt just to reduce the count. there is no file-count, line-count, or budget threshold either — diff size is not a proxy for review uncertainty.
+
+   frame each question through the lens that primes the right failure modes. for high-stakes subsystems, lead with the **domain** ("the billing lens", "the auth lens", "the schema-migration lens") rather than the generic equivalent — the domain framing makes the subagent recall failure modes a generic lens misses.
+
+   you remain the synthesizer: reading the complete raw full diff plus the incremental diff, investigating surrounding code, validating every returned finding, and writing the review are yours. specialist reads supplement that work; they never satisfy your own coverage obligation.
+
+7. **dispatch specialists (only if step 6 found unresolved questions)**: for 2+ questions, emit every Task tool_use block **IN A SINGLE ASSISTANT TURN** before reading any result, so the investigations run in parallel rather than serially. your own \`read\` / \`grep\` / \`webfetch\` calls can ride in that same turn.
+
+   if a specialist errors out, times out, or returns nothing usable, retry it once. if it still fails, resolve the question yourself; if it remains disposition-changing and unresolved, surface the limitation and do not approve. each dispatch carries:
+   - **the absolute diff path(s) from step 2's \`${t("checkout_pr")}\` return, named verbatim in the dispatch prompt.** when \`incrementalDiffPath\` is present, name BOTH (\`incrementalDiffPath: /tmp/.../pr-NNN-SHA-incremental.diff\` then \`diffPath: /tmp/.../pr-NNN-SHA.diff\`) — the reviewer's baked-in prompt reads incremental first and uses full for context; when only \`diffPath\` exists, name it alone. it \`read\`s those files and must NOT re-derive the diff itself; paraphrasing ("review the new commits") sends it down a \`git diff\` fallback that fails on shallow GHA checkouts. do NOT tell them to skip pre-existing issues — that suppresses regressions the new commits amplified; the "issues must be NEW" filter lives at aggregation time (step 8), not in the subagent prompt.
+   - **exactly one falsifiable question with explicit scope boundaries** — ask for evidence that supports or refutes it, never a broad "review for X, Y, and Z" prompt.
+   - **a Task \`description\` set to a short hypothesis label** — the harness reads this field to label log lines so parallel runs can be told apart.
+   - if the question touches third-party API, SDK, or framework contracts, instruct the subagent to verify load-bearing claims via web search and quote source URLs.
+   - ask for findings with file paths and NEW line numbers from the full PR diff so you can validate and anchor them.
+
+   delegation discipline: do NOT summarize the changes for them (a lossy summary biases toward a validation frame; the raw diff is the source), do NOT hand them a curated reading list, do NOT pre-shape their output with a finding schema, and do NOT mention the other specialists — independence is the point.`,
+  `5. **triage**: orient on the *incremental* changes — domain, seams, external contracts, user-facing surfaces. pull as much context as you need to render a confident review: read related files, grep for callers of changed symbols, check tests that exercise the touched paths. **you are the synthesizer.**
 
    if the incremental changes are **genuinely trivial**, skip specialists entirely and jump to step 10's non-substantive path (do NOT submit a review).
 
@@ -489,7 +619,8 @@ ${PR_SUMMARY_FORMAT}`,
    - do NOT summarize the changes for them (a lossy summary biases toward a validation frame; the raw diff is the source)
    - do NOT hand them a curated reading list (let them discover scope)
    - do NOT pre-shape their output with a finding schema
-   - do NOT mention the other lenses (independence is the point)
+   - do NOT mention the other lenses (independence is the point)`
+)}
 
 8. **aggregate, draft, self-critique**: merge findings (yours + output from every specialist you dispatched); de-dup overlaps; trace each finding yourself. drop praise, style preferences, speculative/unverified claims, findings about pre-existing code unrelated to the new commits, anything not actionable, and anything that re-states prior review feedback (heuristic: if the finding's root cause lives in lines the *new commits* added or modified, it's in scope; otherwise drop). also drop **bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. subagents are fallible and bias toward recommending changes; the bar for an actionable inline comment is sound + correct + elegant. recommending a change that improves only one of the three (or degrades elegance to nominally improve correctness) makes the codebase worse, not better. To compute "lines the new commits added or modified": if \`incrementalDiffPath\` from step 2 is present, use it directly. Otherwise, take the prior Pullfrog review's \`commit_id\` (returned alongside each entry from \`${t("list_pull_request_reviews")}\` in step 4) and run \`git diff <prior-review-sha>..HEAD\` to isolate the lines added since that review.
 
@@ -512,7 +643,7 @@ ${PR_SUMMARY_FORMAT}`,
    - ELSE IF INFORMATIONAL OBSERVATIONS (mergeable as-is, but worth surfacing — e.g. prior feedback addressed cleanly with one minor stale doc reference, or a noteworthy positive observation): call \`${t("create_pull_request_review")}\` with \`approved: true\`, NO inline comments, and the review body. body opens with \`> ✅ No new issues found.\\n\\n\` (or similar friendly green opener), followed by the PR summary using the default format below. If a point is concrete enough to anchor to a line, downgrade the whole review to "minor suggestions only" (\`approved: false\`) instead — the ✅ signals "no action needed", which contradicts an actionable anchor.
    - ELSE IF NO NEW ISSUES, SUBSTANTIVE CHANGES (new functionality, behavior changes, or fixes to prior review feedback): call \`${t("create_pull_request_review")}\` to create a PR review. If all previous reviews have been properly addressed and no new issues were discovered, set \`approved: true\`. body opens with \`> ✅ No new issues found.\\n\\n\`, followed by the PR summary using the default format below.
 
-${PR_SUMMARY_FORMAT}`,
+${prSummaryFormat()}`,
     },
     {
       name: "Plan",
@@ -607,7 +738,10 @@ ${PR_SUMMARY_FORMAT}`,
   ];
 }
 
-// static export for UI display — uses opencode format as the readable default
+// static export for UI display — uses opencode format as the readable default.
+// materializes at import, so it carries the BUILD-time prompt profile (env unset → `lean`).
+// its only consumer is the console's built-in-prompt viewer, a client bundle that could never
+// reflect a per-run profile anyway; the run path resolves the profile fresh in `main()`.
 export const modes: Mode[] = computeModes("opencode");
 
 /**

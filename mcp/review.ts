@@ -9,6 +9,7 @@ import { countLinesInRanges, getDiffCoverageBreakdown } from "../utils/diffCover
 import { fixDoubleEscapedString } from "../utils/fixDoubleEscapedString.ts";
 import { patchWorkflowRunFields } from "../utils/patchWorkflowRunFields.ts";
 import { isPullfrog } from "../utils/payload.ts";
+import { byProfile } from "../utils/promptProfile.ts";
 import * as yes from "../yes/index.ts";
 import { deleteProgressComment } from "./comment.ts";
 import type { ToolContext } from "./server.ts";
@@ -539,7 +540,10 @@ export const CreatePullRequestReview = type({
   // running. required-ness is the only pressure that empirically held.
   // see wiki/review-approval.md.
   body: type.string.describe(
-    "1-2 sentence high-level summary with urgency level, critical callouts, and feedback about code outside the diff. Specific feedback on diff lines goes in 'comments' array. ALWAYS pass this parameter — pass an empty string \"\" when approving with no commentary, never omit it."
+    byProfile(
+      "The review summary, plus any concern that has no diff line to anchor to. Your mode guidance defines its structure. Feedback that does anchor to a line goes in the 'comments' array. ALWAYS pass this parameter — pass an empty string \"\" when approving with no commentary, never omit it.",
+      "1-2 sentence high-level summary with urgency level, critical callouts, and feedback about code outside the diff. Specific feedback on diff lines goes in 'comments' array. ALWAYS pass this parameter — pass an empty string \"\" when approving with no commentary, never omit it."
+    )
   ),
   approved: type.boolean
     .describe(
@@ -600,8 +604,12 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
       "Each call creates a permanent, visible review on the PR — NEVER submit test or diagnostic reviews. " +
       "Set `approved: true` to approve, `request_changes: true` to submit a blocking review, or neither for a plain comment review (the three are mutually exclusive). " +
       "Reviews with no body AND no comments are silently skipped (nothing to post). " +
-      "IMPORTANT: 95%+ of feedback should be in 'comments' array with file paths and line numbers. " +
-      "Only use 'body' for a 1-2 sentence summary with urgency and critical callouts. " +
+      byProfile(
+        "Feedback that anchors to a specific line goes in the 'comments' array with file paths and line numbers. " +
+          "The 'body' carries the review summary plus any concern with no line to anchor to; your mode guidance defines its structure. ",
+        "IMPORTANT: 95%+ of feedback should be in 'comments' array with file paths and line numbers. " +
+          "Only use 'body' for a 1-2 sentence summary with urgency and critical callouts. "
+      ) +
       "Use 'suggestion' to propose replacement code - MUST preserve exact indentation of original code. " +
       "The first submission may error once with a one-time diff-coverage nudge listing unread TOC regions — retry with the same arguments and the pre-flight will not block again. " +
       "Example replacing lines 42-44 (3 lines) with 5 lines: " +

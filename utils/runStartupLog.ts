@@ -6,6 +6,7 @@
 
 import { log } from "./cli.ts";
 import type { ResolvedPayload } from "./payload.ts";
+import { promptProfile } from "./promptProfile.ts";
 import { TIMEOUT_DISABLED } from "./time.ts";
 
 function resolveTimeoutForLog(timeout: string | undefined): string {
@@ -58,4 +59,8 @@ export function logRunStartup(ctx: {
   log.info(`» push:    ${ctx.payload.push}`);
   log.info(`» shell:   ${ctx.payload.shell}`);
   log.info(`» timeout: ${resolveTimeoutForLog(ctx.payload.timeout)}`);
+  // the resolved arm, not the raw env: `promptProfile()` treats anything but
+  // `full` as `lean`, so a typo'd value would otherwise land in the treatment
+  // arm with nothing in the log to catch it.
+  log.info(`» prompt:  ${promptProfile()}`);
 }
