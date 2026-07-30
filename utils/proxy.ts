@@ -39,6 +39,7 @@ import type { ResolvedPayload } from "./payload.ts";
 async function mintProxyKey(ctx: {
   oidcCredentials: OidcCredentials | null;
   repo: { owner: string; name: string };
+  oss: boolean;
 }): Promise<string | null> {
   try {
     const headers = await buildProxyTokenHeaders(ctx);
@@ -117,7 +118,9 @@ async function mintProxyKey(ctx: {
 async function buildProxyTokenHeaders(ctx: {
   oidcCredentials: OidcCredentials | null;
   repo: { owner: string; name: string };
+  oss: boolean;
 }): Promise<Record<string, string> | null> {
+  const fundingSource = ctx.oss ? "oss" : "router";
   if (ctx.oidcCredentials) {
     // retry transients — core.getIDToken (the previous mint path) retried
     // 5xx internally, and a soft-skip here degrades the run to BYOK
@@ -127,11 +130,17 @@ async function buildProxyTokenHeaders(ctx: {
       retries: [1000, 2000],
       bail: (error) => !isTransientTokenError(error),
     })();
-    return { Authorization: `Bearer ${oidcToken}` };
+    return {
+      Authorization: `Bearer ${oidcToken}`,
+      "X-Pullfrog-Funding-Source": fundingSource,
+    };
   }
   if (isLocalApiUrl()) {
     log.info(`» proxy: dev bypass (x-dev-repo) for ${ctx.repo.owner}/${ctx.repo.name}`);
-    return { "x-dev-repo": `${ctx.repo.owner}/${ctx.repo.name}` };
+    return {
+      "x-dev-repo": `${ctx.repo.owner}/${ctx.repo.name}`,
+      "X-Pullfrog-Funding-Source": fundingSource,
+    };
   }
   return null;
 }
@@ -176,7 +185,11 @@ async function resolveProxyModel(ctx: {
     return;
   }
 
-  const key = await mintProxyKey({ oidcCredentials: ctx.oidcCredentials, repo: ctx.repo });
+  const key = await mintProxyKey({
+    oidcCredentials: ctx.oidcCredentials,
+    repo: ctx.repo,
+    oss: ctx.oss,
+  });
   if (!key) return;
 
   process.env.OPENROUTER_API_KEY = key;
