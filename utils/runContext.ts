@@ -69,6 +69,13 @@ export interface RunContext {
   plan: AccountPlan;
   proxyModel?: string | undefined;
   dbSecrets?: Record<string, string> | undefined;
+  /**
+   * the server tried and failed to materialize Pullfrog-stored secrets (or we
+   * never got a usable response at all). distinct from an absent `dbSecrets`,
+   * which legitimately means the user has none stored — without the
+   * distinction a transient failure renders as "you have no API key".
+   */
+  secretsUnavailable?: boolean | undefined;
 }
 
 const defaultSettings: RepoSettings = {
@@ -98,6 +105,18 @@ const defaultRunContext: RunContext = {
   apiToken: "",
   oss: false,
   plan: "none",
+};
+
+/**
+ * used only when we never got an answer at all (5xx, network drop, timeout):
+ * stored secrets are unknown rather than known-absent, so the run must not
+ * blame the user. a definitive 4xx keeps `defaultRunContext` — promising that a
+ * re-run will find secrets we were authoritatively told don't apply is worse
+ * than the missing-key copy it replaces.
+ */
+const unknownSecretsRunContext: RunContext = {
+  ...defaultRunContext,
+  secretsUnavailable: true,
 };
 
 /**
@@ -131,7 +150,9 @@ export async function fetchRunContext(params: {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      return defaultRunContext;
+      // 404 (repo not found / app not installed) and 403 (token rejected) are
+      // definitive; only 5xx leaves the secret state genuinely unknown.
+      return response.status >= 500 ? unknownSecretsRunContext : defaultRunContext;
     }
 
     const data = (await response.json()) as {
@@ -141,6 +162,7 @@ export async function fetchRunContext(params: {
       plan?: AccountPlan;
       proxyModel?: string;
       dbSecrets?: Record<string, string>;
+      secretsUnavailable?: boolean;
     } | null;
 
     if (data === null) {
@@ -166,9 +188,12 @@ export async function fetchRunContext(params: {
       plan: data.plan ?? "none",
       proxyModel: data.proxyModel,
       dbSecrets: data.dbSecrets,
+      secretsUnavailable: data.secretsUnavailable,
     };
   } catch {
+    // network drop, abort at the 30s timeout, or an unparseable body — we never
+    // learned anything about this repo's stored secrets.
     clearTimeout(timeoutId);
-    return defaultRunContext;
+    return unknownSecretsRunContext;
   }
 }

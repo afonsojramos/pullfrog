@@ -52,7 +52,11 @@
 
 import type { AgentDiagnostic } from "./agentHangReport.ts";
 import { formatAgentHangBody } from "./agentHangReport.ts";
-import { formatApiKeyErrorSummary, isApiKeyAuthError } from "./apiKeys.ts";
+import {
+  formatApiKeyErrorSummary,
+  isApiKeyAuthError,
+  SECRETS_UNAVAILABLE_MARKER,
+} from "./apiKeys.ts";
 import { BillingError, formatBillingErrorSummary } from "./billingErrors.ts";
 import { MODEL_ACCESS_MARKER } from "./modelAccess.ts";
 import {
@@ -190,6 +194,14 @@ export function renderRunError(input: {
   // the thrown message already IS the rendered markdown body (built by
   // `buildModelAccessError`), so surface it verbatim on both surfaces.
   if (input.errorMessage.includes(MODEL_ACCESS_MARKER)) {
+    return { summary: input.errorMessage, comment: input.errorMessage };
+  }
+
+  // run-context couldn't hand over Pullfrog-stored secrets. same verbatim
+  // contract as the model-access body above, and checked before the api-key
+  // branch below so it can't be rewritten into a "go add a key" CTA — the key
+  // is already there.
+  if (input.errorMessage.includes(SECRETS_UNAVAILABLE_MARKER)) {
     return { summary: input.errorMessage, comment: input.errorMessage };
   }
 

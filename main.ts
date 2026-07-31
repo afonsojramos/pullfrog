@@ -369,6 +369,7 @@ export async function main(): Promise<MainResult> {
         authorized: getAuthorizedModels(),
         owner: runContext.repo.owner,
         name: runContext.repo.name,
+        secretsUnavailable: runContext.secretsUnavailable,
       });
     }
 

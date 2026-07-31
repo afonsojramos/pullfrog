@@ -23,6 +23,46 @@ import {
 const MISSING_KEY_MARKER = "no API key found";
 
 /**
+ * marker for the distinct "run-context couldn't hand over your stored secrets"
+ * body. surfaced verbatim by `runErrorRenderer` (same contract as
+ * `MODEL_ACCESS_MARKER`) because blaming the user for a transient fetch failure
+ * on our side is the wrong CTA — their key is configured and still stored.
+ */
+export const SECRETS_UNAVAILABLE_MARKER = "couldn't load your Pullfrog secrets";
+
+/**
+ * "you have no key" vs "we couldn't read your key" — same failure to the
+ * runner, opposite CTA to the user, so every throw site picks by this flag.
+ */
+function buildKeyError(params: {
+  owner: string;
+  name: string;
+  model?: string | undefined;
+  secretsUnavailable?: boolean | undefined;
+}): string {
+  return params.secretsUnavailable
+    ? buildSecretsUnavailableError(params)
+    : buildMissingApiKeyError(params);
+}
+
+function buildSecretsUnavailableError(params: {
+  owner: string;
+  name: string;
+  model?: string | undefined;
+}): string {
+  const settingsUrl = `${getApiUrl()}/console/${params.owner}/${params.name}`;
+  const modelClause = params.model ? ` needed for \`${params.model}\`` : "";
+
+  return [
+    `**Pullfrog ${SECRETS_UNAVAILABLE_MARKER}${modelClause} on this run.** The key is still stored — the runner just couldn't fetch it, so this is a transient failure on our side, not a missing key.`,
+    "",
+    "**To fix:** re-run the job. If it keeps happening, tell us in Discord.",
+    "",
+    `[Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+  ].join("\n");
+}
+
+/**
  * Markdown body used for both the thrown error and the formatted PR comment
  * summary. When the configured model is known, names it and the exact env
  * var(s) it needs so the user knows precisely what to fix; otherwise falls
@@ -194,6 +234,9 @@ export function validateAgentApiKey(params: {
   authorized: Set<string>;
   owner: string;
   name: string;
+  /** run-context couldn't hand over Pullfrog-stored secrets, so a missing key
+   * says nothing about what the user actually configured. */
+  secretsUnavailable?: boolean | undefined;
 }): void {
   if (params.model) {
     const alias = resolveDisplayAlias(params.model);
@@ -238,15 +281,30 @@ export function validateAgentApiKey(params: {
       // opencode's own reason over sending the user to their secrets page.
       const reason = getModelsFailure();
       if (reason) throw new Error(reason);
+      // `opencode models` can exit 0 having printed only a prefix of its
+      // catalog, so a missing entry is not proof the key is absent — a run
+      // failed or passed purely on where its slug sorted against the cut. only
+      // trust the absence when the model's own env var is unset too.
+      if (getModelEnvVars(params.model).some(hasEnvVar)) return;
       throw new Error(
-        buildMissingApiKeyError({ owner: params.owner, name: params.name, model: params.model })
+        buildKeyError({
+          owner: params.owner,
+          name: params.name,
+          model: params.model,
+          secretsUnavailable: params.secretsUnavailable,
+        })
       );
     }
 
     // claude: single-provider check on the Anthropic auth shapes.
     if (hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")) return;
     throw new Error(
-      buildMissingApiKeyError({ owner: params.owner, name: params.name, model: params.model })
+      buildKeyError({
+        owner: params.owner,
+        name: params.name,
+        model: params.model,
+        secretsUnavailable: params.secretsUnavailable,
+      })
     );
   }
 
@@ -257,10 +315,22 @@ export function validateAgentApiKey(params: {
     // config empties the model set, and it is the likelier cause here too.
     const reason = getModelsFailure();
     if (reason) throw new Error(reason);
-    throw new Error(buildMissingApiKeyError({ owner: params.owner, name: params.name }));
+    throw new Error(
+      buildKeyError({
+        owner: params.owner,
+        name: params.name,
+        secretsUnavailable: params.secretsUnavailable,
+      })
+    );
   }
   if (hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")) return;
-  throw new Error(buildMissingApiKeyError({ owner: params.owner, name: params.name }));
+  throw new Error(
+    buildKeyError({
+      owner: params.owner,
+      name: params.name,
+      secretsUnavailable: params.secretsUnavailable,
+    })
+  );
 }
 
 /**

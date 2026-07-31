@@ -60,6 +60,51 @@ describe("validateAgentApiKey — opencode", () => {
     ).toThrow("no API key found");
   });
 
+  // `opencode models` can exit 0 having printed only an alphabetical prefix of
+  // its catalog, so an absent entry proves nothing about the key. production
+  // runs on one repo passed at 216 entries and failed at 197 purely on where
+  // the configured slug sorted against the cut.
+  it("passes when a truncated catalog omits the model but its env var is set", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-test";
+    expect(() =>
+      validateAgentApiKey({
+        agent: opencode,
+        model: "openrouter/openai/gpt-5.6-sol",
+        authorized: new Set([
+          "openrouter/anthropic/claude-opus-5",
+          "openrouter/google/gemma-3-12b",
+        ]),
+        owner,
+        name,
+      })
+    ).not.toThrow();
+  });
+
+  it("still throws when a truncated catalog omits the model and the env var is unset", () => {
+    expect(() =>
+      validateAgentApiKey({
+        agent: opencode,
+        model: "openrouter/openai/gpt-5.6-sol",
+        authorized: new Set(["openrouter/anthropic/claude-opus-5"]),
+        owner,
+        name,
+      })
+    ).toThrow("no API key found");
+  });
+
+  it("blames the fetch, not the user, when stored secrets were unreadable", () => {
+    expect(() =>
+      validateAgentApiKey({
+        agent: opencode,
+        model: "openrouter/openai/gpt-5.6-sol",
+        authorized: new Set(),
+        owner,
+        name,
+        secretsUnavailable: true,
+      })
+    ).toThrow("couldn't load your Pullfrog secrets");
+  });
+
   it("passes the auto-select path when the authorized set is non-empty", () => {
     expect(() =>
       validateAgentApiKey({

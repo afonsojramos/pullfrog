@@ -19,6 +19,9 @@ export interface RunContextData {
   plan: AccountPlan;
   proxyModel?: string | undefined;
   dbSecrets?: Record<string, string> | undefined;
+  /** stored secrets couldn't be materialized for this run — not the same as
+   * the user having none. see `RunContext.secretsUnavailable`. */
+  secretsUnavailable?: boolean | undefined;
 }
 
 interface ResolveRunContextDataParams {
@@ -61,9 +64,17 @@ export async function resolveRunContextData(
 
   const repoContext = parseRepoContext();
 
+  // the mint is an HTTP call to the runner's token endpoint, and without the
+  // token run-context withholds Pullfrog-stored secrets — so a transient blip
+  // here costs the run its keys and reads downstream as "no API key found".
+  // absent env means local dev / fork PR, where it can never succeed: one
+  // attempt, no retry.
   let oidcToken: string | undefined;
   try {
-    oidcToken = await core.getIDToken("pullfrog-api");
+    oidcToken = await yes.op(() => core.getIDToken("pullfrog-api"), {
+      name: "OIDC mint",
+      retries: process.env.ACTIONS_ID_TOKEN_REQUEST_URL ? [200, 1000] : [],
+    })();
   } catch {
     // OIDC not available (local dev, non-actions environment, fork PRs)
   }
@@ -94,5 +105,10 @@ export async function resolveRunContextData(
     plan: runContext.plan,
     proxyModel: runContext.proxyModel,
     dbSecrets: runContext.dbSecrets,
+    // a failed mint on a runner that should have been able to mint is the same
+    // outcome as the server-side failure: the run never sees stored secrets.
+    secretsUnavailable:
+      runContext.secretsUnavailable ||
+      (!!process.env.ACTIONS_ID_TOKEN_REQUEST_URL && oidcToken === undefined),
   };
 }

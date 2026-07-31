@@ -46,8 +46,13 @@ function readModels(cliPath: string): Set<string> {
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.status !== 0) {
-    failure = (result.stderr ?? "").replace(ANSI_PATTERN, "").trim() || undefined;
-    log.debug(`» \`opencode models\` failed (${result.status}): ${failure ?? result.error}`);
+    // a timeout or spawn failure kills the child before it writes stderr, so
+    // `result.error` carries the only reason there is. without folding it in,
+    // `failure` stays undefined and the empty set reaches validateAgentApiKey
+    // as a bare "you have no key" verdict for what is really a runner problem.
+    const stderr = (result.stderr ?? "").replace(ANSI_PATTERN, "").trim();
+    failure = stderr || result.error?.message;
+    log.debug(`» \`opencode models\` failed (${result.status}): ${failure}`);
     return new Set();
   }
   failure = undefined;
