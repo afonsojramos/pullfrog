@@ -5,6 +5,8 @@ import {
   getModelProvider,
   isBedrockAnthropicId,
   isVertexAnthropicId,
+  OPENAI_COMPATIBLE_MODEL_ENV,
+  OPENAI_COMPATIBLE_PROVIDER,
   resolveCliModel,
   resolveDisplayAlias,
   VERTEX_MODEL_ID_ENV,
@@ -63,6 +65,18 @@ function resolveSlug(slug: string): string | undefined {
       );
     }
     return vertexId;
+  }
+  if (alias?.routing === "openai-compatible") {
+    const modelId = process.env[OPENAI_COMPATIBLE_MODEL_ENV]?.trim();
+    if (!modelId) {
+      throw new Error(
+        `${OPENAI_COMPATIBLE_MODEL_ENV} env var is required when the model is set to "${slug}". ` +
+          `set it to the model ID served by your OpenAI-compatible endpoint ` +
+          `(e.g. a Cloudflare AI Gateway or DashScope model). ` +
+          `see https://docs.pullfrog.com/openai-compatible for setup.`
+      );
+    }
+    return `${OPENAI_COMPATIBLE_PROVIDER}/${modelId}`;
   }
   return resolveCliModel(slug);
 }

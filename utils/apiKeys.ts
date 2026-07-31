@@ -1,6 +1,12 @@
 import {
   BEDROCK_MODEL_ID_ENV,
   getModelEnvVars,
+  OPENAI_COMPATIBLE_API_KEY_ENV,
+  OPENAI_COMPATIBLE_BASE_URL_ENV,
+  OPENAI_COMPATIBLE_CONTEXT_ENV,
+  OPENAI_COMPATIBLE_MAX_OUTPUT_ENV,
+  OPENAI_COMPATIBLE_MODEL_ENV,
+  OPENAI_COMPATIBLE_PROVIDER,
   resolveDisplayAlias,
   VERTEX_MODEL_ID_ENV,
 } from "../models.ts";
@@ -84,9 +90,59 @@ add the missing secret(s) to your GitHub repository at ${githubSecretsUrl}, then
 for full setup instructions, see https://docs.pullfrog.com/vertex`;
 }
 
+function buildOpenAICompatibleSetupError(params: {
+  owner: string;
+  name: string;
+  missing: string[];
+}): string {
+  const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
+
+  return `OpenAI-compatible model selected but required configuration is missing: ${params.missing.join(", ")}.
+
+only the API key is sensitive — add it as a secret at ${githubSecretsUrl}. everything else is plain workflow \`env:\`:
+
+  ${OPENAI_COMPATIBLE_BASE_URL_ENV}: https://your-endpoint.example.com/v1
+  ${OPENAI_COMPATIBLE_API_KEY_ENV}: \${{ secrets.${OPENAI_COMPATIBLE_API_KEY_ENV} }}
+  ${OPENAI_COMPATIBLE_MODEL_ENV}: <model-id>
+  ${OPENAI_COMPATIBLE_CONTEXT_ENV}: "128000"
+  ${OPENAI_COMPATIBLE_MAX_OUTPUT_ENV}: "16384"
+
+set the last two to the real limits of the model your endpoint serves. Pullfrog can't
+discover them — your endpoint owns the model catalog — and without them completions are
+capped at 32000 tokens (rejected outright by models with a smaller cap) and
+auto-compaction is disabled, so long runs grow until your endpoint refuses them.
+
+for full setup instructions, see https://docs.pullfrog.com/openai-compatible`;
+}
+
 function hasEnvVar(name: string): boolean {
   const value = process.env[name];
   return typeof value === "string" && value.length > 0;
+}
+
+/** the token limits are numbers, so presence isn't enough — `128k` must fail here. */
+function hasPositiveNumberEnvVar(name: string): boolean {
+  return Number(process.env[name]) > 0;
+}
+
+function validateOpenAICompatibleSetup(params: { owner: string; name: string }): void {
+  const missing: string[] = [];
+  if (!hasEnvVar(OPENAI_COMPATIBLE_BASE_URL_ENV)) missing.push(OPENAI_COMPATIBLE_BASE_URL_ENV);
+  if (!hasEnvVar(OPENAI_COMPATIBLE_API_KEY_ENV)) missing.push(OPENAI_COMPATIBLE_API_KEY_ENV);
+  if (!hasEnvVar(OPENAI_COMPATIBLE_MODEL_ENV)) missing.push(OPENAI_COMPATIBLE_MODEL_ENV);
+  // required, not optional: opencode has no catalog metadata for a user-supplied
+  // endpoint, and an undeclared limit both caps completions at 32000 and disables
+  // auto-compaction for the whole run. see openAICompatibleLimit().
+  if (!hasPositiveNumberEnvVar(OPENAI_COMPATIBLE_CONTEXT_ENV))
+    missing.push(OPENAI_COMPATIBLE_CONTEXT_ENV);
+  if (!hasPositiveNumberEnvVar(OPENAI_COMPATIBLE_MAX_OUTPUT_ENV))
+    missing.push(OPENAI_COMPATIBLE_MAX_OUTPUT_ENV);
+
+  if (missing.length > 0) {
+    throw new Error(
+      buildOpenAICompatibleSetupError({ owner: params.owner, name: params.name, missing })
+    );
+  }
 }
 
 function validateBedrockSetup(params: { owner: string; name: string }): void {
@@ -147,6 +203,17 @@ export function validateAgentApiKey(params: {
     }
     if (alias?.routing === "vertex") {
       validateVertexSetup({ owner: params.owner, name: params.name });
+      return;
+    }
+
+    // openai-compatible keeps its `openai-compatible/` provider prefix through
+    // resolution (slug `openai-compatible/byok` → specifier
+    // `openai-compatible/<OPENAI_COMPATIBLE_MODEL>`), so one prefix check covers
+    // both forms. its custom provider isn't in the opencode `authorized`
+    // snapshot (it's injected into OPENCODE_CONFIG_CONTENT only at run time), so
+    // validate the env-supplied base URL / key / model directly.
+    if (params.model.startsWith(`${OPENAI_COMPATIBLE_PROVIDER}/`)) {
+      validateOpenAICompatibleSetup({ owner: params.owner, name: params.name });
       return;
     }
 

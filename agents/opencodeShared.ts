@@ -6,7 +6,14 @@
 // then it keeps both runners synchronized so a config drift can't make v1 a
 // silently-broken fallback.
 
-import { modelAliases } from "../models.ts";
+import {
+  modelAliases,
+  OPENAI_COMPATIBLE_API_KEY_ENV,
+  OPENAI_COMPATIBLE_BASE_URL_ENV,
+  OPENAI_COMPATIBLE_CONTEXT_ENV,
+  OPENAI_COMPATIBLE_MAX_OUTPUT_ENV,
+  OPENAI_COMPATIBLE_PROVIDER,
+} from "../models.ts";
 import { log } from "../utils/cli.ts";
 import { installFromNpmTarball } from "../utils/install.ts";
 import { getAuthorizedModels } from "../utils/openCodeModels.ts";
@@ -41,6 +48,65 @@ export function geminiHighThinkingOverrides(): Record<string, { options: object 
         { options: { thinkingConfig: { thinkingLevel: "high" } } },
       ])
   );
+}
+
+interface OpenAICompatibleProviderEntry {
+  npm: string;
+  name: string;
+  options: { baseURL: string | undefined; apiKey: string | undefined };
+  models: Record<string, { name: string; limit: ModelLimit }>;
+}
+
+interface ModelLimit {
+  context: number;
+  output: number;
+}
+
+/**
+ * Per-model token limits for the injected provider. opencode carries no models.dev
+ * metadata for a user-supplied endpoint, so an absent `limit` defaults to
+ * `{context: 0, output: 0}` (`provider/provider.ts`) and that zero costs two
+ * things: `maxOutputTokens` falls back to `OUTPUT_TOKEN_MAX` and sends
+ * `max_tokens: 32000` — rejected by any model with a smaller completion cap
+ * (gpt-4o-mini: "max_tokens is too large: 32000. This model supports at most
+ * 16384") — and `isOverflow` short-circuits on `limit.context === 0`
+ * (`session/overflow.ts`), silently disabling auto-compaction for the whole run.
+ *
+ * Both env vars are therefore required by `validateOpenAICompatibleSetup`, which
+ * runs before the agent and rejects non-numeric values, so they parse here.
+ */
+function openAICompatibleLimit(): ModelLimit {
+  return {
+    context: Number(process.env[OPENAI_COMPATIBLE_CONTEXT_ENV]),
+    output: Number(process.env[OPENAI_COMPATIBLE_MAX_OUTPUT_ENV]),
+  };
+}
+
+/**
+ * OpenAI-compatible provider block for OPENCODE_CONFIG_CONTENT. opencode has no
+ * native provider for an arbitrary gateway, so inject one via
+ * `@ai-sdk/openai-compatible` when the run targets `openai-compatible/<model>`;
+ * `{}` otherwise so the caller can spread it unconditionally. base URL + key are
+ * guaranteed present by `validateOpenAICompatibleSetup`.
+ */
+export function openAICompatibleProvider(
+  model: string | undefined
+): Record<string, OpenAICompatibleProviderEntry> {
+  const prefix = `${OPENAI_COMPATIBLE_PROVIDER}/`;
+  if (!model?.startsWith(prefix)) return {};
+  const modelId = model.slice(prefix.length);
+  return {
+    [OPENAI_COMPATIBLE_PROVIDER]: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "OpenAI-compatible",
+      options: {
+        // trailing slash would double up against opencode's `/chat/completions` join
+        baseURL: process.env[OPENAI_COMPATIBLE_BASE_URL_ENV]?.replace(/\/$/, ""),
+        apiKey: process.env[OPENAI_COMPATIBLE_API_KEY_ENV],
+      },
+      models: { [modelId]: { name: modelId, limit: openAICompatibleLimit() } },
+    },
+  };
 }
 
 // OpenRouter sub-providers that serve Kimi K2 WITHOUT Moonshot's Enforcer

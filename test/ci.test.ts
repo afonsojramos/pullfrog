@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { agents } from "../agents/index.ts";
 import type { WorkflowPermissions } from "../external.ts";
-import { providers } from "../models.ts";
+import { OPENAI_COMPATIBLE_PROVIDER, providers } from "../models.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const actionDir = join(__dirname, "..");
@@ -58,11 +58,17 @@ const agnosticTests = getTestNamesFromDir("agnostic");
 const adhocTests = getTestNamesFromDir("adhoc");
 
 // all provider API key names + managed credentials (e.g. Codex auth blob)
-// + GITHUB_TOKEN + model overrides
+// + GITHUB_TOKEN + model overrides. the openai-compatible provider carries no
+// Pullfrog-managed key, so there's nothing to wire into the CI env blocks —
+// exclude it. bedrock/vertex are routing too but CI-wired with real test creds.
+const isUncatalogedByokProvider = (p: (typeof providers)[keyof typeof providers]) =>
+  Object.values(p.models).every((m) => m.routing === OPENAI_COMPATIBLE_PROVIDER);
 const expectedAgentEnvVars = [
   "GITHUB_TOKEN",
   ...new Set(
-    Object.values(providers).flatMap((p) => [...p.envVars, ...(p.managedCredentials ?? [])])
+    Object.values(providers)
+      .filter((p) => !isUncatalogedByokProvider(p))
+      .flatMap((p) => [...p.envVars, ...(p.managedCredentials ?? [])])
   ),
   "PULLFROG_MODEL",
 ].sort();

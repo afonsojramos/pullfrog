@@ -15,7 +15,7 @@
  * throws and `runErrorRenderer.ts` re-surfaces on both run surfaces.
  */
 
-import { resolveOpenRouterModel } from "../models.ts";
+import { OPENAI_COMPATIBLE_PROVIDER, resolveOpenRouterModel } from "../models.ts";
 import { getApiUrl } from "./apiUrl.ts";
 
 export type ModelAccessReason = "oss" | "byok_no_key" | "router";
@@ -50,11 +50,18 @@ export function decideModelAccess(input: {
 }): ModelAccessDecision {
   if (!input.modelExplicit || !input.model) return { kind: "ok" };
 
-  // raw routing slugs (bedrock/vertex — no provider/model slash) are validated
-  // by their own setup checks, not the opencode `authorized` snapshot.
+  // raw routing slugs (bedrock/vertex — no provider/model slash) and the
+  // openai-compatible backend (provider-prefixed but absent from the opencode
+  // `authorized` snapshot) are validated by their own setup checks. discriminate
+  // openai-compatible on the RESOLVED specifier, matching `validateAgentApiKey`:
+  // both the catalog slug and a raw `openai-compatible/<id>` specifier resolve to
+  // the same prefixed form, so one check covers both and the two gates can't
+  // disagree about what they'll admit.
   const byokAuthorized =
     !!input.resolvedModel &&
-    (input.authorized.has(input.resolvedModel) || !input.resolvedModel.includes("/"));
+    (input.authorized.has(input.resolvedModel) ||
+      !input.resolvedModel.includes("/") ||
+      input.resolvedModel.startsWith(`${OPENAI_COMPATIBLE_PROVIDER}/`));
 
   if (input.proxyActive) {
     const target = resolveOpenRouterModel(input.model);

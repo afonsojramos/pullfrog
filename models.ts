@@ -23,7 +23,7 @@
  * env var and routes to claude-code for Anthropic IDs or opencode for
  * everything else.
  */
-export type ModelRouting = "bedrock" | "vertex";
+export type ModelRouting = "bedrock" | "vertex" | "openai-compatible";
 
 export interface ModelAlias {
   /** stable alias stored in DB, e.g. "anthropic/claude-opus" */
@@ -478,6 +478,28 @@ export const providers = {
       },
     },
   }),
+  "openai-compatible": provider({
+    // "Custom" is the picker group, "OpenAI-compatible" the entry under it, so the
+    // menu reads `Custom › OpenAI-compatible` and a second custom backend (a
+    // different wire format, say) slots in beside it without a rename. the
+    // provider KEY stays `openai-compatible` — it's the stored slug and the
+    // `OPENAI_COMPATIBLE_*` env prefix, so this is display-only.
+    displayName: "Custom",
+    // bring-your-own generic OpenAI-compatible endpoint — Cloudflare AI Gateway,
+    // Alibaba DashScope, self-hosted vLLM, or any compatible gateway. base URL +
+    // key + model ID are all supplied via env; nothing is cataloged or bumped.
+    envVars: ["OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_MODEL"],
+    models: {
+      // single routing entry — the actual model ID is read from
+      // OPENAI_COMPATIBLE_MODEL at run time and the provider is materialized
+      // via `@ai-sdk/openai-compatible`.
+      byok: {
+        displayName: "OpenAI-compatible",
+        resolve: "openai-compatible",
+        routing: "openai-compatible",
+      },
+    },
+  }),
   openrouter: provider({
     displayName: "OpenRouter",
     envVars: ["OPENROUTER_API_KEY"],
@@ -828,6 +850,32 @@ export const BEDROCK_MODEL_ID_ENV = "BEDROCK_MODEL_ID";
 
 /** env var that supplies the Vertex AI model ID for the `vertex/byok` slug. */
 export const VERTEX_MODEL_ID_ENV = "VERTEX_MODEL_ID";
+
+/** provider key + slug prefix for the generic OpenAI-compatible BYOK backend. */
+export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
+/** base URL of the user's OpenAI-compatible endpoint (e.g. a Cloudflare AI Gateway URL). */
+export const OPENAI_COMPATIBLE_BASE_URL_ENV = "OPENAI_COMPATIBLE_BASE_URL";
+/** API key/token for the user's OpenAI-compatible endpoint — the one sensitive secret. */
+export const OPENAI_COMPATIBLE_API_KEY_ENV = "OPENAI_COMPATIBLE_API_KEY";
+/** model ID served by the endpoint, supplied for the `openai-compatible/byok` slug. */
+export const OPENAI_COMPATIBLE_MODEL_ENV = "OPENAI_COMPATIBLE_MODEL";
+/**
+ * context-window size of the endpoint's model. required — `validateOpenAICompatibleSetup`
+ * rejects the run pre-agent when it's unset or non-numeric. it also gates
+ * auto-compaction: opencode's `isOverflow` short-circuits when
+ * `limit.context === 0`, which would otherwise let a long session grow until the
+ * endpoint rejects it on context length.
+ */
+export const OPENAI_COMPATIBLE_CONTEXT_ENV = "OPENAI_COMPATIBLE_CONTEXT";
+/**
+ * max completion tokens the endpoint's model accepts. required — see
+ * OPENAI_COMPATIBLE_CONTEXT_ENV. opencode has no models.dev metadata for a
+ * user-supplied endpoint, and an undeclared limit makes it send
+ * `max_tokens: 32000`, which most models reject outright (gpt-4o and gpt-4o-mini
+ * cap at 16384, many open models at 4096/8192). opencode's `limit` requires
+ * `context` + `output` together, so the pair is validated and emitted as a unit.
+ */
+export const OPENAI_COMPATIBLE_MAX_OUTPUT_ENV = "OPENAI_COMPATIBLE_MAX_OUTPUT";
 
 /**
  * the Bedrock model ID passed to claude-code or opencode is whatever the
