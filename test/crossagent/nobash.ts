@@ -45,7 +45,7 @@ export const test: TestRunnerOptions = {
   env: { PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1" },
   coverage: [
     "action/mcp/shell.ts",
-    "action/agents/{claude,opencode,opencode_v2}.ts",
+    "action/agents/{claude,opencode}.ts",
     "action/agents/claudePretoolGate.ts",
   ],
 };

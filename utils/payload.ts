@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import * as core from "@actions/core";
 import { type } from "arktype";
-import type { AuthorPermission, PayloadEvent } from "../external.ts";
+import { type AuthorPermission, type PayloadEvent, parseEffortPosition } from "../external.ts";
 import packageJson from "../package.json" with { type: "json" };
 import { log } from "./cli.ts";
 import type { RepoSettings } from "./runContext.ts";
@@ -28,6 +28,7 @@ export const JsonPayload = type({
   version: "string",
   "model?": "string | undefined",
   "modelExplicit?": "boolean | undefined",
+  "effort?": "number | string | undefined",
   prompt: "string",
   "triggerer?": "string | undefined",
 
@@ -72,6 +73,7 @@ export const Inputs = type({
   "prompt?": type.string.or("undefined"),
   "prompt_file?": type.string.or("undefined"),
   "model?": type.string.or("undefined"),
+  "effort?": type.string.or("undefined"),
   "timeout?": type.string.or("undefined"),
   "push?": PushPermissionInput.or("undefined"),
   "shell?": ShellPermissionInput.or("undefined"),
@@ -149,6 +151,7 @@ function resolvePromptFile(input: string): string {
 function resolveNonPromptInputs() {
   return Inputs.omit("prompt", "prompt_file").assert({
     model: core.getInput("model") || undefined,
+    effort: core.getInput("effort") || undefined,
     timeout: core.getInput("timeout") || undefined,
     cwd: core.getInput("cwd") || undefined,
     push: core.getInput("push") || undefined,
@@ -185,6 +188,13 @@ export function resolvePayload(
 
   const model = jsonPayload?.model ?? inputs.model ?? repoSettings.model ?? undefined;
 
+  // same precedence as model. carried as a POSITION on [0,1] rather than a rung
+  // name, so it stays meaningful if the model changes underneath it. an
+  // unparseable value is dropped rather than guessed — unset means the harness
+  // applies the model's own default.
+  const rawEffort = jsonPayload?.effort ?? inputs.effort ?? repoSettings.effort ?? undefined;
+  const effort = rawEffort === undefined ? undefined : parseEffortPosition(String(rawEffort));
+
   // determine shell permission - strictest setting wins
   // precedence: disabled > restricted > enabled
   // non-collaborators always get at least "restricted"
@@ -216,6 +226,7 @@ export function resolvePayload(
     // explicit only when the model came from a per-run override flag (carried on
     // the JSON payload). a GHA `model` input or the repo default is not explicit.
     modelExplicit: jsonPayload?.modelExplicit ?? false,
+    effort,
     prompt,
     triggerer:
       jsonPayload?.triggerer ??

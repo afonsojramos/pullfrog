@@ -30,6 +30,7 @@ import { preflightClaudeSubscription } from "../utils/claudeSubscription.ts";
 import { formatJsonValue, log } from "../utils/cli.ts";
 import { installFromNpmTarball } from "../utils/install.ts";
 import { findProviderErrorMatch } from "../utils/providerErrors.ts";
+import { resolveRunEffort } from "../utils/runEffort.ts";
 import { addSkill, installBundledSkills } from "../utils/skills.ts";
 import {
   DEFAULT_MAX_RETAINED_BYTES,
@@ -188,14 +189,57 @@ function stripProviderPrefix(specifier: string): string {
   return slashIndex > 0 ? specifier.slice(slashIndex + 1) : specifier;
 }
 
-// `high` is the model's tuned default ("equivalent to not setting the parameter"
-// per Anthropic docs). `max` is "absolute maximum capability with no constraints
-// on token spending" — meaningfully slower and burns more thinking budget per
-// turn. We default everyone to `high`; PRs that genuinely need full-send can
-// opt in via a future per-run override rather than paying the wall-time cost on
-// every Opus run.
-function resolveEffort(_model: string | undefined): "high" {
-  return "high";
+// ── effort ────────────────────────────────────────────────────────────────────
+
+// env var claude-code reads INSTEAD of `--effort` — it wins over the flag, over
+// settings, and over the model default (`unset`/`auto` drop effort entirely).
+const CLAUDE_EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL";
+
+/**
+ * levels the pinned binary's `--effort` will accept, verbatim from
+ * `claude --help` on 2.1.150 and confirmed by probing each one. anything else is
+ * an arg-parse failure — exit 1, before any API call — so this is the last gate
+ * before a rung reaches the CLI. rungs come from models.dev, a different source
+ * from this enum, so the two are free to drift.
+ *
+ * `ultra` deliberately absent: the binary carries it internally (the request
+ * builder folds it to `max`, and the interactive picker offers it when the model
+ * advertises it) but the ARG PARSER rejects it — `--effort ultra` exits 1. same
+ * for `ultracode`, which needs CLI >= 2.1.203. reading the binary's strings will
+ * suggest otherwise; probe the flag instead.
+ *
+ * REVALIDATE ON EVERY claude-code BUMP.
+ */
+const CLAUDE_CODE_EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+
+/** capability tokens claude-code gates `--effort` and adaptive thinking on. */
+function effortCapabilities(levels: readonly string[]): string {
+  const topRungs = levels.filter((l) => l === "xhigh" || l === "max").map((l) => `${l}_effort`);
+  return ["effort", ...topRungs, "adaptive_thinking", "thinking"].join(",");
+}
+
+/**
+ * restore effort on the classic Bedrock/Vertex routes, where claude-code strips
+ * `--effort` and falls back to the legacy `thinking.budget_tokens` shape that
+ * Opus 4.7+ 400s on, for every model its pinned build doesn't hardcode.
+ *
+ * of the four slots the capability table walks, `ANTHROPIC_CUSTOM_MODEL_OPTION`
+ * is the one that doesn't also redefine what "opus"/"sonnet" mean for the rest
+ * of the session; the lookup is plain model-ID equality, so it needs
+ * `ANTHROPIC_MODEL` to name the same ID. callers scope this to IDs naming an
+ * alias we catalog, since over-claiming pushes a model back onto a shape it
+ * 400s on. operator-set values always win. see wiki/effort.md.
+ */
+function applyHostedEffortCapabilities(params: {
+  env: Record<string, string | undefined>;
+  modelId: string;
+  levels: readonly string[];
+}): void {
+  params.env.ANTHROPIC_MODEL ||= params.modelId;
+  params.env.ANTHROPIC_CUSTOM_MODEL_OPTION ||= params.modelId;
+  params.env.ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES ||= effortCapabilities(
+    params.levels
+  );
 }
 
 // ── NDJSON event types ─────────────────────────────────────────────────────────
@@ -1072,7 +1116,7 @@ export const claude = agent({
     installBundledSkills({ home: homeEnv.HOME });
 
     const mcpConfigPath = writeMcpConfig(ctx);
-    const effort = resolveEffort(model);
+    const effort = resolveRunEffort(ctx);
 
     // PreToolUse gate that hard-blocks state-mutating MCP tool calls from
     // subagents (the `agent_id` field is non-empty in the hook input only
@@ -1102,13 +1146,23 @@ export const claude = agent({
       "--settings",
       pretoolGate.settingsPath,
       "--verbose",
-      "--effort",
-      effort,
       "--disallowedTools",
       CLAUDE_DISALLOWED_TOOLS,
       "--agents",
       buildAgentsJson(),
     ];
+
+    // an out-of-range level is a hard arg-parse failure before any API call, so
+    // a model with no ladder gets no flag at all rather than a guessed level.
+    // rungs are whatever models.dev publishes, which is a different source from
+    // this CLI's enum — so drop anything the pinned binary won't take rather
+    // than let a catalog change exit the run. revalidate CLAUDE_CODE_EFFORTS on
+    // every claude-code bump; the binary gates `ultra` and could add more.
+    if (effort.rung && !CLAUDE_CODE_EFFORTS.includes(effort.rung)) {
+      log.warning(`» effort ${effort.rung} not sent — claude-code doesn't accept that level`);
+    } else if (effort.rung) {
+      baseArgs.push("--effort", effort.rung);
+    }
 
     if (model) {
       baseArgs.push("--model", model);
@@ -1129,7 +1183,7 @@ export const claude = agent({
     // carries it through and we don't disturb it.
     const repoDir = process.cwd();
 
-    // PWD must match the spawn cwd (see opencode_v2.ts for the analogous fix).
+    // PWD must match the spawn cwd (see opencode.ts for the analogous fix).
     // claude-code 2.1.x reads `process.env.PWD` and registers it as a "session"
     // additional-working-directory when it differs from `process.cwd()` (per
     // the bundled cli.js — `let H=process.env.PWD; if(H && H !== Y7() && ...)
@@ -1151,6 +1205,9 @@ export const claude = agent({
     if (isVertexRoute) {
       applyClaudeVertexEnv(env);
       env.ANTHROPIC_MODEL = specifier;
+    }
+    if ((isBedrockRoute || isVertexRoute) && specifier && effort.alias?.effort) {
+      applyHostedEffortCapabilities({ env, modelId: specifier, levels: effort.alias.effort });
     }
 
     // claude-code's `Vw()` resolver prefers ANTHROPIC_API_KEY over the OAuth
@@ -1177,7 +1234,16 @@ export const claude = agent({
       }
     }
 
-    log.info(`» effort: ${effort}`);
+    // the effective level is already in the startup block; only the override is
+    // new information. we keep passing `--effort` rather than setting the env
+    // var, so a customer's own value wins — same rule as every other
+    // workflow-provided env — but a silent win would make the setting a lie.
+    const effortEnvOverride = env[CLAUDE_EFFORT_ENV]?.trim();
+    if (effortEnvOverride) {
+      log.warning(
+        `» ${CLAUDE_EFFORT_ENV}=${effortEnvOverride} in the run env overrides the effort setting for this session`
+      );
+    }
     log.debug(`» starting Pullfrog (Claude Code): ${cliPath} ${baseArgs.join(" ")}`);
     log.debug(`» working directory: ${repoDir}`);
 

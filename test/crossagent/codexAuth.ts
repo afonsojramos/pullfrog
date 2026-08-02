@@ -104,7 +104,7 @@ export const test: TestRunnerOptions = {
     "action/utils/codexHome.ts",
     "action/utils/codexRefreshDetect.ts",
     "action/entryPost.ts",
-    "action/agents/{opencode,opencode_v2}.ts",
+    "action/agents/{opencode}.ts",
   ],
   // forks + contributors without the Codex secret skip cleanly rather than
   // failing on `auth_materialized=✗` and (with fail-fast: true) cascading

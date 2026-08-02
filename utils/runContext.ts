@@ -27,6 +27,9 @@ export interface LearningsHeading {
 
 export interface RepoSettings {
   model: string | null;
+  // reasoning-effort position on [0,1], landed on the running model's own
+  // published ladder at resolve time. see action/effort.ts.
+  effort: number | null;
   modes: Mode[];
   setupScript: string | null;
   postCheckoutScript: string | null;
@@ -94,6 +97,7 @@ export interface RunContext {
 
 const defaultSettings: RepoSettings = {
   model: null,
+  effort: null,
   modes: [],
   setupScript: null,
   postCheckoutScript: null,

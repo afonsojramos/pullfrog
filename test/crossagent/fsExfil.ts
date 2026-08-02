@@ -151,7 +151,7 @@ export const test: TestRunnerOptions = {
   repoSetup,
   env: { PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1" },
   tags: ["security"],
-  coverage: ["action/mcp/shell.ts", "action/agents/{claude,opencode,opencode_v2}.ts"],
+  coverage: ["action/mcp/shell.ts", "action/agents/{claude,opencode}.ts"],
   // sandbox is no-op when CI != "true" (detectSandboxMethod returns "none"),
   // so the test would red-fail for the wrong reason. skip cleanly instead.
   skipIf: () =>

@@ -15,6 +15,9 @@ inputs:
   model:
     description: "Model to use — a curated slug (e.g. anthropic/claude-opus) or a raw models.dev specifier (e.g. google/gemini-3.1-flash-lite). Overrides repo settings."
     required: false
+  effort:
+    description: "Reasoning effort: low, medium, high, xhigh, max, or a position on [0,1]. Lands on the running model's own range, rounding down. Overrides repo settings."
+    required: false
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false

@@ -1,11 +1,12 @@
 /**
  * Startup log formatting for the resolver pipeline. Computes the
- * "model / agent / push / shell / timeout" block that main.ts prints
+ * "model / effort / agent / push / shell / timeout" block that main.ts prints
  * after resolving the agent + model + payload.
  */
 
 import { log } from "./cli.ts";
 import type { ResolvedPayload } from "./payload.ts";
+import { resolveRunEffort } from "./runEffort.ts";
 import { TIMEOUT_DISABLED } from "./time.ts";
 
 function resolveTimeoutForLog(timeout: string | undefined): string {
@@ -29,6 +30,25 @@ function resolveModelForLog(ctx: {
   return "auto";
 }
 
+/**
+ * a run must never silently pay for a level that didn't apply, so surface the
+ * level the harness actually sends and say so when it isn't the one requested.
+ * "no effort control" and "model we don't recognize" are distinct causes and
+ * read very differently to whoever pastes this line into a support thread.
+ */
+function resolveEffortForLog(ctx: {
+  payload: ResolvedPayload;
+  resolvedModel: string | undefined;
+}): string {
+  const effort = resolveRunEffort(ctx);
+  // this block prints before the agent starts, so an auto-select run has no
+  // model yet — the harness prints the real rung once it picks one.
+  if (!ctx.resolvedModel && !ctx.payload.proxyModel) return "pending — model not chosen yet";
+  if (!effort.alias) return "not applied — model not recognized";
+  if (!effort.rung) return "n/a (model has no effort control)";
+  return effort.configured ? effort.rung : `${effort.rung} (default)`;
+}
+
 function resolveAgentForLog(ctx: { agentName: string; resolvedModel: string | undefined }): string {
   const envAgent = process.env.PULLFROG_AGENT?.trim();
   if (envAgent && envAgent === ctx.agentName) {
@@ -41,8 +61,8 @@ function resolveAgentForLog(ctx: { agentName: string; resolvedModel: string | un
 }
 
 /**
- * Emit the startup block ("» model / agent / push / shell / timeout") after
- * the agent and model are resolved. Single side-effect; no return.
+ * Emit the startup block ("» model / effort / agent / push / shell / timeout")
+ * after the agent and model are resolved. Single side-effect; no return.
  */
 export function logRunStartup(ctx: {
   payload: ResolvedPayload;
@@ -51,6 +71,9 @@ export function logRunStartup(ctx: {
 }): void {
   log.info(
     `» model:   ${resolveModelForLog({ payload: ctx.payload, resolvedModel: ctx.resolvedModel })}`
+  );
+  log.info(
+    `» effort:  ${resolveEffortForLog({ payload: ctx.payload, resolvedModel: ctx.resolvedModel })}`
   );
   log.info(
     `» agent:   ${resolveAgentForLog({ agentName: ctx.agentName, resolvedModel: ctx.resolvedModel })}`

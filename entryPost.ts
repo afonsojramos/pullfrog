@@ -16,7 +16,7 @@
 //
 // Today's only job: detect a Codex auth refresh by diffing the on-disk
 // auth.json against the original refresh token (saved to GH Actions state
-// by action/agents/opencode_v2.ts — see also the legacy v1 file kept as
+// by action/agents/opencode.ts — see also the legacy v1 file kept as
 // reference at action/agents/opencode.ts), convert OpenCode's auth shape
 // back to Codex CLI shape, and PUT it to /api/runtime/secret.
 //

@@ -1,5 +1,5 @@
 // Shared helpers for the OpenCode agent harnesses (`./opencode.ts` v1 and
-// `./opencode_v2.ts` v2). Pure config / model-registry / install glue —
+// `./opencode.ts` v2). Pure config / model-registry / install glue —
 // nothing here touches the NDJSON event loop, which differs between v1 and v2.
 //
 // Once v1 is deleted post-burn-in this module collapses back into v2; until
@@ -33,22 +33,6 @@ export type OpenCodeConfig = {
   enabled_providers?: string[];
   [key: string]: unknown;
 };
-
-/**
- * Build the `provider.google.models[id].options` map that pins every direct-Google
- * Gemini alias to `thinkingLevel: "high"`. Sourced from the model registry so
- * adding/renaming a Google alias in `action/models.ts` flows through automatically.
- */
-export function geminiHighThinkingOverrides(): Record<string, { options: object }> {
-  return Object.fromEntries(
-    modelAliases
-      .filter((a) => a.provider === "google")
-      .map((a) => [
-        a.resolve.replace(/^google\//, ""),
-        { options: { thinkingConfig: { thinkingLevel: "high" } } },
-      ])
-  );
-}
 
 interface OpenAICompatibleProviderEntry {
   npm: string;
@@ -140,29 +124,6 @@ export function kimiOpenRouterProviderOverrides(): Record<string, { options: obj
         { options: { provider: { ignore: KIMI_ENFORCERLESS_PROVIDERS } } },
       ])
   );
-}
-
-/**
- * Build the `provider.openrouter.models[id].options` map that pins the
- * efficient-tier DeepSeek model to high reasoning effort on the OpenRouter
- * route — the funded/OSS default path. The shape must nest under `options`
- * (opencode builds `Model.options` only from the entry's `options` sub-object —
- * `provider.ts` `mergeDeep(existingModel.options, model.options)`) and use a
- * `reasoning` record (the openrouter provider forwards only `usage`/`reasoning`/
- * `promptCacheKey`); a bare `reasoningEffort` sibling is silently dropped.
- * Sourced from the registry so a resolve bump carries the override forward.
- * `high` is the ceiling OpenRouter's unified `reasoning.effort` exposes
- * (low/medium/high); DeepSeek's native `max` is only reachable via a direct
- * DeepSeek key, not the OpenRouter route.
- */
-export function deepseekHighEffortOverrides(): Record<
-  string,
-  { options: { reasoning: { effort: string } } }
-> {
-  const orModel = modelAliases
-    .find((a) => a.slug === "deepseek/deepseek-pro")
-    ?.openRouterResolve?.replace(/^openrouter\//, "");
-  return orModel ? { [orModel]: { options: { reasoning: { effort: "high" } } } } : {};
 }
 
 /**

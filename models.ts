@@ -5,6 +5,8 @@
  * bump `resolve` when a new model generation ships — the alias (slug) stays stable.
  */
 
+import { type EffortPosition, resolveRung } from "./effort.ts";
+
 // ── types ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -54,6 +56,14 @@ export interface ModelAlias {
   /** alias key (within same provider) of the cheaper sibling reviewfrog should
    * use as its lens-fanout subagent. e.g. claude-opus → "claude-sonnet". */
   subagentModel: string | undefined;
+  /** reasoning-effort rungs this model accepts on the direct route, ascending.
+   * mirrors models.dev `reasoning_options[type=effort].values`. undefined means
+   * the model has no effort control and the setting is a documented no-op. */
+  effort: readonly string[] | undefined;
+  /** effort rungs on the OpenRouter route, when they differ from `effort` (the
+   * DeepSeek/GLM top rung is `max` natively but `xhigh` via OpenRouter).
+   * undefined falls back to `effort`. */
+  openRouterEffort: readonly string[] | undefined;
   /** hide from selectable lists (UI dropdowns, CLI pickers). does NOT affect
    * resolution — for that use `fallback`. used to keep a redundant alias out of
    * pickers (e.g. the free `minimax-m2.5-free` duplicate). */
@@ -80,6 +90,10 @@ interface ModelDef {
   /** alias key (within same provider) of the cheaper sibling reviewfrog should
    * use as its lens-fanout subagent (e.g. claude-opus → "claude-sonnet"). */
   subagentModel?: string;
+  /** effort rungs accepted on the direct route, ascending — see ModelAlias.effort */
+  effort?: readonly string[];
+  /** effort rungs on the OpenRouter route when they differ — see ModelAlias.openRouterEffort */
+  openRouterEffort?: readonly string[];
   /** hide from selectable lists. does NOT affect resolution; for that use `fallback`. */
   hidden?: boolean;
 }
@@ -116,6 +130,7 @@ export const providers = {
       "claude-fable": {
         displayName: "Claude Fable",
         resolve: "anthropic/claude-fable-5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         // rolling alias: models.dev's OpenRouter mirror lags brand-new pinned
         // versions (claude-fable-5 isn't indexed yet), so track ~…-latest to
         // stay catalog-valid and auto-follow version bumps.
@@ -125,6 +140,7 @@ export const providers = {
       "claude-opus": {
         displayName: "Claude Opus",
         resolve: "anthropic/claude-opus-5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/anthropic/claude-opus-5",
         preferred: true,
         subagentModel: "claude-sonnet",
@@ -132,6 +148,7 @@ export const providers = {
       "claude-sonnet": {
         displayName: "Claude Sonnet",
         resolve: "anthropic/claude-sonnet-5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/anthropic/claude-sonnet-5",
       },
       "claude-haiku": {
@@ -149,6 +166,7 @@ export const providers = {
       gpt: {
         displayName: "GPT Sol",
         resolve: "openai/gpt-5.6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         preferred: true,
         subagentModel: "gpt-terra",
@@ -160,6 +178,7 @@ export const providers = {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
         resolve: "openai/gpt-5.6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
         subagentModel: "gpt",
       },
@@ -169,11 +188,13 @@ export const providers = {
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "openai/gpt-5.6-terra",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
       "gpt-mini": {
         displayName: "GPT Luna",
         resolve: "openai/gpt-5.6-luna",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
       // legacy aliases — openai unified the codex line into the main GPT family
@@ -203,6 +224,7 @@ export const providers = {
       o3: {
         displayName: "O3",
         resolve: "openai/o3",
+        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/openai/o3",
       },
     },
@@ -214,6 +236,7 @@ export const providers = {
       "gemini-pro": {
         displayName: "Gemini Pro",
         resolve: "google/gemini-3.1-pro-preview",
+        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/google/gemini-3.1-pro-preview",
         preferred: true,
         // Inherit (subagents stay on Pro). Google has no in-between tier;
@@ -225,6 +248,7 @@ export const providers = {
       "gemini-flash": {
         displayName: "Gemini Flash",
         resolve: "google/gemini-3.5-flash",
+        effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/google/gemini-3.5-flash",
       },
     },
@@ -236,6 +260,7 @@ export const providers = {
       grok: {
         displayName: "Grok",
         resolve: "xai/grok-4.3",
+        effort: ["none", "low", "medium", "high"],
         openRouterResolve: "openrouter/x-ai/grok-4.3",
         preferred: true,
       },
@@ -265,12 +290,16 @@ export const providers = {
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
         resolve: "deepseek/deepseek-v4-pro",
+        effort: ["high", "max"],
+        openRouterEffort: ["high", "xhigh"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
         preferred: true,
       },
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
         resolve: "deepseek/deepseek-v4-flash",
+        effort: ["high", "max"],
+        openRouterEffort: ["high", "xhigh"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-flash",
       },
       // legacy aliases — deepseek retires these on 2026-07-24; transparently
@@ -299,6 +328,7 @@ export const providers = {
       "kimi-k3": {
         displayName: "Kimi K3",
         resolve: "moonshotai/kimi-k3",
+        effort: ["low", "high", "max"],
         openRouterResolve: "openrouter/moonshotai/kimi-k3",
         preferred: true,
         subagentModel: "kimi-k2",
@@ -324,12 +354,14 @@ export const providers = {
       "claude-opus": {
         displayName: "Claude Opus",
         resolve: "opencode/claude-opus-5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/anthropic/claude-opus-5",
         subagentModel: "claude-sonnet",
       },
       "claude-sonnet": {
         displayName: "Claude Sonnet",
         resolve: "opencode/claude-sonnet-5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/anthropic/claude-sonnet-5",
       },
       "claude-haiku": {
@@ -340,6 +372,7 @@ export const providers = {
       gpt: {
         displayName: "GPT Sol",
         resolve: "opencode/gpt-5.6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         subagentModel: "gpt-terra",
       },
@@ -348,6 +381,7 @@ export const providers = {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
         resolve: "opencode/gpt-5.6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
         subagentModel: "gpt",
       },
@@ -355,11 +389,13 @@ export const providers = {
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "opencode/gpt-5.6-terra",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
       "gpt-mini": {
         displayName: "GPT Luna",
         resolve: "opencode/gpt-5.6-luna",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
       // legacy aliases — see openai provider above for context.
@@ -385,12 +421,14 @@ export const providers = {
       "gemini-pro": {
         displayName: "Gemini Pro",
         resolve: "opencode/gemini-3.1-pro",
+        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/google/gemini-3.1-pro-preview",
         // Inherit — see google/gemini-pro for rationale.
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
         resolve: "opencode/gemini-3.5-flash",
+        effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/google/gemini-3.5-flash",
       },
       "kimi-k2": {
@@ -409,6 +447,7 @@ export const providers = {
       "gpt-5-nano": {
         displayName: "GPT Nano",
         resolve: "opencode/gpt-5-nano",
+        effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/openai/gpt-5-nano",
       },
       "mimo-v2-pro-free": {
@@ -435,6 +474,8 @@ export const providers = {
       "glm-5.1": {
         displayName: "GLM 5.2",
         resolve: "opencode-go/glm-5.2",
+        effort: ["high", "max"],
+        openRouterEffort: ["high", "xhigh"],
         openRouterResolve: "openrouter/z-ai/glm-5.2",
         preferred: true,
       },
@@ -511,6 +552,7 @@ export const providers = {
       "claude-opus": {
         displayName: "Claude Opus",
         resolve: "openrouter/~anthropic/claude-opus-latest",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/~anthropic/claude-opus-latest",
         preferred: true,
         subagentModel: "claude-sonnet",
@@ -518,6 +560,7 @@ export const providers = {
       "claude-sonnet": {
         displayName: "Claude Sonnet",
         resolve: "openrouter/~anthropic/claude-sonnet-latest",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/~anthropic/claude-sonnet-latest",
       },
       "claude-haiku": {
@@ -532,6 +575,7 @@ export const providers = {
       gpt: {
         displayName: "GPT Sol",
         resolve: "openrouter/openai/gpt-5.6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         subagentModel: "gpt-terra",
       },
@@ -540,6 +584,7 @@ export const providers = {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
         resolve: "openrouter/openai/gpt-5.6-sol-pro",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
         subagentModel: "gpt",
       },
@@ -547,11 +592,13 @@ export const providers = {
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "openrouter/openai/gpt-5.6-terra",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
       "gpt-mini": {
         displayName: "GPT Luna",
         resolve: "openrouter/openai/gpt-5.6-luna",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
       // legacy aliases — see openai provider for context.
@@ -577,32 +624,38 @@ export const providers = {
       "o4-mini": {
         displayName: "O4 Mini",
         resolve: "openrouter/openai/o4-mini",
+        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/openai/o4-mini",
       },
       "gemini-pro": {
         displayName: "Gemini Pro",
         resolve: "openrouter/~google/gemini-pro-latest",
+        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/~google/gemini-pro-latest",
         // Inherit — see google/gemini-pro for rationale.
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
         resolve: "openrouter/~google/gemini-flash-latest",
+        effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/~google/gemini-flash-latest",
       },
       grok: {
         displayName: "Grok",
         resolve: "openrouter/x-ai/grok-4.3",
+        effort: ["none", "low", "medium", "high"],
         openRouterResolve: "openrouter/x-ai/grok-4.3",
       },
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
         resolve: "openrouter/deepseek/deepseek-v4-pro",
+        effort: ["high", "xhigh"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
       },
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
         resolve: "openrouter/deepseek/deepseek-v4-flash",
+        effort: ["high", "xhigh"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-flash",
       },
       // legacy alias — deepseek retires this on 2026-07-24; transparently
@@ -621,6 +674,7 @@ export const providers = {
       "kimi-k3": {
         displayName: "Kimi K3",
         resolve: "openrouter/moonshotai/kimi-k3",
+        effort: ["low", "high", "max"],
         openRouterResolve: "openrouter/moonshotai/kimi-k3",
       },
       // slug pins the m2 line for DB stability; resolve tracks the current m2.7.
@@ -703,6 +757,8 @@ export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
       // here to a fully-qualified slug so callers can look up the target alias
       // directly without re-deriving the provider.
       subagentModel: def.subagentModel ? `${providerKey}/${def.subagentModel}` : undefined,
+      effort: def.effort,
+      openRouterEffort: def.openRouterEffort,
       hidden: def.hidden ?? false,
     }))
 );
@@ -716,8 +772,8 @@ export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
  * (CLI resolve, OpenRouter resolve, footer label) handles them transparently.
  *
  * `efficient` mirrors the OSS/default subsidy model (DeepSeek V4 Pro — beats
- * Kimi K2.7 on agentic-review quality at ~4-5x lower cost, run at high
- * reasoning effort via `deepseekHighEffortOverrides`); `intelligent` is the
+ * Kimi K2.7 on agentic-review quality at ~4-5x lower cost, run at whatever
+ * effort the repo asks for, clamped to its published ladder); `intelligent` is the
  * frontier pick (Claude Opus). a `null` model means the tier hasn't been
  * pinned: callers default by card status via `defaultAutoTier`.
  */
@@ -825,6 +881,40 @@ export function resolveCliModel(slug: string): string | undefined {
  */
 export function resolveOpenRouterModel(slug: string): string | undefined {
   return resolveDisplayAlias(slug)?.openRouterResolve;
+}
+
+// ── effort ─────────────────────────────────────────────────────────────────────
+
+/**
+ * the effort rungs `slug` accepts on the route being used, or undefined when the
+ * model has no effort control at all. walks the fallback chain, so a deprecated
+ * slug is judged by the model that actually runs. drives both the console's
+ * level list and the runtime clamp, so the two can't disagree.
+ */
+export function getModelEffortLevels(params: {
+  slug: string;
+  useOpenRouter: boolean;
+}): readonly string[] | undefined {
+  const alias = resolveDisplayAlias(params.slug);
+  if (!alias) return undefined;
+  if (params.useOpenRouter) return alias.openRouterEffort ?? alias.effort;
+  return alias.effort;
+}
+
+/**
+ * the rung a run actually sends: a position landed on this model's own published
+ * ladder. the result is always a rung the model offers, so there is no arithmetic
+ * anywhere that can produce a level it doesn't have. undefined means the model
+ * publishes no rungs and the harness gets no flag.
+ */
+export function resolveModelRung(params: {
+  slug: string;
+  position: EffortPosition;
+  useOpenRouter: boolean;
+}): string | undefined {
+  const published = getModelEffortLevels(params);
+  if (!published) return undefined;
+  return resolveRung({ position: params.position, published });
 }
 
 // ── default proxy model ──────────────────────────────────────────────────────────

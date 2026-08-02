@@ -346,6 +346,12 @@ export async function main(): Promise<MainResult> {
     if (access.kind === "proxy") payload.proxyModel = access.target;
     if (access.kind === "byok") payload.proxyModel = undefined;
 
+    // a subsidised run is Pullfrog's spend, so it takes the floor of whatever
+    // ladder the subsidy model publishes — `high` on DeepSeek, matching what
+    // every OSS run got before this setting existed. a position rather than a
+    // rung name, so it holds if the subsidy model changes.
+    if (runContext.oss && payload.proxyModel) payload.effort = 0;
+
     const resolvedModel = payload.proxyModel ? undefined : resolveModel({ slug: payload.model });
 
     vertexCredentials = materializeVertexCredentials({ model: resolvedModel });
@@ -358,7 +364,7 @@ export async function main(): Promise<MainResult> {
     // runs that derive the target from proxyModel). matching priority with
     // resolveModelForLog so the "Using `…`" badge reflects what actually ran.
     // the opencode agent refines this from `rawModel` once it auto-selects (a
-    // pick main.ts can't know — see opencode_v2.ts), so auto-select runs persist
+    // pick main.ts can't know — see opencode.ts), so auto-select runs persist
     // their real model rather than this placeholder.
     const effectiveModel = payload.proxyModel ?? resolvedModel ?? payload.model;
     // surface it in comment/review footers and persist it on the end-of-run PATCH.

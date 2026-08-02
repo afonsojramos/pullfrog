@@ -4,6 +4,8 @@
  * Other files in action/ re-export from this file for backward compatibility.
  */
 
+import type { EffortPosition } from "./effort.ts";
+
 // mcp name constant
 export const pullfrogMcpName = "pullfrog";
 
@@ -26,6 +28,18 @@ export function formatMcpToolRef(agentId: AgentId, toolName: string): string {
   }
 }
 
+// reasoning effort lives in effort.ts — see wiki/effort.md
+export type { EffortPosition } from "./effort.ts";
+export {
+  DEFAULT_EFFORT_POSITION,
+  EFFORT_ALIASES,
+  isEffortPosition,
+  offeredRungs,
+  parseEffortPosition,
+  resolveRung,
+  rungLabel,
+  rungPosition,
+} from "./effort.ts";
 // model alias registry lives in models.ts — re-exported here for shared access
 export type { AutoTier, ModelAlias, ModelProvider, ProviderConfig } from "./models.ts";
 export {
@@ -34,6 +48,7 @@ export {
   DEFAULT_PROXY_MODEL,
   defaultAutoTier,
   getAutoSelectHintModel,
+  getModelEffortLevels,
   getModelEnvVars,
   getModelManagedCredentials,
   getModelProvider,
@@ -46,6 +61,7 @@ export {
   resolveAutoTier,
   resolveCliModel,
   resolveDisplayAlias,
+  resolveModelRung,
   resolveModelSlug,
   resolveOpenRouterModel,
 } from "./models.ts";
@@ -308,6 +324,8 @@ export interface WriteablePayload {
    * baseInstructions flag) keeps the soft-fallback safety net. see modelAccess.ts.
    */
   modelExplicit?: boolean | undefined;
+  /** reasoning-effort position on [0,1]; 0 is the model's cheapest rung, 1 its priciest */
+  effort?: EffortPosition | undefined;
   /** the user's actual request (body if @pullfrog tagged) */
   prompt: string;
   /** github username of the human who triggered this workflow run */

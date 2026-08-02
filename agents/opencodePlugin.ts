@@ -34,7 +34,7 @@
  * plugin — `buildOpencodeSubagentGateSource` below — because it's the
  * load-bearing security fence and must ship into both opencode harnesses,
  * whereas this events re-emitter is only needed by the legacy `opencode.ts`
- * CLI-parsing path (the active `opencode_v2.ts` reads subagent events directly
+ * CLI-parsing path (the active `opencode.ts` reads subagent events directly
  * off the SDK event stream, so it installs ONLY the gate plugin). Deny-list
  * source of truth: `action/agents/subagentToolGates.ts`.
  *
@@ -152,7 +152,7 @@ export default async function pullfrogEventsPlugin() {
  * Standalone subagent gate plugin written to
  * `<XDG_CONFIG_HOME>/opencode/plugin/pullfrog-subagent-gate.ts`. Installed by
  * BOTH opencode harnesses (the legacy `opencode.ts` and the active in-process
- * `opencode_v2.ts`) — the gate is the load-bearing security fence, so it ships
+ * `opencode.ts`) — the gate is the load-bearing security fence, so it ships
  * independently of the events re-emitter above (which v2 doesn't need).
  *
  * Hard-blocks state-mutating MCP tool calls originating from a subagent

@@ -82,6 +82,7 @@ async function dispatchFollowUpReReview(ctx: ToolContext, reviewedSha: string): 
     "~pullfrog": true,
     version: ctx.payload.version,
     model: ctx.payload.model,
+    effort: ctx.payload.effort,
     prompt: "",
     eventInstructions: RE_REVIEW_PREAMBLE,
     event,

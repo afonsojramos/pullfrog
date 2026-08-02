@@ -82,9 +82,11 @@ async function plan(slug: string): Promise<Plan> {
     });
     // claude expects a bare model id (e.g. "claude-sonnet-5"), not "anthropic/claude-sonnet-5"
     const bareModel = cliModel.split("/").slice(1).join("/");
-    // mirror production: claude.ts always passes `--effort high` (resolveEffort).
-    // newer Opus (4.8+) rejects the CLI's default `thinking.type.enabled` shape
-    // with a 400 and requires the adaptive-thinking API that `--effort` selects.
+    // mirror production: claude.ts passes `--effort <level>` for every model with
+    // an effort ladder. newer Opus (4.8+) rejects the CLI's legacy
+    // `thinking.type.enabled` shape with a 400 — `--effort` only sets
+    // `output_config.effort`, but on a model whose capabilities the CLI knows,
+    // passing it means the CLI is on the adaptive-thinking path too.
     return {
       agent: "claude",
       cliPath,
@@ -96,7 +98,7 @@ async function plan(slug: string): Promise<Plan> {
     packageName: "opencode-ai",
     version: getDevDependencyVersion("opencode-ai"),
     // v1.14+: postinstall.mjs renames the platform-specific binary to
-    // `bin/opencode.exe` for every OS — see action/agents/opencode_v2.ts.
+    // `bin/opencode.exe` for every OS — see action/agents/opencode.ts.
     executablePath: "bin/opencode.exe",
     installDependencies: true,
   });

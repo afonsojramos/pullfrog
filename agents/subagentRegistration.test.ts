@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const claudeSource = readFileSync(join(__dirname, "claude.ts"), "utf-8");
 const opencodeSharedSource = readFileSync(join(__dirname, "opencodeShared.ts"), "utf-8");
-const opencodeV2Source = readFileSync(join(__dirname, "opencode_v2.ts"), "utf-8");
+const opencodeV2Source = readFileSync(join(__dirname, "opencode.ts"), "utf-8");
 
 /**
  * The Claude Code `--agents` JSON and OpenCode `agent` config block are the

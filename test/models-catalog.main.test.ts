@@ -25,6 +25,7 @@ type ModelsDevModel = {
   status?: string;
   release_date?: string;
   cost?: { input?: number; output?: number };
+  reasoning_options?: { type: string; values?: string[] }[];
 };
 
 type ModelsDevProvider = {
@@ -100,6 +101,37 @@ describe("openRouterResolve models.dev validity", async () => {
         `model "${parsed.modelId}" not found under ${parsed.provider} on models.dev`
       ).toBeDefined();
     });
+  }
+});
+
+// the registry mirrors models.dev's published effort ladders rather than
+// fetching them per run. drift is not cosmetic: claude-code hard-errors on an
+// out-of-range `--effort` before it makes any API call, so a stale ladder
+// breaks runs outright. see wiki/effort.md.
+describe("effort ladders mirror models.dev", async () => {
+  const data = await api;
+
+  const publishedEffort = (spec: string) => {
+    const parsed = parseResolve(spec);
+    const options = data[parsed.provider]?.models[parsed.modelId]?.reasoning_options;
+    return options?.find((o) => o.type === "effort")?.values;
+  };
+
+  for (const alias of modelAliases) {
+    if (alias.routing || alias.fallback) continue;
+
+    it(`${alias.slug} effort matches models.dev`, () => {
+      expect(publishedEffort(alias.resolve)).toEqual(alias.effort);
+    });
+
+    // hoisted so the narrowing survives into the callback
+    const routerResolve = alias.openRouterResolve;
+    if (routerResolve) {
+      it(`${alias.slug} openRouterEffort matches models.dev`, () => {
+        // an absent openRouterEffort means "same ladder as direct"
+        expect(publishedEffort(routerResolve)).toEqual(alias.openRouterEffort ?? alias.effort);
+      });
+    }
   }
 });
 
