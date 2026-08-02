@@ -75,6 +75,17 @@ export {
   getProgressComment,
   updateProgressComment,
 } from "../utils/progressComment.ts";
+export type {
+  RunStatusCheckConclusion,
+  RunStatusCheckOctokit,
+} from "../utils/runStatusCheck.ts";
+export {
+  APPROVAL_CHECK_NAME,
+  createRunStatusCheck,
+  finalizeRunStatusCheck,
+  RUN_STATUS_CHECK_NAME,
+  runStatusCheckNeedsFinalizing,
+} from "../utils/runStatusCheck.ts";
 export {
   isValidTimeString,
   parseTimeString,

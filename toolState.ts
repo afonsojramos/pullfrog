@@ -157,7 +157,10 @@ export interface ToolState {
   // `review` (which postReviewCleanup deletes) so it survives to finalize.
   // `sha` is the sha the agent reviewed, so the check anchors to it rather
   // than to a head that may have moved mid-run.
-  approval?: { wouldApprove: boolean; sha: string | undefined };
+  // `url` is the submitted review's html_url when one landed — the artifact a
+  // reader most wants from the `Pullfrog` check, so it is surfaced as a link in
+  // that check's summary. absent when the run produced no review.
+  approval?: { wouldApprove: boolean; sha: string | undefined; url?: string | undefined };
   // dedupe key: parent review comment_id → most-recent reply written this
   // session by reply_to_review_comment. used by duplicateReplyDecision to
   // skip identical-body re-emissions of the same call (PR #610 root cause).

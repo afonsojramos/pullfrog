@@ -43,6 +43,9 @@ export interface RepoSettings {
   // false suppresses the "Leaping into action..." comment (server-side, before
   // dispatch) and the live task-list updates. see mcp/comment.ts reportProgress.
   progressComments: boolean;
+  // false suppresses the `pullfrog` run-lifecycle check-run (server-side at dispatch,
+  // action-side at run end). see utils/runStatusCheck.ts.
+  statusChecks: boolean;
   modeInstructions: Record<string, string>;
   learnings: string | null;
   learningsHeadings: LearningsHeading[];
@@ -91,6 +94,7 @@ const defaultSettings: RepoSettings = {
   autoMergeEnabled: false,
   signedCommits: false,
   progressComments: true,
+  statusChecks: true,
   modeInstructions: {},
   learnings: null,
   learningsHeadings: [],

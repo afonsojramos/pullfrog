@@ -341,6 +341,12 @@ export interface WriteablePayload {
   cwd?: string | undefined;
   /** pre-created progress comment (ID + type) for updating status */
   progressComment?: { id: string; type: "issue" | "review" } | undefined;
+  /**
+   * pre-created `pullfrog` check-run, seeded `in_progress` by the server at dispatch so
+   * the PR's checks list shows the run before the GHA runner boots. the action PATCHes
+   * it to a terminal conclusion at run end. see `action/utils/runStatusCheck.ts`.
+   */
+  checkRun?: { id: string } | undefined;
   /** when true, seed the PR summary tmpfile + persist edits at run end */
   generateSummary?: boolean | undefined;
 }

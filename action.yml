@@ -25,7 +25,7 @@ inputs:
     description: "Shell permission: disabled, restricted (filters secrets from env vars), or enabled. Public repos default to restricted for security; private repos default to enabled."
     required: false
   status_checks:
-    description: "Post `pullfrog` (run completion) and `pullfrog-approval` (review verdict) commit-status checks on PR runs so they can be required by branch protection: disabled (default) or enabled."
+    description: "Set to `enabled` to additionally post the `Pullfrog approval` review-verdict check, so it can be required by branch protection. The `Pullfrog` run-status check is controlled by the repository setting (on by default), not by this input — Pullfrog seeds it before the workflow starts, so a workflow-level value cannot suppress it."
     required: false
   progress_comments:
     description: "Post the temporary `Leaping into action...` comment and its live task-list updates: enabled (default) or disabled. Overrides the repository setting. Final reviews, result comments, and failure reports are unaffected."

@@ -2,67 +2,72 @@ import type { RestEndpointMethodTypes } from "@octokit/rest";
 import type { ToolContext } from "../mcp/server.ts";
 import { primaryRepoState } from "../toolState.ts";
 import { log } from "./cli.ts";
+import {
+  APPROVAL_CHECK_NAME,
+  createTerminalRunStatusCheck,
+  finalizeRunStatusCheck,
+  parseCheckRunId,
+  RUN_STATUS_CHECK_NAME,
+} from "./runStatusCheck.ts";
 
 /**
- * commit-status check-run names. `pullfrog` is the review-verdict-agnostic run
- * completion check (lets a repo require `pullfrog` so branch protection stops
- * hanging at "waiting for status"); `pullfrog-approval` correlates with whether
- * Pullfrog would approve the PR under current review logic.
- */
-const COMPLETION_CHECK = "pullfrog";
-const APPROVAL_CHECK = "pullfrog-approval";
-
-type Conclusion = "success" | "failure";
-
-async function createCheckRun(
-  ctx: ToolContext,
-  params: { name: string; headSha: string; conclusion: Conclusion; title: string; summary: string }
-): Promise<void> {
-  const createParams: RestEndpointMethodTypes["checks"]["create"]["parameters"] = {
-    owner: ctx.repo.owner,
-    repo: ctx.repo.name,
-    name: params.name,
-    head_sha: params.headSha,
-    status: "completed",
-    conclusion: params.conclusion,
-    output: { title: params.title, summary: params.summary },
-  };
-  if (ctx.runId) {
-    createParams.details_url = `https://github.com/${ctx.repo.owner}/${ctx.repo.name}/actions/runs/${ctx.runId}`;
-  }
-  await ctx.octokit.rest.checks.create(createParams);
-  log.info(`» posted ${params.name} check (${params.conclusion}) on ${params.headSha.slice(0, 7)}`);
-}
-
-/**
- * post the opt-in `pullfrog` (run completion) and `pullfrog-approval` (review
- * verdict) commit-status check-runs so they can be required by branch
- * protection. no-op unless the `status_checks` input is enabled and the run is
- * on a pull request.
+ * post the `Pullfrog` (run lifecycle) and `Pullfrog approval` (review verdict)
+ * commit-status check-runs.
  *
- * terminal-only by design: we never create an `in_progress` check. a
- * hard-cancelled run (SIGKILL) would strand a required check `in_progress` and
- * block merges forever; an absent required check already blocks merge the same
- * way while the run is in flight, with no stuck-check failure mode.
+ *   - `Pullfrog` is on by default (`Repo.statusChecks`). the server already created it
+ *     `in_progress` at dispatch, so the work here is a PATCH to its terminal conclusion —
+ *     see `runStatusCheck.ts` for why a second create would leave two contradictory rows.
+ *     the terminal-create fallback covers a payload with no `checkRun` (older server
+ *     build mid-rolling-deploy, or a workflow driven outside Pullfrog's dispatch path).
+ *   - `Pullfrog approval` stays opt-in (`status_checks: enabled`) and terminal-only:
+ *     it asserts a review verdict, which only exists once a run produces one. anchored
+ *     to the exact reviewed sha so a mid-run push leaves the new head unapproved until
+ *     a follow-up re-review reports.
  *
- *   - `pullfrog` is posted on every PR run: success iff the run finished
- *     successfully, failure on error/timeout. review-verdict-agnostic.
- *   - `pullfrog-approval` is posted only when this run produced an approval
- *     verdict (`toolState.approval`, set by create_pull_request_review),
- *     anchored to the reviewed sha so a mid-run push leaves the new head
- *     unapproved until the follow-up re-review reports.
- *
- * best-effort throughout: a check-post failure (fork PR head not in the base
- * repo, transient 5xx, closed PR) must never flip the run's own outcome.
+ * best-effort throughout: a check-post failure (transient 5xx, closed PR, revoked
+ * permission) must never flip the run's own outcome. the `workflow_run.completed` webhook
+ * and both stuck-run reaper sweeps close out a check this function fails to finalize.
  */
 export async function reportStatusChecks(
   ctx: ToolContext,
   params: { runSucceeded: boolean }
 ): Promise<void> {
-  if (!ctx.payload.statusChecks) return;
   const event = ctx.payload.event;
   const pullNumber = event.issue_number;
   if (event.is_pr !== true || typeof pullNumber !== "number") return;
+  // the check-run id is the authority, not the setting: if the server seeded a check, it
+  // MUST be finalized even when this workflow opted out via `status_checks: disabled`.
+  // the server never parses workflow YAML (it only sees `Repo.statusChecks`), so the
+  // opt-out cannot prevent the seed — and a seeded check left `in_progress` because the
+  // action declined to touch it is strictly worse than the check the user didn't want.
+  const checkRunId = parseCheckRunId(ctx.payload.checkRun);
+  if (checkRunId === undefined && !ctx.payload.runStatusCheck && !ctx.payload.approvalCheck) return;
+
+  const conclusion = params.runSucceeded ? "success" : "failure";
+  const detailsUrl = ctx.runId
+    ? `https://github.com/${ctx.repo.owner}/${ctx.repo.name}/actions/runs/${ctx.runId}`
+    : undefined;
+
+  if (checkRunId !== undefined) {
+    await finalizeRunStatusCheck({
+      octokit: ctx.octokit,
+      owner: ctx.repo.owner,
+      repo: ctx.repo.name,
+      checkRunId,
+      conclusion,
+      detailsUrl,
+      reviewUrl: ctx.toolState.approval?.url,
+    })
+      .then(() => log.info(`» finalized ${RUN_STATUS_CHECK_NAME} check (${conclusion})`))
+      .catch((err) => log.debug(`status checks: ${RUN_STATUS_CHECK_NAME} finalize failed: ${err}`));
+  }
+
+  // everything below needs a head sha, which costs an API call — skip it when there is
+  // nothing left to post.
+  const approval = ctx.toolState.approval;
+  const needsApprovalCheck = ctx.payload.approvalCheck && params.runSucceeded && approval;
+  const needsFallbackRunCheck = ctx.payload.runStatusCheck && checkRunId === undefined;
+  if (!needsApprovalCheck && !needsFallbackRunCheck) return;
 
   let headSha: string;
   try {
@@ -77,31 +82,43 @@ export async function reportStatusChecks(
     return;
   }
 
-  const completionSha = primaryRepoState(ctx.toolState).checkoutSha ?? headSha;
-  await createCheckRun(ctx, {
-    name: COMPLETION_CHECK,
-    headSha: completionSha,
-    conclusion: params.runSucceeded ? "success" : "failure",
-    title: params.runSucceeded ? "Pullfrog run completed" : "Pullfrog run failed",
-    summary: params.runSucceeded
-      ? "The Pullfrog run finished successfully."
-      : "The Pullfrog run failed or timed out. See the run logs for details.",
-  }).catch((err) => log.debug(`status checks: ${COMPLETION_CHECK} post failed: ${err}`));
+  if (needsFallbackRunCheck) {
+    await createTerminalRunStatusCheck({
+      octokit: ctx.octokit,
+      owner: ctx.repo.owner,
+      repo: ctx.repo.name,
+      headSha: primaryRepoState(ctx.toolState).checkoutSha ?? headSha,
+      conclusion,
+      detailsUrl,
+      reviewUrl: ctx.toolState.approval?.url,
+    })
+      .then(() => log.info(`» posted ${RUN_STATUS_CHECK_NAME} check (${conclusion})`))
+      .catch((err) => log.debug(`status checks: ${RUN_STATUS_CHECK_NAME} post failed: ${err}`));
+  }
 
-  // only assert an approval verdict when the run cleanly completed. the verdict
-  // is recorded before create_pull_request_review actually submits, so on a
-  // failed/crashed run the review may not have landed — leave pullfrog-approval
-  // absent (the next run resolves it) rather than post a stale verdict.
-  const approval = ctx.toolState.approval;
-  if (params.runSucceeded && approval) {
-    await createCheckRun(ctx, {
-      name: APPROVAL_CHECK,
-      headSha: approval.sha ?? headSha,
-      conclusion: approval.wouldApprove ? "success" : "failure",
+  // only assert an approval verdict when the run cleanly completed. the verdict is
+  // recorded before create_pull_request_review actually submits, so on a failed/crashed
+  // run the review may not have landed — leave pullfrog-approval absent (the next run
+  // resolves it) rather than post a stale verdict.
+  if (!needsApprovalCheck || !approval) return;
+
+  const createParams: RestEndpointMethodTypes["checks"]["create"]["parameters"] = {
+    owner: ctx.repo.owner,
+    repo: ctx.repo.name,
+    name: APPROVAL_CHECK_NAME,
+    head_sha: approval.sha ?? headSha,
+    status: "completed",
+    conclusion: approval.wouldApprove ? "success" : "failure",
+    output: {
       title: approval.wouldApprove ? "Pullfrog would approve" : "Pullfrog would not approve",
       summary: approval.wouldApprove
         ? "Pullfrog has no outstanding review feedback on this PR."
         : "Pullfrog has outstanding review feedback or requested changes on this PR.",
-    }).catch((err) => log.debug(`status checks: ${APPROVAL_CHECK} post failed: ${err}`));
-  }
+    },
+  };
+  if (detailsUrl) createParams.details_url = detailsUrl;
+  await ctx.octokit.rest.checks
+    .create(createParams)
+    .then(() => log.info(`» posted ${APPROVAL_CHECK_NAME} check`))
+    .catch((err) => log.debug(`status checks: ${APPROVAL_CHECK_NAME} post failed: ${err}`));
 }

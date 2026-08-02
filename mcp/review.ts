@@ -264,7 +264,11 @@ export async function approveAfterFix(ctx: ToolContext): Promise<void> {
   });
   // record the verdict so the opt-in `pullfrog-approval` status check (posted
   // right after this in finalizeSuccessRun) reports success on the reviewed sha.
-  ctx.toolState.approval = { wouldApprove: true, sha: headSha };
+  ctx.toolState.approval = {
+    wouldApprove: true,
+    sha: headSha,
+    url: result.data.html_url,
+  };
   log.info(`» auto-approved #${pullNumber} after fix run (review ${result.data.id})`);
 
   // the approval review is now the durable artifact for this run; drop the
@@ -920,6 +924,9 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
         }
         const reviewId = result.data.id;
         const reviewNodeId = result.data.node_id;
+        // the verdict was recorded before submission (so it survives cleanup); now that
+        // the review exists, attach its url for the `Pullfrog` check's summary.
+        if (ctx.toolState.approval) ctx.toolState.approval.url = result.data.html_url;
         log.info(`» created review ${reviewId} on pull request #${pull_number}`);
 
         // reviewedSha = what the agent actually reviewed (checkout SHA), not the

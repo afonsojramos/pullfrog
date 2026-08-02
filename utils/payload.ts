@@ -48,6 +48,9 @@ export const JsonPayload = type({
     id: "string",
     type: "'issue' | 'review'",
   }).or("undefined"),
+  // optional so a payload from an older server build (pre-`checkRun`) still parses
+  // against a newer action across a rolling deploy.
+  "checkRun?": type({ id: "string" }).or("undefined"),
   "generateSummary?": "boolean | undefined",
 });
 
@@ -226,15 +229,25 @@ export function resolvePayload(
     timeout: inputs.timeout ?? jsonPayload?.timeout,
     cwd: resolveCwd(inputs.cwd),
     progressComment: jsonPayload?.progressComment,
+    checkRun: jsonPayload?.checkRun,
     generateSummary: jsonPayload?.generateSummary,
 
     // permissions: inputs > repoSettings > fallbacks
     push: inputs.push ?? repoSettings.push ?? "restricted",
     shell: resolvedShell,
 
-    // opt-in commit-status check-runs (branch protection). workflow-level
-    // static input, off unless the repo's pullfrog.yml sets status_checks: enabled.
-    statusChecks: inputs.status_checks === "enabled",
+    // the `pullfrog` run-lifecycle check. ON by default — the whole point is that a PR
+    // shows whether Pullfrog is running without anyone having to opt in. the workflow
+    // input is the source of truth when set (mirrors `push`); otherwise the repo
+    // setting decides.
+    runStatusCheck:
+      inputs.status_checks === undefined
+        ? repoSettings.statusChecks
+        : inputs.status_checks === "enabled",
+
+    // the `pullfrog-approval` verdict check stays opt-in and workflow-only. it exists to
+    // be *required* by branch protection, so it must never turn itself on.
+    approvalCheck: inputs.status_checks === "enabled",
 
     // temporary progress chrome. the workflow input is the source of truth when
     // set (mirrors `push`); otherwise the repo setting decides. defaults to true.

@@ -101,7 +101,7 @@ jobs:
 
 ```
 
-To gate merges on Pullfrog with branch protection, add `status_checks: enabled` under `with:`. Each PR run then posts a `pullfrog` check (run completion — success when the run finishes, failure on error/timeout) and a `pullfrog-approval` check (whether Pullfrog would approve the PR), both requireable as status checks. See [PR reviews → Required status checks](https://docs.pullfrog.dev/pr-reviews#required-status-checks-branch-protection).
+Every PR run posts a `Pullfrog` commit-status check: `in_progress` from the moment the run is dispatched, then success when it finishes or failure on error/timeout. It is on by default (turn it off per-repo in the console). To also gate merges on Pullfrog's review verdict, add `status_checks: enabled`, which additionally posts a `Pullfrog approval` check (whether Pullfrog would approve the PR). Both are requireable as branch-protection status checks. See [PR reviews → Status checks](https://docs.pullfrog.dev/pr-reviews#status-checks).
 
 #### 2. Create `triggers.yml`
 
