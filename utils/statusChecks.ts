@@ -6,6 +6,8 @@ import {
   APPROVAL_CHECK_NAME,
   createTerminalRunStatusCheck,
   finalizeRunStatusCheck,
+  LEGACY_APPROVAL_CHECK_NAME,
+  LEGACY_RUN_STATUS_CHECK_NAME,
   parseCheckRunId,
   RUN_STATUS_CHECK_NAME,
 } from "./runStatusCheck.ts";
@@ -67,7 +69,10 @@ export async function reportStatusChecks(
   const approval = ctx.toolState.approval;
   const needsApprovalCheck = ctx.payload.approvalCheck && params.runSucceeded && approval;
   const needsFallbackRunCheck = ctx.payload.runStatusCheck && checkRunId === undefined;
-  if (!needsApprovalCheck && !needsFallbackRunCheck) return;
+  // the legacy aliases post on every run for these repos, not only when a verdict exists —
+  // `pullfrog` was a per-run check before the rename and something may still require it.
+  const needsLegacyAliases = ctx.payload.approvalCheck;
+  if (!needsApprovalCheck && !needsFallbackRunCheck && !needsLegacyAliases) return;
 
   let headSha: string;
   try {
@@ -96,6 +101,8 @@ export async function reportStatusChecks(
       .catch((err) => log.debug(`status checks: ${RUN_STATUS_CHECK_NAME} post failed: ${err}`));
   }
 
+  if (needsLegacyAliases) await postLegacyAliasChecks(ctx, { conclusion, headSha, detailsUrl });
+
   // only assert an approval verdict when the run cleanly completed. the verdict is
   // recorded before create_pull_request_review actually submits, so on a failed/crashed
   // run the review may not have landed — leave pullfrog-approval absent (the next run
@@ -121,4 +128,55 @@ export async function reportStatusChecks(
     .create(createParams)
     .then(() => log.info(`» posted ${APPROVAL_CHECK_NAME} check`))
     .catch((err) => log.debug(`status checks: ${APPROVAL_CHECK_NAME} post failed: ${err}`));
+}
+
+/**
+ * Post the pre-rename check names alongside the current ones.
+ *
+ * Renaming a check silently stops the old context reporting, which blocks merges on any
+ * repo that required it — and we cannot migrate those repos for them, because branch
+ * protection is readable on only a fraction of installs. Emitting both keeps every repo
+ * green regardless of which name it pinned.
+ *
+ * Terminal-only and gated on `approvalCheck` (`status_checks: enabled`), which is exactly
+ * how these behaved before the rename and the only way they could ever have appeared — so
+ * this restores old repos without adding a row anywhere new.
+ */
+async function postLegacyAliasChecks(
+  ctx: ToolContext,
+  params: { conclusion: "success" | "failure"; headSha: string; detailsUrl: string | undefined }
+): Promise<void> {
+  if (!ctx.payload.approvalCheck) return;
+
+  await createTerminalRunStatusCheck({
+    octokit: ctx.octokit,
+    owner: ctx.repo.owner,
+    repo: ctx.repo.name,
+    headSha: primaryRepoState(ctx.toolState).checkoutSha ?? params.headSha,
+    conclusion: params.conclusion,
+    detailsUrl: params.detailsUrl,
+    reviewUrl: ctx.toolState.approval?.url,
+    name: LEGACY_RUN_STATUS_CHECK_NAME,
+  }).catch((err) =>
+    log.debug(`status checks: ${LEGACY_RUN_STATUS_CHECK_NAME} post failed: ${err}`)
+  );
+
+  const approval = ctx.toolState.approval;
+  if (!approval) return;
+  const legacyApproval: RestEndpointMethodTypes["checks"]["create"]["parameters"] = {
+    owner: ctx.repo.owner,
+    repo: ctx.repo.name,
+    name: LEGACY_APPROVAL_CHECK_NAME,
+    head_sha: approval.sha ?? params.headSha,
+    status: "completed",
+    conclusion: approval.wouldApprove ? "success" : "failure",
+    output: {
+      title: approval.wouldApprove ? "Pullfrog would approve" : "Pullfrog would not approve",
+      summary: `Renamed to \`${APPROVAL_CHECK_NAME}\` — update your branch protection to the new name; this one is kept only for compatibility.`,
+    },
+  };
+  if (params.detailsUrl) legacyApproval.details_url = params.detailsUrl;
+  await ctx.octokit.rest.checks
+    .create(legacyApproval)
+    .catch((err) => log.debug(`status checks: ${LEGACY_APPROVAL_CHECK_NAME} post failed: ${err}`));
 }

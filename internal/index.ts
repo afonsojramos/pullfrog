@@ -95,6 +95,8 @@ export {
   APPROVAL_CHECK_NAME,
   createRunStatusCheck,
   finalizeRunStatusCheck,
+  LEGACY_APPROVAL_CHECK_NAME,
+  LEGACY_RUN_STATUS_CHECK_NAME,
   RUN_STATUS_CHECK_NAME,
   runStatusCheckNeedsFinalizing,
 } from "../utils/runStatusCheck.ts";

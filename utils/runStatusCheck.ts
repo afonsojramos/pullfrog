@@ -33,6 +33,22 @@ export const RUN_STATUS_CHECK_NAME = "Pullfrog";
 export const APPROVAL_CHECK_NAME = "Pullfrog approval";
 
 /**
+ * Pre-2026-08-02 check names, still posted as aliases.
+ *
+ * A check run's `name` is ALSO the context branch protection matches on — GitHub has no
+ * separate display name — so renaming these stopped the old contexts reporting and blocked
+ * merges on every repo that required them. We cannot simply migrate those repos for them:
+ * branch protection is readable on only ~8% of installs (the app holds no `administration`
+ * permission on the rest), so the affected set is not even fully knowable.
+ *
+ * These are therefore emitted ALONGSIDE the new names, terminal-only, exactly as they
+ * behaved before the rename. Scoped to `status_checks: enabled`, which is the only way the
+ * old checks could ever have appeared — so no repo gains a row it didn't already have.
+ */
+export const LEGACY_RUN_STATUS_CHECK_NAME = "pullfrog";
+export const LEGACY_APPROVAL_CHECK_NAME = "pullfrog-approval";
+
+/**
  * The terminal states we report. Exactly GitHub's check-run `conclusion` enum, which
  * happens to be `WorkflowRunStatus` minus `running` — so the server can map a finished
  * run's status straight across (`checkConclusionFromStatus` in utils/workflowRunStatus.ts).
@@ -280,11 +296,13 @@ export async function createTerminalRunStatusCheck(params: {
   conclusion: RunStatusCheckConclusion;
   detailsUrl: string | undefined;
   reviewUrl?: string | undefined;
+  /** defaults to the current check name; set to post a legacy alias. */
+  name?: string | undefined;
 }): Promise<void> {
   const createParams: CreateCheckRunParams = {
     owner: params.owner,
     repo: params.repo,
-    name: RUN_STATUS_CHECK_NAME,
+    name: params.name ?? RUN_STATUS_CHECK_NAME,
     head_sha: params.headSha,
     status: "completed",
     conclusion: params.conclusion,
