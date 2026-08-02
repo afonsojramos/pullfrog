@@ -177,8 +177,11 @@ export async function installOpencodeCli(params: { binPath: string }): Promise<s
 // auto-select using the authorized model set captured in main.ts via
 // `opencode models` introspection.
 
+// the console picker is locked for Router accounts without a payment method —
+// exactly the accounts that land here once their wallet runs dry.
 const AUTO_SELECT_WARNING =
-  "select a model explicitly in the Pullfrog console (https://pullfrog.com/console) to avoid this.";
+  "select a model explicitly in the Pullfrog console (https://pullfrog.com/console) to avoid this — " +
+  "if the picker is locked, this run had no Pullfrog Router funding: add a card or top up your credit.";
 
 export function autoSelectModel(): string | undefined {
   const authorized = getAuthorizedModels();
