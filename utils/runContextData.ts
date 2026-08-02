@@ -5,7 +5,12 @@ import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
 import { type OctokitWithPlugins, parseRepoContext } from "./github.ts";
 import { isTransientOctokitError } from "./isTransientNetworkError.ts";
-import { type AccountPlan, fetchRunContext, type RepoSettings } from "./runContext.ts";
+import {
+  type AccountPlan,
+  type CommercialRefusal,
+  fetchRunContext,
+  type RepoSettings,
+} from "./runContext.ts";
 
 export interface RunContextData {
   repo: {
@@ -19,6 +24,7 @@ export interface RunContextData {
   plan: AccountPlan;
   proxyModel?: string | undefined;
   dbSecrets?: Record<string, string> | undefined;
+  commercialRefused?: CommercialRefusal | undefined;
   /** stored secrets couldn't be materialized for this run — not the same as
    * the user having none. see `RunContext.secretsUnavailable`. */
   secretsUnavailable?: boolean | undefined;
@@ -105,6 +111,7 @@ export async function resolveRunContextData(
     plan: runContext.plan,
     proxyModel: runContext.proxyModel,
     dbSecrets: runContext.dbSecrets,
+    commercialRefused: runContext.commercialRefused,
     // a failed mint on a runner that should have been able to mint is the same
     // outcome as the server-side failure: the run never sees stored secrets.
     secretsUnavailable:

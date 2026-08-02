@@ -18,6 +18,7 @@ import {
 } from "./utils/activity.ts";
 import { resolveAgent, resolveModel } from "./utils/agent.ts";
 import { validateAgentApiKey } from "./utils/apiKeys.ts";
+import { formatCommercialGateSummary } from "./utils/billingErrors.ts";
 import { resolveBody } from "./utils/body.ts";
 import { log } from "./utils/cli.ts";
 import { installCodexAuth, PULLFROG_DATA_DIR } from "./utils/codexHome.ts";
@@ -138,6 +139,8 @@ export async function main(): Promise<MainResult> {
   const runContext = await resolveRunContextData({ octokit: initialOctokit, token: jobToken });
   timer.checkpoint("runContextData");
 
+  const payload = resolvePayload(resolvedPromptInput, runContext.repoSettings);
+
   // seed toolState with the primary repo (keyed in `repos`). dir is the
   // run-entry cwd; configureRepoGit refreshes it after any payload.cwd chdir.
   const toolState = initToolState({
@@ -147,6 +150,45 @@ export async function main(): Promise<MainResult> {
     name: runContext.repo.name,
     dir: process.cwd(),
   });
+  toolState.model = payload.model;
+  toolState.oss = runContext.oss;
+  toolState.shaPinned = isActionPinnedToSha();
+  // seed the comment target before every terminal branch. `reportErrorToComment`
+  // reads only toolState, so silent triggers otherwise have nowhere to post.
+  if (payload.event.issue_number !== undefined) {
+    primaryRepoState(toolState).issueNumber = payload.event.issue_number;
+  }
+  if (payload.event.trigger === "pull_request_synchronize") {
+    primaryRepoState(toolState).beforeSha = payload.event.before_sha;
+  }
+
+  // stash OIDC credentials before any early return. refused runs need a scoped
+  // comment token; normal runs reuse the snapshot after the restricted env wipe.
+  const oidcCredentials: OidcCredentials | null =
+    process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      ? {
+          requestUrl: process.env.ACTIONS_ID_TOKEN_REQUEST_URL,
+          requestToken: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+        }
+      : null;
+
+  if (runContext.commercialRefused) {
+    await using _commentTokenRef = await resolveTokens({
+      push: "disabled",
+      oidc: oidcCredentials,
+    });
+    const errorMessage =
+      runContext.commercialRefused === "subscription_unpaid"
+        ? "Pro renewal failed for this organization"
+        : "Pro plan required for this organization";
+    log.error(errorMessage);
+    const body = formatCommercialGateSummary({
+      reason: runContext.commercialRefused,
+      ownerLogin: runContext.repo.owner,
+    });
+    await writeRunErrorOutputs({ rendered: { summary: body, comment: body }, toolState });
+    return { success: false, error: errorMessage };
+  }
 
   // tmpdir hoisted out of the try block: `installFromNpmTarball` reads
   // PULLFROG_TEMP_DIR (set as a side effect of createTempDirectory) when
@@ -194,32 +236,6 @@ export async function main(): Promise<MainResult> {
   if (runContext.repoSettings.envAllowlist) {
     setEnvAllowlist(runContext.repoSettings.envAllowlist);
   }
-
-  // resolve payload to determine shell permission
-  const payload = resolvePayload(resolvedPromptInput, runContext.repoSettings);
-  toolState.model = payload.model;
-  toolState.oss = runContext.oss;
-  toolState.shaPinned = isActionPinnedToSha();
-  // seed the comment target up front. `reportErrorToComment` reads only this (not
-  // the payload), so without it a run with no pre-seeded progress comment — silent
-  // triggers, or `progressComments: disabled` — has nowhere to post a terminal error.
-  if (payload.event.issue_number !== undefined) {
-    primaryRepoState(toolState).issueNumber = payload.event.issue_number;
-  }
-  if (payload.event.trigger === "pull_request_synchronize") {
-    primaryRepoState(toolState).beforeSha = payload.event.before_sha;
-  }
-
-  // stash OIDC credentials in memory before wiping from process.env —
-  // consumed by proxy-key minting and the mid-run MCP token refresh (#891).
-  // the agent's shell commands can't access JS variables, so this is safe
-  const oidcCredentials: OidcCredentials | null =
-    process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
-      ? {
-          requestUrl: process.env.ACTIONS_ID_TOKEN_REQUEST_URL,
-          requestToken: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
-        }
-      : null;
 
   // surface a narrowed cross-repo request in the run output (not just the
   // server-side dispatch log) so the triggerer sees what wasn't granted.

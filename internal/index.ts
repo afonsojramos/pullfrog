@@ -41,6 +41,7 @@ export {
 } from "../external.ts";
 export type { Mode } from "../modes.ts";
 export { modes } from "../modes.ts";
+export { commercialPaywallBody } from "../utils/billingErrors.ts";
 export type {
   BuildPullfrogFooterParams,
   WorkflowRunFooterInfo,

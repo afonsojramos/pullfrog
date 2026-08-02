@@ -311,7 +311,7 @@ export const providers = {
     },
   }),
   opencode: provider({
-    displayName: "OpenCode",
+    displayName: "OpenCode Zen",
     envVars: ["OPENCODE_API_KEY"],
     models: {
       "big-pickle": {
@@ -488,6 +488,10 @@ export const providers = {
     // bring-your-own generic OpenAI-compatible endpoint — Cloudflare AI Gateway,
     // Alibaba DashScope, self-hosted vLLM, or any compatible gateway. base URL +
     // key + model ID are all supplied via env; nothing is cataloged or bumped.
+    // the two token limits are deliberately absent: this list is the auth
+    // heuristic (`hasPullfrogStoredAuthForModel`, `validateAgentApiKey`), and a
+    // stored context number is config, not proof of a key. the console picks
+    // them up from `PROVIDER_EXTRA_SECRET_NAMES` instead.
     envVars: ["OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_MODEL"],
     models: {
       // single routing entry — the actual model ID is read from

@@ -220,7 +220,7 @@ export async function writeRunErrorOutputs(input: {
       error: input.rendered.comment,
       createIfMissing: true,
     });
-  } catch {
-    // error reporting failed, but don't let it mask the original error
+  } catch (error) {
+    log.warning(`error comment failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

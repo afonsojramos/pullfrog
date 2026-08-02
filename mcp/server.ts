@@ -88,11 +88,8 @@ export interface ToolContext {
   jobId: string | undefined;
   mcpServerUrl: string;
   tmpdir: string;
-  // repo-level OSS flag + account-level billing plan. together they decide
-  // whether pullfrog is paying for marginal infra — see `isInfraCovered` in
-  // the server's `utils/billing.ts`. plan gating for endpoints like the
-  // learnings PATCH is enforced server-side via 402, so we pass plan along
-  // mostly for future use / observability. see wiki/pricing.md.
+  // repo-level OSS flag + legacy-named account card signal. retained in the
+  // runtime context for existing consumers and observability.
   oss: boolean;
   plan: AccountPlan;
   // resolved upstream model specifier (e.g. "google/gemini-3.1-pro-preview").

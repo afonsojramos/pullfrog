@@ -59,11 +59,21 @@ export interface RepoSettings {
 }
 
 /**
- * Account-level billing plan. Orthogonal to repo-level OSS status. Mirrors
- * the server's `AccountPlan` in `utils/billing.ts`. `"none"` = free tier,
- * `"payg"` = card on file / pay-as-you-go.
+ * Account-level card signal. Orthogonal to repo-level OSS and Pro status.
+ * Mirrors the server's legacy-named `AccountPlan` in `utils/billing.ts`.
+ * `"none"` = no card; `"payg"` = card on file.
  */
 export type AccountPlan = "none" | "payg";
+
+/**
+ * The org commercial gate's refusal (billing model v2). Set when run-context
+ * returns 402 for a `paused`/`unpaid` org — the backstop for manual re-runs and
+ * self-configured triggers that never hit reserveRun. main.ts stops before
+ * installing the agent or loading account secrets and writes actionable copy.
+ * A forked action can bypass this response, so proxy-token enforces the same
+ * verdict before issuing a Pullfrog Router key.
+ */
+export type CommercialRefusal = "commercial" | "subscription_unpaid";
 
 export interface RunContext {
   settings: RepoSettings;
@@ -72,6 +82,7 @@ export interface RunContext {
   plan: AccountPlan;
   proxyModel?: string | undefined;
   dbSecrets?: Record<string, string> | undefined;
+  commercialRefused?: CommercialRefusal | undefined;
   /**
    * the server tried and failed to materialize Pullfrog-stored secrets (or we
    * never got a usable response at all). distinct from an absent `dbSecrets`,
@@ -152,6 +163,22 @@ export async function fetchRunContext(params: {
     });
 
     clearTimeout(timeoutId);
+
+    // commercial gate refusal (billing model v2): a 402 means the org's Pro
+    // plan is paused/unpaid. Surface it so main.ts stops the run — every
+    // other non-ok still degrades to defaults (transient server blip must not
+    // block runs).
+    if (response.status === 402) {
+      const body: unknown = await response.json().catch(() => null);
+      const reason: CommercialRefusal =
+        typeof body === "object" &&
+        body !== null &&
+        "reason" in body &&
+        body.reason === "subscription_unpaid"
+          ? "subscription_unpaid"
+          : "commercial";
+      return { ...defaultRunContext, commercialRefused: reason };
+    }
 
     if (!response.ok) {
       // 404 (repo not found / app not installed) and 403 (token rejected) are
