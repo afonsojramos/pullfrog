@@ -3,6 +3,7 @@ import * as p from "@clack/prompts";
 import arg from "arg";
 import pc from "picocolors";
 import { modelAliases, type ProviderConfig, providers, resolveDisplayAlias } from "../models.ts";
+import { describeSecretTarget } from "./_shared.ts";
 
 const PULLFROG_API_URL = (process.env.PULLFROG_API_URL || "https://pullfrog.com").replace(
   /\/+$/,
@@ -665,8 +666,9 @@ async function handleSecret(ctx: {
 
   if (method === "pullfrog") {
     const scope: SecretScope = ctx.secrets.isOrg ? await promptScope(ctx) : "account";
+    const target = describeSecretTarget({ owner: ctx.owner, repo: ctx.repo, scope });
 
-    activeSpin!.start(`saving ${envVar}`);
+    activeSpin!.start(`saving ${pc.cyan(envVar)} to ${target}`);
     let saveResult: PullfrogSecretResult;
     try {
       saveResult = await setPullfrogSecret({
@@ -686,7 +688,7 @@ async function handleSecret(ctx: {
     }
 
     if (saveResult.saved) {
-      activeSpin!.stop(`saved ${pc.cyan(envVar)} to Pullfrog`);
+      activeSpin!.stop(`saved ${pc.cyan(envVar)} to ${target}`);
     } else {
       activeSpin!.stop(pc.red("could not save secret"));
       p.log.warn(

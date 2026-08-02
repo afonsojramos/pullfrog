@@ -24,6 +24,7 @@ import pc from "picocolors";
 import { mintCodexAuth, refreshCodexAuth } from "../utils/codexAuth.ts";
 import {
   bail,
+  describeSecretTarget,
   fetchStatus,
   getGhToken,
   handleCancel,
@@ -318,7 +319,8 @@ async function runCodexAuth(): Promise<void> {
       savable = auth;
     }
 
-    spin.start(`saving ${pc.cyan(CODEX_AUTH_SECRET)} to Pullfrog`);
+    const target = describeSecretTarget({ owner: remote.owner, repo: remote.repo, scope });
+    spin.start(`saving ${pc.cyan(CODEX_AUTH_SECRET)} to ${target}`);
     const result = await setPullfrogSecret({
       token,
       owner: remote.owner,
@@ -334,7 +336,7 @@ async function runCodexAuth(): Promise<void> {
       );
       process.exit(1);
     }
-    spin.stop(`saved ${pc.cyan(CODEX_AUTH_SECRET)} to Pullfrog (${scope})`);
+    spin.stop(`saved ${pc.cyan(CODEX_AUTH_SECRET)} to ${target}`);
 
     setActiveSpin(null);
     p.outro("done.");
@@ -463,7 +465,8 @@ async function runClaudeAuth(): Promise<void> {
       );
     }
 
-    spin.start(`saving ${pc.cyan(CLAUDE_OAUTH_SECRET)} to Pullfrog`);
+    const target = describeSecretTarget({ owner: remote.owner, repo: remote.repo, scope });
+    spin.start(`saving ${pc.cyan(CLAUDE_OAUTH_SECRET)} to ${target}`);
     const result = await setPullfrogSecret({
       token,
       owner: remote.owner,
@@ -479,7 +482,7 @@ async function runClaudeAuth(): Promise<void> {
       );
       process.exit(1);
     }
-    spin.stop(`saved ${pc.cyan(CLAUDE_OAUTH_SECRET)} to Pullfrog (${scope})`);
+    spin.stop(`saved ${pc.cyan(CLAUDE_OAUTH_SECRET)} to ${target}`);
 
     setActiveSpin(null);
     p.outro("done.");

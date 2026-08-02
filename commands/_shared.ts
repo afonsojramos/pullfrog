@@ -216,6 +216,18 @@ export async function setPullfrogSecret(ctx: {
   return { saved: false, error: result.data.error || `api returned ${result.status}` };
 }
 
+/** where a Pullfrog-stored secret actually lands, for CLI copy — the
+ * account-level store is keyed to the repo owner, the repo-level store to the
+ * repo itself. */
+export function describeSecretTarget(ctx: {
+  owner: string;
+  repo: string;
+  scope: SecretScope;
+}): string {
+  if (ctx.scope === "account") return `account ${pc.cyan(`@${ctx.owner}`)}`;
+  return `repo ${pc.cyan(`${ctx.owner}/${ctx.repo}`)}`;
+}
+
 export async function promptScope(ctx: { owner: string; repo: string }): Promise<SecretScope> {
   const scope = await p.select<SecretScope>({
     message: "secret scope",
