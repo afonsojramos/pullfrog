@@ -194,7 +194,13 @@ export async function main(): Promise<MainResult> {
   // PULLFROG_TEMP_DIR (set as a side effect of createTempDirectory) when
   // the opencode CLI install runs below for BYOK introspection. agent +
   // mcp server setup further down also consume the same tmpdir.
-  createTempDirectory();
+  //
+  // the return value is reused below rather than calling again: every call
+  // `mkdtempSync`s a NEW directory and overwrites PULLFROG_TEMP_DIR, and the
+  // installers key their fs cache off that variable *at call time* — so a
+  // second call silently invalidated the cache and re-downloaded plus
+  // re-extracted the whole opencode tarball on every run.
+  const tmpdir = createTempDirectory();
 
   // install OpenCode + capture the BASELINE model set BEFORE dbSecrets and
   // Codex auth.json are in scope. this is the set of models OpenCode can
@@ -294,8 +300,6 @@ export async function main(): Promise<MainResult> {
     if (payload.cwd && process.cwd() !== payload.cwd) {
       process.chdir(payload.cwd);
     }
-
-    const tmpdir = createTempDirectory();
 
     // resolve body - fetches body_html and converts to markdown if images present
     // this ensures agents receive markdown with working signed image URLs
