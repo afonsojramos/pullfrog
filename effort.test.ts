@@ -110,12 +110,25 @@ describe("the axis behaves as specified", () => {
     expect(resolveRung({ position: 0.99, published: five })).toBe("xhigh");
   });
 
-  it("the default lands high without topping out", () => {
-    expect(DEFAULT_EFFORT_POSITION).toBe(0.75);
-    expect(resolveRung({ position: DEFAULT_EFFORT_POSITION, published: five })).toBe("xhigh");
+  it("the default IS the position of `high`, so it lands there on a five-rung ladder", () => {
+    expect(DEFAULT_EFFORT_POSITION).toBe(0.5);
+    // the whole point: the default and a user clicking High store the same value
+    expect(rungPosition({ rung: "high", published: five })).toBe(DEFAULT_EFFORT_POSITION);
+    expect(resolveRung({ position: DEFAULT_EFFORT_POSITION, published: five })).toBe("high");
     expect(resolveRung({ position: DEFAULT_EFFORT_POSITION, published: three })).toBe("medium");
     // DeepSeek's floor — what every DeepSeek run got before this setting existed
     expect(resolveRung({ position: DEFAULT_EFFORT_POSITION, published: two })).toBe("high");
+  });
+
+  it("the default reaches `high` on every real model whose ladder has one", () => {
+    for (const alias of RUNNABLE) {
+      const published = getModelEffortLevels({ slug: alias.slug, useOpenRouter: false }) ?? [];
+      const rungs = offeredRungs(published);
+      if (!rungs.includes("high")) continue;
+      // a ladder carrying `high` should default to it, not above it
+      const landed = resolveRung({ position: DEFAULT_EFFORT_POSITION, published });
+      expect(rungs.indexOf(landed as string)).toBeLessThanOrEqual(rungs.indexOf("high"));
+    }
   });
 
   it("a ladder with no usable rungs yields nothing rather than a guess", () => {

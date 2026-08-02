@@ -24,12 +24,16 @@
 export type EffortPosition = number;
 
 /**
- * where a repo sits when it has never configured effort. high on the axis
- * without being the ceiling: `xhigh` on the Claude/GPT flagships, `medium` on a
- * three-rung ladder, `high` on DeepSeek's two — which is what every DeepSeek run
- * got before this setting existed.
+ * where a repo sits when it has never configured effort.
+ *
+ * 0.5 is not a round number picked for feel — it is EXACTLY the position `high`
+ * occupies on a five-rung ladder (`2/4`), so the default and a user clicking
+ * **High** in the console store the same value. It lands on `high` for the
+ * Claude and GPT flagships, Kimi K3 and DeepSeek, and `medium` on a three-rung
+ * ladder. That keeps the flagships at the level every model already effectively
+ * ran at before this setting existed.
  */
-export const DEFAULT_EFFORT_POSITION: EffortPosition = 0.75;
+export const DEFAULT_EFFORT_POSITION: EffortPosition = 0.5;
 
 /**
  * names we accept on user-facing surfaces (`--effort=`, the action input),
