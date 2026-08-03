@@ -595,6 +595,7 @@ export async function main(): Promise<MainResult> {
       agentId,
       outputSchema,
       signedCommits: runContext.repoSettings.signedCommits,
+      repoIntelligence: runContext.repoSettings.repoIntelligence,
       learningsFilePath: toolState.learningsFilePath ?? null,
       learningsHeadings: runContext.repoSettings.learningsHeadings,
       setupHookFailure: describeSetupFailure(setupHook.failure),

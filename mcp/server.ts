@@ -3,7 +3,7 @@ import "./arkConfig.ts";
 import { createServer } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { FastMCP, type Tool } from "fastmcp";
-import { type AgentId, pullfrogMcpName, type XrepoConfig } from "../external.ts";
+import { type AgentId, hasSimilarIssues, pullfrogMcpName, type XrepoConfig } from "../external.ts";
 import type { Mode } from "../modes.ts";
 import type { ToolState } from "../toolState.ts";
 import { closeBrowserDaemon } from "../utils/browser.ts";
@@ -173,7 +173,7 @@ function buildCommonTools(ctx: ToolContext, outputSchema?: JsonSchema): Pullfrog
     tools.push(ListReposTool(ctx), CheckoutRepoTool(ctx));
   }
 
-  if (ctx.repoIntelligence && ctx.payload.event.issue_number && !ctx.payload.event.is_pr) {
+  if (hasSimilarIssues({ repoIntelligence: ctx.repoIntelligence, event: ctx.payload.event })) {
     tools.push(SimilarIssuesTool(ctx));
   }
 

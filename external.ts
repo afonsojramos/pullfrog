@@ -373,3 +373,15 @@ export interface WriteablePayload {
 
 // immutable payload type for agent execution
 export type Payload = Readonly<WriteablePayload>;
+
+/**
+ * Whether `find_similar_issues` is registered for this run: an entitled account,
+ * on an issue rather than a PR. Shared by the MCP registration and the prompt so
+ * the duplicate-detection instructions can never describe an absent tool.
+ */
+export function hasSimilarIssues(params: {
+  repoIntelligence: boolean;
+  event: PayloadEvent;
+}): boolean {
+  return params.repoIntelligence && !!params.event.issue_number && !params.event.is_pr;
+}

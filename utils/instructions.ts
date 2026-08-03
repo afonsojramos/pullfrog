@@ -1,7 +1,13 @@
 // changes to prompt assembly should be reflected in wiki/prompt.md
 import { execSync } from "node:child_process";
 import { encode as toonEncode } from "@toon-format/toon";
-import { type AgentId, formatMcpToolRef, type PayloadEvent, pullfrogMcpName } from "../external.ts";
+import {
+  type AgentId,
+  formatMcpToolRef,
+  hasSimilarIssues,
+  type PayloadEvent,
+  pullfrogMcpName,
+} from "../external.ts";
 import type { Mode } from "../modes.ts";
 import type { ResolvedPayload } from "./payload.ts";
 import type { LearningsHeading } from "./runContext.ts";
@@ -16,6 +22,9 @@ interface InstructionsContext {
   /** commits are created via the GitHub API (commit_changes tool) so GitHub
    * signs them — flips the Git instructions to the signed-commits flow. */
   signedCommits: boolean;
+  /** the account is allowlisted for issue indexing, so `find_similar_issues`
+   * is registered on issue runs — adds the duplicate-check instruction. */
+  repoIntelligence: boolean;
   /** absolute path to the seeded learnings tmpfile, or null when the file
    * couldn't be seeded for some reason. main.ts always seeds, so in
    * practice this is always set; the null case keeps the type honest. */
@@ -362,6 +371,20 @@ Rules:
 ### GitHub
 
 Use MCP tools from ${pullfrogMcpName} for all GitHub operations. Never use the \`gh\` CLI — it is not authenticated and will fail. The MCP tools handle authentication and enforce permissions.
+${
+  hasSimilarIssues({ repoIntelligence: ctx.repoIntelligence, event: ctx.payload.event })
+    ? `
+#### Duplicate detection (enabled for this repository)
+
+This repository indexes its issues, so triage starts by checking whether this one already exists:
+- Call \`${t("find_similar_issues")}\` for issue #${ctx.payload.event.issue_number} BEFORE planning or implementing. It is cheap, and a duplicate makes the rest of the work unnecessary.
+- Candidates are semantic matches, not verdicts. Read the promising ones with \`${t("get_issue")}\` and decide yourself — most issues have a nearest neighbour that is merely related.
+- If it IS a duplicate, say so and link the original instead of producing a plan. Mention whether the original is already closed or fixed.
+- If it is not, continue with the task normally and do not mention the check.
+- Never close, label, or otherwise mutate either issue on similarity alone — report and let a human act.
+`
+    : ""
+}
 
 ${getShellInstructions(ctx.payload.shell, t)}
 
