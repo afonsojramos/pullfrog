@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import * as core from "@actions/core";
 import { table } from "table";
 import { type AgentUsage, formatCostUsd } from "../agents/shared.ts";
+import { isDebugEnabled } from "./activity.ts";
 import { isGitHubActions, isInsideDocker } from "./globals.ts";
 
 // --- log prefix via AsyncLocalStorage ---
@@ -39,12 +40,13 @@ function prefixPlain(name: string): string {
   return `${ctx.prefix} ${name}`;
 }
 
+// distinct from the shared `isDebugEnabled` composite: `log.debug` uses these
+// to pick an output CHANNEL — `core.debug()` (a `::debug::` annotation GitHub
+// only renders in a debug run) vs a plain `core.info()` line locally.
 const isRunnerDebugEnabled = () => core.isDebug();
 
 const isLocalDebugEnabled = () =>
   process.env.LOG_LEVEL === "debug" || process.env.ACTIONS_STEP_DEBUG === "true";
-
-const isDebugEnabled = () => isLocalDebugEnabled() || isRunnerDebugEnabled();
 
 /** timestamp prefix for debug mode — empty string when debug is off */
 function ts(): string {

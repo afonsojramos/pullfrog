@@ -69,6 +69,7 @@ import type { ToolState } from "../toolState.ts";
 import {
   AGENT_ACTIVITY_TIMEOUT_MS,
   AGENT_FIRST_EVENT_TIMEOUT_MS,
+  isDebugEnabled,
   markActivity,
 } from "../utils/activity.ts";
 import type { AgentDiagnostic } from "../utils/agentHangReport.ts";
@@ -198,9 +199,19 @@ function bootOpencodeServer(params: {
   // that logger is the ONLY place the server records the cause behind a 500
   // `UnknownError` + `ref` — without it `recentStderr` is empty and an invalid
   // repo config is undiagnosable. ERROR level keeps the ring buffer signal-dense.
+  //
+  // a debug run raises that to INFO, the only way to see a stall that produces
+  // no error at all: opencode logs the provider request as `stream` at INFO
+  // (`session/llm.ts`), so at ERROR a silent provider leaves the buffer empty
+  // with no evidence the request was even issued. INFO and not DEBUG
+  // deliberately — the `stream` line carries only provider/model/session
+  // metadata, while DEBUG can carry payloads, and these logs are readable by
+  // anyone with repo read. see wiki/opencode-silent-stall.md.
+  const logLevel = isDebugEnabled() ? "INFO" : "ERROR";
+  if (logLevel !== "ERROR") log.info(`» opencode log level: ${logLevel} (debug run)`);
   const proc = nodeSpawn(
     params.cliPath,
-    ["serve", "--port", "0", "--hostname", "127.0.0.1", "--print-logs", "--log-level", "ERROR"],
+    ["serve", "--port", "0", "--hostname", "127.0.0.1", "--print-logs", "--log-level", logLevel],
     {
       cwd: params.cwd,
       env: params.env,

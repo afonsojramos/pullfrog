@@ -1,6 +1,13 @@
 import { performance } from "node:perf_hooks";
 
-function isMonitorDebugEnabled(): boolean {
+/**
+ * whether the operator asked for debug output — GitHub's own "re-run with debug
+ * logging" (`RUNNER_DEBUG=1`), the `ACTIONS_STEP_DEBUG=true` repo secret, or a
+ * local `LOG_LEVEL=debug`. lives here rather than in `log.ts` because this
+ * module imports only `node:perf_hooks`, so every other util can depend on it
+ * without a cycle. one switch raises every diagnostic we own.
+ */
+export function isDebugEnabled(): boolean {
   return (
     process.env.ACTIONS_STEP_DEBUG === "true" ||
     process.env.RUNNER_DEBUG === "1" ||
@@ -170,7 +177,7 @@ function startProcessOutputMonitor(ctx: OutputMonitorContext): OutputMonitor {
   // then reset the timer every interval and the timeout would never fire,
   // re-creating the exact zombie-run bug #12 was meant to kill.
   const debugBypass = (msg: string): void => {
-    if (!isMonitorDebugEnabled()) return;
+    if (!isDebugEnabled()) return;
     originalStdoutWrite(`[${new Date().toISOString()}] [DEBUG] ${msg}\n`);
   };
 
