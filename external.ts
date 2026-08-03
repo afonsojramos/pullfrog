@@ -56,6 +56,7 @@ export {
   isAutoTier,
   isCardGatedModel,
   modelAliases,
+  modelHasStoredAuth,
   parseModel,
   providers,
   resolveAutoTier,

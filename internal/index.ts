@@ -35,6 +35,7 @@ export {
   isCardGatedModel,
   isEffortPosition,
   modelAliases,
+  modelHasStoredAuth,
   offeredRungs,
   parseEffortPosition,
   parseModel,

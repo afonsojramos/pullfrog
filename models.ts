@@ -738,6 +738,18 @@ export function getModelManagedCredentials(slug: string): string[] {
   return providerConfig?.managedCredentials?.slice() ?? [];
 }
 
+/**
+ * Whether one of `secretNames` can run `model` — the Router opt-out predicate,
+ * shared so every caller decides the same way. Auto-tier sentinels and
+ * deprecated aliases resolve first; `getModelEnvVars("auto/intelligent")` is
+ * `[]` otherwise.
+ */
+export function modelHasStoredAuth(params: { model: string; secretNames: string[] }): boolean {
+  const slug = resolveDisplayAlias(params.model)?.slug ?? params.model;
+  const authVars = [...getModelEnvVars(slug), ...getModelManagedCredentials(slug)];
+  return authVars.some((v) => params.secretNames.includes(v));
+}
+
 // ── derived flat list ──────────────────────────────────────────────────────────
 
 export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
