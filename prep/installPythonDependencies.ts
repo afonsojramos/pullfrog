@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { log } from "../utils/cli.ts";
+import { filterEnvForUntrustedCode } from "../utils/secrets.ts";
 import { spawn } from "../utils/subprocess.ts";
 import type {
   PrepDefinition,
@@ -84,7 +85,7 @@ async function isCommandAvailable(command: string): Promise<boolean> {
   const result = await spawn({
     cmd: "which",
     args: [command],
-    env: { PATH: process.env.PATH || "" },
+    env: filterEnvForUntrustedCode(),
   });
   return result.exitCode === 0;
 }
@@ -101,7 +102,7 @@ async function installTool(name: string): Promise<string | null> {
   const result = await spawn({
     cmd,
     args,
-    env: { PATH: process.env.PATH || "", HOME: process.env.HOME || "" },
+    env: filterEnvForUntrustedCode(),
     onStderr: (chunk) => process.stderr.write(chunk),
   });
 
@@ -192,7 +193,7 @@ export const installPythonDependencies: PrepDefinition = {
     const result = await spawn({
       cmd,
       args,
-      env: { PATH: process.env.PATH || "", HOME: process.env.HOME || "" },
+      env: filterEnvForUntrustedCode(),
     });
 
     const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();

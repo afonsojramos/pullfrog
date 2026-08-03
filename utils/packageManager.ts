@@ -3,6 +3,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import semver from "semver";
 import { log } from "./cli.ts";
+import { filterEnvForUntrustedCode } from "./secrets.ts";
 import { spawn } from "./subprocess.ts";
 
 export type SupportedPackageManager = "npm" | "pnpm" | "yarn" | "bun";
@@ -147,11 +148,7 @@ async function runCorepack(args: string[]): Promise<CorepackResult> {
   const result = await spawn({
     cmd: "corepack",
     args,
-    env: {
-      PATH: process.env.PATH || "",
-      HOME: process.env.HOME || "",
-      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-    },
+    env: { ...filterEnvForUntrustedCode(), COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" },
     onStdout: (chunk) => process.stdout.write(chunk),
     onStderr: (chunk) => process.stderr.write(chunk),
   });
@@ -162,7 +159,7 @@ async function currentVersion(name: SupportedPackageManager): Promise<string | n
   const result = await spawn({
     cmd: name,
     args: ["--version"],
-    env: { PATH: process.env.PATH || "" },
+    env: filterEnvForUntrustedCode(),
   });
   if (result.exitCode !== 0) return null;
   return result.stdout.trim();
@@ -254,4 +251,77 @@ export async function ensurePackageManager(params: EnsurePackageManagerParams): 
   }
 
   return true;
+}
+
+/** `SupportedPackageManager` plus deno, which corepack never manages. */
+export type ProvisionablePackageManager = SupportedPackageManager | "deno";
+
+async function isCommandAvailable(command: string): Promise<boolean> {
+  const result = await spawn({ cmd: "which", args: [command], env: filterEnvForUntrustedCode() });
+  return result.exitCode === 0;
+}
+
+/**
+ * Install a manager corepack doesn't ship a shim for. pnpm and yarn go through
+ * `ensurePackageManager`; bun and deno fall through to here.
+ */
+async function installFallback(
+  name: ProvisionablePackageManager,
+  installSpec: string
+): Promise<string | null> {
+  if (name === "npm") return null;
+  log.info(`» installing ${installSpec} via npm install -g (corepack does not manage ${name})`);
+  const args =
+    name === "deno"
+      ? ["-c", "curl -fsSL https://deno.land/install.sh | sh"]
+      : ["install", "-g", installSpec];
+  const cmd = name === "deno" ? "sh" : "npm";
+  const result = await spawn({
+    cmd,
+    args,
+    env: filterEnvForUntrustedCode(),
+    onStderr: (chunk) => process.stderr.write(chunk),
+  });
+  if (result.exitCode !== 0) return result.stderr || `failed to install ${name}`;
+  if (name === "deno") {
+    const denoPath = join(process.env.HOME || "", ".deno", "bin");
+    process.env.PATH = `${denoPath}:${process.env.PATH}`;
+  }
+  log.info(`» installed ${name}`);
+  return null;
+}
+
+/**
+ * Put the project's package manager on PATH, by whichever route provisions it —
+ * corepack for pnpm/yarn, `npm i -g` for bun, the install script for deno.
+ * Returns an error string on failure, else null.
+ *
+ * Callers must gate this on shell being enabled; provisioning executes code.
+ *
+ * Idempotent by construction (`isCommandAvailable` short-circuits and
+ * `ensurePackageManager` caches on a `--version` match), which is what lets
+ * `main.ts` call it BEFORE the `setup` lifecycle hook and the prep phase call it
+ * again later for the cost of one `which`. That ordering is the point: a `setup`
+ * hook running `bun install` used to die with `bun: command not found` 0.8s
+ * before Pullfrog installed bun itself, because the pre-hook site only ever
+ * asked corepack — which ignores bun and deno entirely. See #1121.
+ */
+export async function provisionPackageManager(params: {
+  name: ProvisionablePackageManager;
+  declared: PackageManagerSpec | null;
+  binDir: string;
+}): Promise<string | null> {
+  if (await isCommandAvailable(params.name)) {
+    // already on PATH, but possibly the wrong version.
+    if (params.declared) {
+      await ensurePackageManager({ spec: params.declared, binDir: params.binDir });
+    }
+    return null;
+  }
+  if (params.declared) {
+    const activated = await ensurePackageManager({ spec: params.declared, binDir: params.binDir });
+    if (activated) return null;
+  }
+  const spec = params.declared ? `${params.declared.name}@${params.declared.version}` : params.name;
+  return installFallback(params.name, spec);
 }

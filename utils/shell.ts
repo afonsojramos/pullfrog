@@ -24,6 +24,24 @@ interface ShellOptions {
 }
 
 /**
+ * Node's `spawnSync` default is 1MB, and hitting it is silent: the child is
+ * SIGTERM'd, `status` comes back `null`, and the truncated buffer looks like
+ * ordinary output. A large `git diff` therefore surfaced as a bogus
+ * "exit code -1" whose detail was ~1MB of raw diff, which then went straight
+ * into the model's context. 32MB is past any git output we expect, so the
+ * common case now SUCCEEDS and flows through `spillGitOutput`'s file-backed
+ * truncation instead of the failure path. see #1113.
+ */
+const MAX_BUFFER_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Hard cap on the error detail handed back to a caller (and, through
+ * `handleToolError`, to the model). Comfortably above a real git diagnostic,
+ * far below anything that would blow a context window.
+ */
+const MAX_ERROR_DETAIL_CHARS = 20_000;
+
+/**
  * Execute a shell command safely using spawnSync with argument arrays.
  * Prevents shell injection by avoiding string interpolation in shell commands.
  *
@@ -48,6 +66,7 @@ export function $(cmd: string, args: string[], options?: ShellOptions): string {
     encoding,
     cwd: options?.cwd,
     env,
+    maxBuffer: MAX_BUFFER_BYTES,
   });
 
   const stdout = result.stdout ?? "";
@@ -75,6 +94,16 @@ export function $(cmd: string, args: string[], options?: ShellOptions): string {
 
   // Handle errors
   if (result.status !== 0) {
+    // ENOBUFS means the child was killed for exceeding MAX_BUFFER_BYTES, so
+    // `status` is null and there is no exit code to report. say what actually
+    // happened rather than inventing "exit code -1" and pasting the truncated
+    // buffer as if it were a diagnostic.
+    if (result.error && "code" in result.error && result.error.code === "ENOBUFS") {
+      throw new Error(
+        `Command produced more than ${MAX_BUFFER_BYTES / 1024 / 1024}MB of output and was terminated: ${cmd} ${args.join(" ")}`
+      );
+    }
+
     const errorResult = {
       status: result.status ?? -1,
       stdout,
@@ -90,10 +119,12 @@ export function $(cmd: string, args: string[], options?: ShellOptions): string {
     // stderr (merge conflicts, cherry-pick rejections, diff --exit-code,
     // ls-files --error-unmatch). Falling back to "Unknown error" robbed the
     // agent of any signal and forced an extra MCP round-trip. see #766.
+    // capped because this string reaches the model verbatim via handleToolError.
     const detail = [stderr, stdout]
       .map((s) => s.trim())
       .filter(Boolean)
-      .join("\n");
+      .join("\n")
+      .slice(0, MAX_ERROR_DETAIL_CHARS);
     throw new Error(
       `Command failed with exit code ${errorResult.status}: ${detail || "Unknown error"}`
     );

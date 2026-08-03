@@ -17,6 +17,7 @@ describe("renderRunError BYOK provider billing exhausted (#835)", () => {
       errorMessage: deepseekRaw,
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.summary).toContain("`deepseek` account is out of credit");
     expect(result.summary).toContain("https://platform.deepseek.com/top_up");
@@ -30,6 +31,7 @@ describe("renderRunError BYOK provider billing exhausted (#835)", () => {
       errorMessage: anthropicRaw,
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.comment).toContain("out of credit");
   });
@@ -39,6 +41,7 @@ describe("renderRunError BYOK provider billing exhausted (#835)", () => {
       errorMessage: opencodeZenRaw,
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.comment).toContain("out of credit");
   });
@@ -48,6 +51,7 @@ describe("renderRunError BYOK provider billing exhausted (#835)", () => {
       errorMessage: "Insufficient balance — provider response with no providerID tag",
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.comment).toContain("Your provider account is out of credit");
     expect(result.comment).not.toContain("Your your");
@@ -67,6 +71,7 @@ describe("renderRunError ProviderModelNotFoundError (#816)", () => {
       errorMessage: staleFreeRaw,
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.summary).toContain("no longer available in OpenCode's catalog");
     expect(result.summary).toContain("`acme/widget`");
@@ -79,6 +84,7 @@ describe("renderRunError ProviderModelNotFoundError (#816)", () => {
       errorMessage: bigPickleRaw,
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.summary).toContain("no longer available in OpenCode's catalog");
     expect(result.summary).toContain("big-pickle");
@@ -89,6 +95,7 @@ describe("renderRunError ProviderModelNotFoundError (#816)", () => {
       errorMessage: "activity timeout after 900s",
       repo,
       agentDiagnostic: undefined,
+      routerActive: false,
     });
     expect(result.summary).not.toContain("no longer available in OpenCode's catalog");
   });

@@ -36,7 +36,21 @@ type ComputeIncrementalDiffParams = {
  * - patch-text diffing (interdiff / diff-of-diffs): fragile, hunk offset noise on rebase
  * - range-diff on raw commit ranges: confused by commit reorganization across force-pushes
  */
-export function computeIncrementalDiff(params: ComputeIncrementalDiffParams): string | null {
+export type IncrementalDiffResult =
+  /** range-diff ran and produced a delta */
+  | { status: "ok"; diff: string }
+  /** range-diff ran and the two versions are identical */
+  | { status: "empty" }
+  /** range-diff could not run — most often `beforeSha` has no ancestry to
+   *  merge-base against on a shallow clone. distinct from "empty" on purpose:
+   *  they were the same `null` before, so `checkout_pr` could not tell the
+   *  agent whether there was nothing to see or whether we had simply failed.
+   *  see #1139. */
+  | { status: "unavailable"; reason: string };
+
+export function computeIncrementalDiff(
+  params: ComputeIncrementalDiffParams
+): IncrementalDiffResult {
   try {
     // $1=beforeSha, $2=baseBranch, $3=headSha
     const raw = $(
@@ -56,10 +70,15 @@ export function computeIncrementalDiff(params: ComputeIncrementalDiffParams): st
       { log: false }
     );
 
-    return postProcessRangeDiff(raw);
+    const processed = postProcessRangeDiff(raw);
+    return processed === null ? { status: "empty" } : { status: "ok", diff: processed };
   } catch (e) {
-    log.debug(`» range-diff failed: ${e instanceof Error ? e.message : String(e)}`);
-    return null;
+    const reason = e instanceof Error ? e.message : String(e);
+    // `log.warning`, not `log.debug`: debug is gated on LOG_LEVEL/ACTIONS_STEP_DEBUG,
+    // neither of which is set in production — so 174 of 744 IncrementalReview runs
+    // lost their incremental diff completely silently. see #1139.
+    log.warning(`» incremental diff unavailable: range-diff failed: ${reason}`);
+    return { status: "unavailable", reason };
   }
 }
 

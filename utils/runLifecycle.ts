@@ -97,6 +97,7 @@ export async function finalizeSuccessRun(input: {
         errorMessage: input.result.error || "agent run failed",
         repo: input.repo,
         agentDiagnostic: input.toolState.agentDiagnostic,
+        routerActive: !!input.toolContext.payload.proxyModel,
       })
     : null;
 

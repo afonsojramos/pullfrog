@@ -14,7 +14,10 @@ import { execute, tool } from "./shared.ts";
 
 export const ShellParams = type({
   command: "string",
-  description: "string",
+  // advisory and unread — no code path consumes it. kept in the schema only
+  // because it nudges the model to state intent before running a command;
+  // REQUIRING it cost a full rejected turn every time one was omitted. #1140.
+  "description?": "string",
   "timeout?": type.number.describe(
     "Timeout in MILLISECONDS (not seconds). Default 30000 (30s), max 120000 (2m). e.g. timeout: 180000 for 3 minutes; timeout: 180 means 180ms and will kill the process almost immediately."
   ),
@@ -445,6 +448,16 @@ Do NOT use this tool for git commands — use the dedicated git tools instead.`,
         proc.on("exit", done);
         proc.on("error", () => done(null));
       });
+
+      // `exit` fires when the direct `bash -c` child dies, but the stdout/stderr
+      // pipes stay open as long as any self-daemonized descendant still holds the
+      // inherited write end — and our `data` listeners keep those read streams
+      // referenced, so the event loop never drains and the action hangs after
+      // `Task complete.` (measured: up to 5.3h of billed runner time). dropping
+      // our own read ends releases the handles without killing a descendant the
+      // user deliberately backgrounded. see #1087.
+      proc.stdout?.destroy();
+      proc.stderr?.destroy();
 
       let output = stderr ? (stdout ? `${stdout}\n${stderr}` : stderr) : stdout;
       if (timedOut)

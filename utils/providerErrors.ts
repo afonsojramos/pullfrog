@@ -21,7 +21,21 @@ const PROVIDER_ERROR_PATTERNS: ProviderErrorPattern[] = [
   { regex: /\bFreeUsageLimitError\b/, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
   { regex: /Insufficient balance/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
   { regex: /credit balance is too low/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
-  { regex: /spending cap/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // "spending cap" (Gemini) and "spending limit" (xAI, #1076) are the same
+  // condition in two house styles — a configured ceiling was reached.
+  { regex: /spending (?:cap|limit)/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // xAI exhausts credits and the monthly ceiling in one 403 whose status code
+  // sits nowhere near a `status:` key, so no status pattern below fires (#1076).
+  { regex: /used all available credits/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // the OpenRouter shapes `isRouterKeylimitExhaustedError` matches. on a Router
+  // run those mean the PULLFROG wallet is empty and `renderRunError` returns a
+  // `BillingError` before ever reaching this list; on a BYOK run the very same
+  // wire text means the user's OWN OpenRouter wallet is empty, and this entry is
+  // what gives them the right dashboard instead of ours. see #1135.
+  {
+    regex: /requires more credits|Key limit exceeded \(total limit\)/i,
+    label: PROVIDER_BILLING_EXHAUSTED_LABEL,
+  },
   // auth patterns must come BEFORE rate-limit patterns. OpenRouter 401 error
   // payloads carry `x-ratelimit-*` response headers in the dump, and the
   // free-form rate-limit regex below would otherwise win on word-boundary

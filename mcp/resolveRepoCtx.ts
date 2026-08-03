@@ -1,4 +1,4 @@
-import { type RepoAccess, requireRepoState } from "../toolState.ts";
+import { type RepoAccess, repoKey } from "../toolState.ts";
 import { createOctokit, type OctokitWithPlugins } from "../utils/github.ts";
 import type { ToolContext } from "./server.ts";
 
@@ -40,8 +40,22 @@ const readOctokitByToken = new Map<string, OctokitWithPlugins>();
  */
 export function resolveRepoCtx(ctx: ToolContext, repo?: string | undefined): RepoCtx {
   const owner = ctx.repo.owner;
-  const name = repo ?? ctx.repo.name;
-  const state = requireRepoState(ctx.toolState, owner, name);
+  // `||`, not `??`: models fill optional string params with "" rather than
+  // omitting them, and `??` passed that straight through to a `owner/` key that
+  // matches nothing. 69 dead tool calls across 7 owners in the archived logs,
+  // every one of them this shape. see #1134.
+  const name = repo?.trim() || ctx.repo.name;
+  const state = ctx.toolState.repos.get(repoKey(owner, name));
+  if (!state) {
+    // `requireRepoState`'s own message names `checkout_repo`, which is only
+    // registered on --xrepo runs (server.ts) — on a single-repo run it sends the
+    // agent after a tool it cannot see, so it retries verbatim instead.
+    throw new Error(
+      ctx.xrepo
+        ? `repo ${repoKey(owner, name)} is not a registered checkout — use checkout_repo first`
+        : `repo ${repoKey(owner, name)} is not a registered checkout — this run is single-repo, so omit \`repo\` to target ${owner}/${ctx.repo.name}`
+    );
+  }
 
   // primary + write secondaries share the write-tier tokens.
   if (state.access !== "read") {

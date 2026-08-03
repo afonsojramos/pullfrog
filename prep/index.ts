@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { log } from "../utils/cli.ts";
-import { spawn } from "../utils/subprocess.ts";
+import { dirtyTrackedPaths, restoreDirtiedSince } from "../utils/worktree.ts";
 import { installNodeDependencies } from "./installNodeDependencies.ts";
 import { installPythonDependencies } from "./installPythonDependencies.ts";
 import type { PrepDefinition, PrepOptions, PrepResult } from "./types.ts";
@@ -9,49 +9,6 @@ export type { PrepOptions, PrepResult } from "./types.ts";
 
 // register all prep steps here
 const prepSteps: PrepDefinition[] = [installNodeDependencies, installPythonDependencies];
-
-/** tracked paths with staged or unstaged modifications. */
-async function dirtyTrackedPaths(): Promise<Set<string>> {
-  const result = await spawn({
-    cmd: "git",
-    args: ["diff", "--name-only", "HEAD"],
-    env: process.env,
-    activityTimeout: 0,
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `git diff --name-only HEAD failed (exit ${result.exitCode}): ${result.stderr.trim() || "(no stderr)"}`
-    );
-  }
-  return new Set(result.stdout.split("\n").filter(Boolean));
-}
-
-/**
- * discard tracked-file mods left by prep steps so the customer checkout is
- * clean before agent tools run (#906: frozen installs run package lifecycle
- * scripts that rewrite tracked generated files like the msw worker, and the
- * resulting dirt makes `checkout_pr` refuse). only paths that were clean
- * before prep are restored — pre-existing dirt and files the agent touched
- * elsewhere are never clobbered. untracked files (e.g. node_modules) are
- * unaffected.
- */
-async function restorePrepDirtiedFiles(preDirty: Set<string>): Promise<void> {
-  const dirtied = [...(await dirtyTrackedPaths())].filter((path) => !preDirty.has(path));
-  if (dirtied.length === 0) return;
-  const result = await spawn({
-    cmd: "git",
-    args: ["restore", "--staged", "--worktree", "--", ...dirtied],
-    env: process.env,
-    activityTimeout: 0,
-  });
-  if (result.exitCode !== 0) {
-    log.warning(
-      `» failed to restore ${dirtied.length} tracked file(s) modified by prep: ${result.stderr.trim() || "(no stderr)"}`
-    );
-    return;
-  }
-  log.info(`» restored ${dirtied.length} tracked file(s) modified by prep: ${dirtied.join(", ")}`);
-}
 
 /**
  * run all prep steps sequentially.
@@ -86,7 +43,10 @@ export async function runPrepPhase(options: PrepOptions): Promise<PrepResult[]> 
       }
     }
   } finally {
-    await restorePrepDirtiedFiles(preDirty);
+    // #906: frozen installs run package lifecycle scripts that rewrite tracked
+    // generated files (the msw worker, etc.), and the resulting dirt makes
+    // `checkout_pr` refuse for the rest of the run.
+    await restoreDirtiedSince({ before: preDirty, actor: "prep" });
   }
 
   const totalDurationMs = performance.now() - startTime;

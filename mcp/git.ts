@@ -17,7 +17,7 @@ import {
   detectWorkingTreeChanges,
 } from "../utils/apiCommit.ts";
 import { log } from "../utils/cli.ts";
-import { $git, $gitFetchWithDeepen } from "../utils/gitAuth.ts";
+import { $git, $gitFetchWithDeepen, TRANSIENT_AUTH_PATTERNS } from "../utils/gitAuth.ts";
 import { executeLifecycleHook, type LifecycleHookFailure } from "../utils/lifecycle.ts";
 import { $ } from "../utils/shell.ts";
 import { resolveRepoCtx } from "./resolveRepoCtx.ts";
@@ -340,15 +340,6 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /returned error: 5\d\d/i,
   /HTTP 429/,
   /returned error: 429/i,
-];
-
-// installation-token 401s on git push. GitHub intermittently mints a token its
-// git edge never accepts — it 401s for the token's whole life, so retrying the
-// same token never recovers. the cure is to re-mint a fresh token instance and
-// retry with it (see pushWithRetry). distinct from 403 permission denied.
-const TRANSIENT_AUTH_PATTERNS: RegExp[] = [
-  /Invalid username or token/,
-  /Authentication failed for 'https:\/\/github\.com\//,
 ];
 
 export function classifyPushError(msg: string): PushErrorKind {
@@ -1149,7 +1140,11 @@ export function GitFetchTool(ctx: ToolContext) {
       if (params.depth !== undefined) {
         fetchArgs.push(`--depth=${params.depth}`);
       }
-      await $gitFetchWithDeepen(fetchArgs, { token: rc.gitToken, cwd: rc.dir }, "git_fetch");
+      await $gitFetchWithDeepen(
+        fetchArgs,
+        { token: rc.gitToken, cwd: rc.dir, refreshGitToken: rc.refreshGitToken },
+        "git_fetch"
+      );
       return { success: true, ref: params.ref };
     }),
   });

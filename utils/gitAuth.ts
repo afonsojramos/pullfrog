@@ -28,7 +28,24 @@ type SafeGitSubcommand = "fetch" | "push";
 type GitAuthOptions = {
   token: string;
   cwd?: string;
+  /**
+   * re-mint the git token when GitHub hands out one its git edge never accepts.
+   * when present, an auth-class failure is retried ONCE with a fresh token.
+   */
+  refreshGitToken?: ((stale: string) => Promise<string>) | undefined;
 };
+
+/**
+ * installation-token 401s on git. GitHub intermittently mints a token its git
+ * edge never accepts, so retrying the SAME token never recovers — only a
+ * re-mint does. lives here rather than next to `classifyPushError` in
+ * `mcp/git.ts` because the fetch path needs it too and `git.ts` imports this
+ * module, not the other way round. see #1115.
+ */
+export const TRANSIENT_AUTH_PATTERNS: RegExp[] = [
+  /Invalid username or token/,
+  /Authentication failed for 'https:\/\/github\.com\//,
+];
 
 type GitResult = {
   stdout: string;
@@ -280,6 +297,28 @@ export async function $gitFetchWithDeepen(
     return await $git("fetch", args, options);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // the re-mint cure was wired only into `pushWithRetry`, so a token GitHub's
+    // git edge rejects killed `checkout_pr` unrecoverably (92 occurrences, 20
+    // runs, 0 re-mints). ONE retry, not the push path's five: the mint revokes
+    // the superseded token, and a repo running 60+ concurrent jobs would
+    // otherwise multiply mint/revoke traffic against an installation that is
+    // already rate-limited. a re-fetch of the same refspec is idempotent. #1115
+    if (TRANSIENT_AUTH_PATTERNS.some((p) => p.test(msg)) && options.refreshGitToken) {
+      log.info(
+        `» ${label ?? "git fetch"} hit an auth error, re-minting the git token and retrying`
+      );
+      const fresh = await options.refreshGitToken(options.token);
+      // recurse rather than calling `$git` directly: auth is negotiated before
+      // ref/object negotiation, so the realistic ordering is "token rejected →
+      // re-mint → the now-authenticated fetch discovers the shallow clone can't
+      // reach the ref". a bare `$git` here would skip the `--deepen` recovery
+      // below entirely. clearing `refreshGitToken` keeps the one-retry bound.
+      return await $gitFetchWithDeepen(
+        args,
+        { ...options, token: fresh, refreshGitToken: undefined },
+        label
+      );
+    }
     const isShallowUnreachable = SHALLOW_UNREACHABLE_PATTERNS.some((p) => p.test(msg));
     if (!isShallowUnreachable) throw err;
     const isShallow =

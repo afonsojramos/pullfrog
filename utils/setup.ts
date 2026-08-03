@@ -208,6 +208,13 @@ export function removeIncludeIfEntries(repoDir: string): void {
 
 export interface GitContext {
   gitToken: string;
+  /**
+   * re-mint the git token when GitHub's git edge rejects the one we hold. the
+   * fetch path had no re-mint at all, so `checkout_pr` died unrecoverably on a
+   * bad token instance while `push_branch` recovered from the identical
+   * failure. see #1115.
+   */
+  refreshGitToken?: ((stale: string) => Promise<string>) | undefined;
   owner: string;
   name: string;
   octokit: OctokitWithPlugins;

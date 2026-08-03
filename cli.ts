@@ -119,6 +119,13 @@ async function run(): Promise<void> {
 
 try {
   await run();
+  // exit explicitly rather than waiting for the event loop to drain. a leaked
+  // handle — a self-daemonized `pullfrog_shell` descendant is the one we've
+  // actually seen — otherwise strands a finished job for hours. safe here and
+  // nowhere earlier: `run()` has fully resolved, so `main()`'s `finally` (the
+  // end-of-run PATCH, artifact persistence, status checks) has already
+  // completed, and @actions/core writes its outputs synchronously. see #1087.
+  process.exit(process.exitCode ?? 0);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(pc.red(message));

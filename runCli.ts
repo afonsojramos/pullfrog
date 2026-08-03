@@ -75,7 +75,34 @@ function getUntrustedPathRoots(env: NodeJS.ProcessEnv): string[] {
   return roots;
 }
 
-function resolveExecutable(params: { command: string; env: NodeJS.ProcessEnv }): string | null {
+/**
+ * Existence + the execute bit is not proof a launcher WORKS. Self-hosted pools
+ * ship partial `externals/node24` trees whose `npx` is a shim over a
+ * `lib/cli.js` that isn't there: it passes every filesystem check and then dies
+ * with a bare `MODULE_NOT_FOUND`. Probing `--version` is what lets
+ * `resolveExecutable` keep walking PATH to the runner's working copy, and what
+ * makes the corepack fallback reachable at all. See #1084.
+ */
+function isExecutableUsable(path: string, env: NodeJS.ProcessEnv): boolean {
+  try {
+    // MUST use the same env the real invocation gets. `context.env` prepends
+    // `nodeBinDir` precisely because the action runtime's `node` may not be on
+    // the ambient PATH — and a GHA runner's `npx` is a `#!/usr/bin/env node`
+    // shebang, so probing with the inherited env exits 127 and would demote a
+    // perfectly good launcher (then throw, when corepack fails the same way).
+    execFileSync(path, ["--version"], { stdio: "ignore", env });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveExecutable(params: {
+  command: string;
+  env: NodeJS.ProcessEnv;
+  /** probe each candidate before accepting it, and keep walking PATH if it fails */
+  verify?: boolean;
+}): string | null {
   const pathValue = params.env.PATH ?? "";
   const untrustedRoots = getUntrustedPathRoots(params.env);
   const pathEntries = pathValue
@@ -90,9 +117,12 @@ function resolveExecutable(params: { command: string; env: NodeJS.ProcessEnv }):
   for (const pathEntry of pathEntries) {
     for (const extension of extensions) {
       const candidate = join(pathEntry, `${params.command}${extension.toLowerCase()}`);
-      if (canAccessExecutable(candidate)) {
-        return candidate;
+      if (!canAccessExecutable(candidate)) continue;
+      if (params.verify && !isExecutableUsable(candidate, params.env)) {
+        console.warn(`» ${candidate} is not runnable, continuing to search PATH`);
+        continue;
       }
+      return candidate;
     }
   }
 
@@ -168,21 +198,33 @@ function requireExecutable(params: {
 }
 
 function runPackageCli(context: RuntimeContext, packageSpec: string, cliArgs: string[]): void {
-  const npxPath = resolveExecutable({ command: "npx", env: context.env });
+  // `verify` here and not in `requireExecutable`: this is the one resolution
+  // whose failure is unattributable, because a broken launcher dies before any
+  // of our logging exists. see #1084.
+  const npxPath = resolveExecutable({ command: "npx", env: context.env, verify: true });
   if (npxPath) {
+    console.log(`» running ${packageSpec} via ${npxPath}`);
     runCommand({ context, command: npxPath, args: ["--yes", packageSpec, ...cliArgs] });
     return;
   }
 
-  const corepackPath = resolveExecutable({ command: "corepack", env: context.env });
+  const corepackPath = resolveExecutable({ command: "corepack", env: context.env, verify: true });
   if (corepackPath) {
     console.warn("» npx not found, using corepack pnpm dlx");
     runCommand({ context, command: corepackPath, args: ["pnpm", "dlx", packageSpec, ...cliArgs] });
     return;
   }
 
+  // `::error::` written directly rather than via @actions/core: this is the
+  // bootstrap, deliberately dependency-light, and it runs before any of our
+  // error plumbing is initialized. without it a runner with a broken launcher
+  // fails with no annotation and no PR comment at all.
+  console.log(
+    `::error::Pullfrog could not start: no working npx or corepack on this runner's PATH. ` +
+      `This usually means a self-hosted runner has an incomplete Node installation. PATH was: ${context.env.PATH ?? "<empty>"}`
+  );
   throw new Error(
-    `could not find npx or corepack on PATH to run ${packageSpec}; ` +
+    `could not find a working npx or corepack on PATH to run ${packageSpec}; ` +
       `runtime PATH was: ${context.env.PATH ?? "<empty>"}`
   );
 }

@@ -82,6 +82,7 @@ import { trackChild, untrackChild } from "../utils/subprocess.ts";
 import type { TodoTracker } from "../utils/todoTracking.ts";
 import { getDevDependencyVersion } from "../utils/version.ts";
 import { resolveVertexOpenCodeModel } from "../utils/vertex.ts";
+import { dirtyTrackedPaths, restoreDirtiedSince } from "../utils/worktree.ts";
 import { GIT_NATIVE_READ_DENY_OPENCODE, GIT_NATIVE_WRITE_DENY_OPENCODE } from "./nativeFsDenies.ts";
 import {
   buildOpencodeSubagentGateSource,
@@ -1189,6 +1190,14 @@ export const opencode = agent({
     log.debug(`» working directory: ${repoDir}`);
 
     // ── boot server + create session ─────────────────────────────────────────
+    // opencode's instance bootstrap writes into the project directory: it
+    // injects `$schema` into any `opencode.json` it loads, and installs
+    // `@opencode-ai/plugin` into `.opencode/` when the repo ships project
+    // plugins. a repo that TRACKS either file goes dirty, and since the writes
+    // land after prep's restore window nothing owned them — `checkout_pr` then
+    // refused for the rest of the run (#1133). the binary exposes no
+    // project-plugin-root override, so snapshot here and restore below.
+    const preBootDirty = await dirtyTrackedPaths();
     const server = await bootOpencodeServer({ cliPath, env, cwd: repoDir });
     // the SDK's bundled fetch tries to disable per-request timeouts via the
     // bun-only `req.timeout = false` no-op, which does nothing under node/undici
@@ -1223,6 +1232,10 @@ export const opencode = agent({
       });
 
       const sessionResp = await client.session.create({ title: "Pullfrog" });
+      // config and plugins load lazily during instance bootstrap — on the first
+      // request, not at spawn — so this is the earliest point the startup writes
+      // above have all landed, and it is still ahead of the first agent turn.
+      await restoreDirtiedSince({ before: preBootDirty, actor: "agent startup" });
       if (sessionResp.error || !sessionResp.data) {
         const msg = sessionResp.error
           ? formatPromptError(sessionResp.error)

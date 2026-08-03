@@ -3,6 +3,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { detect } from "package-manager-detector";
 import { agents } from "./agents/index.ts";
 import { subagentDeniedToolNames } from "./agents/subagentToolGates.ts";
 import { reportProgress } from "./mcp/comment.ts";
@@ -48,8 +49,9 @@ import {
 } from "./utils/openCodeModels.ts";
 import { applyOverrides } from "./utils/overrides.ts";
 import {
-  ensurePackageManager,
+  type ProvisionablePackageManager,
   packageManagerBinDir,
+  provisionPackageManager,
   resolvePackageManagerSpec,
 } from "./utils/packageManager.ts";
 import { aggregateUsage, patchWorkflowRunFields } from "./utils/patchWorkflowRunFields.ts";
@@ -421,8 +423,21 @@ export async function main(): Promise<MainResult> {
     // (prepended to PATH), not the node bin dir, so a setup `npm i -g pnpm`
     // can't collide with it.
     const pmSpec = await resolvePackageManagerSpec(process.cwd());
-    if (pmSpec) {
-      await ensurePackageManager({ spec: pmSpec, binDir: packageManagerBinDir(tmpdir) });
+    // resolve the manager the same way the prep phase will (declared spec first,
+    // then lockfile) and provision it by whatever route it needs. asking corepack
+    // alone was the bug: it manages pnpm and yarn and ignores bun and deno, so a
+    // `setup` hook running `bun install` died with `bun: command not found` 0.8s
+    // before Pullfrog installed bun itself. see #1121.
+    const pmDetected = await detect({ cwd: process.cwd(), strategies: ["lockfile"] });
+    const pmName = pmSpec?.name ?? (pmDetected?.name as ProvisionablePackageManager) ?? "npm";
+    // provisioning executes code, so it is gated on shell exactly like the prep phase.
+    if (payload.shell !== "disabled") {
+      const pmError = await provisionPackageManager({
+        name: pmName,
+        declared: pmSpec,
+        binDir: packageManagerBinDir(tmpdir),
+      });
+      if (pmError) log.warning(`» could not provision ${pmName}: ${pmError}`);
     }
     timer.checkpoint("packageManager");
 
@@ -802,6 +817,7 @@ export async function main(): Promise<MainResult> {
       errorMessage,
       repo: runContext.repo,
       agentDiagnostic: toolState.agentDiagnostic,
+      routerActive: !!payload.proxyModel,
     });
     await writeRunErrorOutputs({ rendered, toolState });
 

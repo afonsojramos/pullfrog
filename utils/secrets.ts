@@ -99,6 +99,41 @@ function isSafeEnvVar(key: string): boolean {
   return SAFE_ENV_PREFIXES.some((p) => key.startsWith(p));
 }
 
+/**
+ * GitHub Actions workflow-command FILE paths. Writing to any of them mutates the
+ * job itself — `$GITHUB_ENV` injects env into later steps, `$GITHUB_PATH`
+ * prepends to PATH, `$GITHUB_OUTPUT` forges step outputs. They pass
+ * `isSafeEnvVar` on the `GITHUB_`/`RUNNER_` prefix and carry no secret, so
+ * they were never the allowlist's concern — but a package manager running a
+ * third-party `postinstall` is arbitrary code execution OUTSIDE the shell tool's
+ * mount namespace (see wiki/security.md), which is exactly the boundary those
+ * files let it cross. Handing it the exact paths is strictly worse than making
+ * it guess them.
+ */
+const WORKFLOW_COMMAND_ENV_NAMES = [
+  "GITHUB_ENV",
+  "GITHUB_PATH",
+  "GITHUB_OUTPUT",
+  "GITHUB_STATE",
+  "GITHUB_STEP_SUMMARY",
+  // dropping the five paths above but keeping RUNNER_TEMP would be theatre:
+  // the file-command files live in `$RUNNER_TEMP/_runner_file_commands/`, so the
+  // directory is one `ls` away. nothing in the install path reads it (only our
+  // own leak-surface wipe in `setup.ts`, which runs in the parent), and package
+  // managers use TMPDIR.
+  "RUNNER_TEMP",
+];
+
+/**
+ * `filterEnv()` minus the workflow-command file paths. For subprocesses that
+ * execute third-party code we do not sandbox — the dependency installers.
+ */
+export function filterEnvForUntrustedCode(): Record<string, string> {
+  const env = filterEnv();
+  for (const name of WORKFLOW_COMMAND_ENV_NAMES) delete env[name];
+  return env;
+}
+
 /** filter env vars using default-deny allowlist: safe set + user allowlist */
 export function filterEnv(): Record<string, string> {
   const filtered: Record<string, string> = {};

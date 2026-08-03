@@ -371,25 +371,34 @@ export function isApiKeyAuthError(text: string): boolean {
     /Failed to authenticate\. API Error:/i.test(text) ||
     /Your api key:.*is invalid/i.test(text) ||
     isClaudeSubscriptionDisabledError(text) ||
+    isClaudeSessionLimitError(text) ||
     isOAuthCredentialExpiredError(text)
   );
 }
 
 /**
- * Expired OAuth-connection credential shapes (#931) — the fix is to
- * re-authenticate the provider connection (`pullfrog auth <provider>`), not
- * to rotate a repo-secret API key, so `formatApiKeyErrorSummary` renders
- * distinct copy for these. Patterns are deliberately narrow:
- * "authentication token has expired" (not bare "token has expired") so a
- * GitHub installation-token expiry can't be misread as an LLM key problem.
- * also covers server-side revocation ("authentication token has been
- * invalidated", OpenAI `token_invalidated`, #1041) and the Claude CLI's
- * "OAuth access token has expired" phrasing (#1072) — same remediation.
+ * Dead OAuth-connection credential — the provider is telling us the token
+ * itself is finished (expired, invalidated, revoked, or unrecognised), and the
+ * only fix is to re-authenticate the connection (`pullfrog auth <provider>`),
+ * never to rotate a repo-secret API key. `formatApiKeyErrorSummary` renders
+ * distinct copy for the whole class.
+ *
+ * Match the SHAPE, not the sentence. Four prior issues (#931, #1041, #1072,
+ * #1122) each landed one more literal and the next provider rewording walked
+ * straight through, so these patterns are parameterised over the two things
+ * that vary — which token noun the provider uses, and which terminal state it
+ * reports. Still deliberately narrow on the noun ("authentication token" /
+ * "OAuth access token", never bare "token") so a GitHub installation-token
+ * expiry can't be misread as an LLM credential problem.
  */
 export function isOAuthCredentialExpiredError(text: string): boolean {
   return (
-    /authentication token has (expired|been invalidated)/i.test(text) ||
-    /OAuth access token has expired/i.test(text) ||
+    /(?:authentication|OAuth access) token has (?:expired|been (?:invalidated|revoked))/i.test(
+      text
+    ) ||
+    // the provider no longer recognises the token at all (#1086) — same dead
+    // credential, phrased as a lookup miss rather than a state transition.
+    /Could not find the appropriate key in your authentication token/i.test(text) ||
     /Token refresh failed/i.test(text)
   );
 }
@@ -401,6 +410,29 @@ export function isOAuthCredentialExpiredError(text: string): boolean {
  */
 export function isClaudeSubscriptionDisabledError(text: string): boolean {
   return /disabled Claude subscription access/i.test(text);
+}
+
+/**
+ * Claude Pro/Max usage cap (#1104): `You've hit your session limit · resets
+ * 9:20pm (UTC)`. A quota condition, not a credential one — the subscription is
+ * healthy and will work again at the reset.
+ *
+ * The rungs are ENUMERATED rather than matched with a wildcard. A `[A-Za-z]+`
+ * slot also swallows OpenAI Codex's `You've hit your usage limit.`, and the copy
+ * this gates hardcodes "Your Claude subscription" and an `ANTHROPIC_API_KEY`
+ * remedy — so a ChatGPT-subscription run (a supported configuration; see
+ * `installCodexAuth`) would be told to fix a subscription it does not have.
+ * That is the exact wrong-CTA defect this classifier exists to prevent.
+ *
+ * Capture group 1 is the reset stamp when present, bounded by quote/newline
+ * because the message often arrives inside a JSON dump — a greedy `.+` there
+ * renders `9:20pm (UTC)","type":...` into the user-facing copy.
+ */
+const CLAUDE_SESSION_LIMIT_PATTERN =
+  /hit your (?:session|weekly|five-hour|Opus|Sonnet|Haiku)\s+limit(?:\s*·\s*resets\s+([^"\n]+))?/i;
+
+export function isClaudeSessionLimitError(text: string): boolean {
+  return CLAUDE_SESSION_LIMIT_PATTERN.test(text);
 }
 
 /**
@@ -424,6 +456,20 @@ export function formatApiKeyErrorSummary(params: {
 
   const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
   const settingsUrl = `${getApiUrl()}/console/${params.owner}/${params.name}`;
+
+  // the subscription hit its usage cap. checked before every credential branch
+  // below: nothing is wrong with the token, so a "rotate your key" CTA would
+  // send the user to fix something that isn't broken. lead with the reset time
+  // — it's the only thing that stops them re-triggering into the same wall.
+  if (isClaudeSessionLimitError(params.raw)) {
+    const reset = CLAUDE_SESSION_LIMIT_PATTERN.exec(params.raw)?.[1]?.trim();
+    const resets = reset ? ` It resets at **${reset}**.` : "";
+    return [
+      `**Your Claude subscription has hit its usage limit.**${resets} Re-trigger Pullfrog after the reset, or add an \`ANTHROPIC_API_KEY\` repo secret — Pullfrog routes around an exhausted subscription automatically when one is present.`,
+      "",
+      `[Add repo secret →](${githubSecretsUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    ].join("\n");
+  }
 
   // an org admin disabled Claude Code subscription access — re-authenticating
   // can't clear an entitlement flag, so name the two remedies the provider's

@@ -5,6 +5,7 @@ import { type } from "arktype";
 import { resolveBodyAssets } from "../utils/body.ts";
 import { stripExistingFooter } from "../utils/buildPullfrogFooter.ts";
 import { log } from "../utils/log.ts";
+import * as yes from "../yes/index.ts";
 import type { ToolContext } from "./server.ts";
 import { execute, tool } from "./shared.ts";
 
@@ -456,14 +457,70 @@ export function buildThreadBlocks(
   return threadBlocks;
 }
 
-async function getReviewThreads(input: GetReviewDataInput) {
-  const response = await input.octokit.graphql<ReviewThreadsQueryResponse>(REVIEW_THREADS_QUERY, {
-    owner: input.owner,
-    name: input.name,
-    prNumber: input.pullNumber,
-  });
+/**
+ * The thread graph and the file list are PR-scoped: `REVIEW_THREADS_QUERY` pulls
+ * EVERY thread on the PR and the review filter is applied client-side below, so
+ * the responses are byte-identical for every `reviewId` on the same PR.
+ * `get_review_comments` was refetching both on every call — 28 identical
+ * round trips per run across 84 runs, contributing to installation-wide API
+ * limit exhaustion. See #1097.
+ *
+ * The 60s TTL is chosen, not incidental: it covers the burst without outliving
+ * a resolve loop, since `isResolved` / `isOutdated` drive the `[RESOLVED]` /
+ * `[OUTDATED]` markers and `resolve_review_thread` mutates that state mid-run.
+ * `resolveReviewThreadCache` invalidates explicitly on top of that.
+ *
+ * Two-arg form on purpose: `yes.op` excludes the second parameter from the
+ * cache key, so the octokit client is never hashed into it.
+ */
+const fetchAllReviewThreads = yes.op(
+  async (key: { owner: string; name: string; pullNumber: number }, ctx: { octokit: Octokit }) => {
+    const response = await ctx.octokit.graphql<ReviewThreadsQueryResponse>(REVIEW_THREADS_QUERY, {
+      owner: key.owner,
+      name: key.name,
+      prNumber: key.pullNumber,
+    });
+    return response.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+  },
+  { ttl: 60_000, name: "reviewThreads" }
+);
 
-  const allThreads = response.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+const fetchPrFiles = yes.op(
+  async (key: { owner: string; name: string; pullNumber: number }, ctx: { octokit: Octokit }) =>
+    ctx.octokit.paginate(ctx.octokit.rest.pulls.listFiles, {
+      owner: key.owner,
+      repo: key.name,
+      pull_number: key.pullNumber,
+      per_page: 100,
+    }),
+  { ttl: 60_000, name: "prFiles" }
+);
+
+/**
+ * Drop the cached thread graph after a mutation that changes resolved state,
+ * so the agent can never be shown its own just-resolved thread as unresolved.
+ * Repo-wide rather than per-PR because `resolve_review_thread` takes only a
+ * GraphQL node ID — and a run targets one PR anyway, so the wider sweep costs
+ * nothing and cannot miss.
+ */
+function invalidateReviewThreadCache(repo: { owner: string; name: string }): void {
+  fetchAllReviewThreads.invalidate(
+    (cached) => cached.owner === repo.owner && cached.name === repo.name
+  );
+}
+
+async function getReviewThreads(input: GetReviewDataInput) {
+  // CLONE before returning: the caller rewrites `comment.body` in place while
+  // resolving inline assets, and handing back the cached objects would make the
+  // next call re-resolve its own output — re-downloading every asset, since the
+  // rewritten body still matches `hasImages` and `bodyHTML` is still the
+  // original. cloning here keeps the cached copy pristine.
+  const allThreads = structuredClone(
+    await fetchAllReviewThreads(
+      { owner: input.owner, name: input.name, pullNumber: input.pullNumber },
+      { octokit: input.octokit }
+    )
+  );
 
   if (allThreads.length >= 100) {
     log.warning(
@@ -586,12 +643,10 @@ export async function getReviewData(input: GetReviewDataInput): Promise<
   // building thread blocks, and an empty array short-circuits below.
   const prFiles =
     threads.length > 0
-      ? await input.octokit.paginate(input.octokit.rest.pulls.listFiles, {
-          owner: input.owner,
-          repo: input.name,
-          pull_number: input.pullNumber,
-          per_page: 100,
-        })
+      ? await fetchPrFiles(
+          { owner: input.owner, name: input.name, pullNumber: input.pullNumber },
+          { octokit: input.octokit }
+        )
       : [];
 
   if (review.data.body) {
@@ -783,6 +838,7 @@ export function ResolveReviewThreadTool(ctx: ToolContext) {
 
         const thread = response.resolveReviewThread.thread;
         log.info(`» resolved review thread ${thread.id}`);
+        invalidateReviewThreadCache({ owner: ctx.repo.owner, name: ctx.repo.name });
 
         return {
           thread_id: thread.id,

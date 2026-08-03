@@ -206,6 +206,7 @@ type EnsureBeforeShaParams = {
   owner: string;
   repo: string;
   gitToken: string;
+  refreshGitToken?: ((stale: string) => Promise<string>) | undefined;
   isShallow: boolean;
 };
 
@@ -264,13 +265,28 @@ async function ensureBeforeShaReachable(params: EnsureBeforeShaParams): Promise<
     });
     await $gitFetchWithDeepen(
       ["--no-tags", ...(params.isShallow ? ["--depth=1"] : []), "origin", tempBranch],
-      { token: params.gitToken },
+      { token: params.gitToken, refreshGitToken: params.refreshGitToken },
       `before_sha temp branch ${tempBranch}`
     );
     log.debug(`» fetched before_sha via temp branch ${tempBranch}`);
     return true;
   } catch (e) {
     log.debug(`» failed to fetch before_sha: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+
+/**
+ * Is this commit object present locally? `merge-base` failing does NOT tell us
+ * which case we are in — a missing object and a missing common ancestor collapse
+ * into the same `sh -c` failure — and `git diff-tree` needs the object too. So
+ * ask directly before recommending it. See #1139.
+ */
+function hasLocalCommit(sha: string | undefined): boolean {
+  if (!sha) return false;
+  try {
+    return $("git", ["cat-file", "-t", sha], { log: false }).trim() === "commit";
+  } catch {
     return false;
   }
 }
@@ -383,7 +399,7 @@ export async function checkoutPrBranch(
   pr: PrData,
   params: CheckoutPrBranchParams
 ): Promise<{ hookWarning?: string | undefined }> {
-  const { octokit, owner, name, gitToken, toolState, beforeSha } = params;
+  const { octokit, owner, name, gitToken, refreshGitToken, toolState, beforeSha } = params;
 
   // SECURITY: PR ref names come from GitHub and are attacker-controlled on
   // forks (the PR author picks headRef freely, and baseRef could be a
@@ -427,7 +443,7 @@ export async function checkoutPrBranch(
   log.debug(`» fetching base branch (${pr.baseRef})...`);
   await $gitFetchWithDeepen(
     ["--no-tags", "origin", pr.baseRef],
-    { token: gitToken },
+    { token: gitToken, refreshGitToken },
     `base branch ${pr.baseRef}`
   );
 
@@ -455,7 +471,7 @@ export async function checkoutPrBranch(
         try {
           await $gitFetchWithDeepen(
             ["--no-tags", "origin", `+pull/${pr.number}/head:${localBranch}`],
-            { token: gitToken },
+            { token: gitToken, refreshGitToken },
             `PR #${pr.number}`
           );
         } catch (e) {
@@ -491,6 +507,7 @@ export async function checkoutPrBranch(
         owner,
         repo: name,
         gitToken,
+        refreshGitToken,
         isShallow,
       })
     : false;
@@ -664,6 +681,7 @@ export function CheckoutPrTool(ctx: ToolContext) {
       owner: ctx.repo.owner,
       name: ctx.repo.name,
       gitToken: ctx.gitToken,
+      refreshGitToken: ctx.refreshGitToken,
       toolState: ctx.toolState,
       shell: ctx.payload.shell,
       postCheckoutScript: ctx.postCheckoutScript,
@@ -683,6 +701,8 @@ export function CheckoutPrTool(ctx: ToolContext) {
 
     // compute incremental diff if we have a beforeSha to compare against
     let incrementalDiffPath: string | undefined;
+    let incrementalUnavailable = false;
+    let incrementalUnavailableReason: string | undefined;
     if (primary.beforeSha) {
       const beforeShort = primary.beforeSha.slice(0, 7);
       const incremental = computeIncrementalDiff({
@@ -690,15 +710,18 @@ export function CheckoutPrTool(ctx: ToolContext) {
         beforeSha: primary.beforeSha,
         headSha: checkoutSha,
       });
-      if (incremental) {
+      if (incremental.status === "ok") {
         incrementalDiffPath = join(
           tempDir,
           `pr-${pull_number}-${beforeShort}-${headShort}-incremental.diff`
         );
-        writeFileSync(incrementalDiffPath, incremental);
+        writeFileSync(incrementalDiffPath, incremental.diff);
         log.info(
-          `» incremental diff computed (${incremental.length} bytes) → ${incrementalDiffPath}`
+          `» incremental diff computed (${incremental.diff.length} bytes) → ${incrementalDiffPath}`
         );
+      } else if (incremental.status === "unavailable") {
+        incrementalUnavailable = true;
+        incrementalUnavailableReason = incremental.reason;
       }
     }
 
@@ -778,7 +801,18 @@ export function CheckoutPrTool(ctx: ToolContext) {
       ? `IMPORTANT: incrementalDiffPath contains ONLY the changes since the last reviewed version ` +
         `(computed via range-diff). you MUST read incrementalDiffPath FIRST to understand what changed, ` +
         `then use diffPath for full PR context. do NOT skip the incremental diff. `
-      : "";
+      : incrementalUnavailable
+        ? // say it FAILED rather than leaving the agent to infer "nothing changed"
+          // from an absent field. only suggest diff-tree when the previous
+          // revision is actually PRESENT locally — if the fetch never landed it,
+          // diff-tree needs that object too and would fail identically. see #1139.
+          `NOTE: an incremental diff was expected for this run but could not be computed` +
+          (incrementalUnavailableReason ? ` (${incrementalUnavailableReason})` : "") +
+          `. review the full diffPath instead. ` +
+          (hasLocalCommit(primary.beforeSha)
+            ? `if you need just the delta, \`git diff-tree -p ${primary.beforeSha} ${checkoutSha}\` works without a merge base. `
+            : `the previous revision was never fetched into this shallow checkout, so the full diff is the only option. `)
+        : "";
 
     const impactInstructions = impactPath
       ? ` impactPath contains bounded, deterministic reference leads for semantic atoms changed by the PR. ` +

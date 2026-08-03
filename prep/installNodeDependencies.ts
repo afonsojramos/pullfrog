@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { detect } from "package-manager-detector";
 import { resolveCommand } from "package-manager-detector/commands";
 import { log } from "../utils/cli.ts";
-import { ensurePackageManager, resolvePackageManagerSpec } from "../utils/packageManager.ts";
+import { provisionPackageManager, resolvePackageManagerSpec } from "../utils/packageManager.ts";
+import { filterEnvForUntrustedCode } from "../utils/secrets.ts";
 import { spawn } from "../utils/subprocess.ts";
 import type { NodePackageManager, NodePrepResult, PrepDefinition, PrepOptions } from "./types.ts";
 
@@ -11,40 +12,9 @@ async function isCommandAvailable(command: string): Promise<boolean> {
   const result = await spawn({
     cmd: "which",
     args: [command],
-    env: { PATH: process.env.PATH || "" },
+    env: filterEnvForUntrustedCode(),
   });
   return result.exitCode === 0;
-}
-
-// fallback installers for managers corepack doesn't ship shims for.
-// pnpm and yarn are handled by `ensurePackageManager` (corepack); bun and
-// deno fall through to here because corepack ignores them.
-async function installFallback(
-  name: NodePackageManager,
-  installSpec: string
-): Promise<string | null> {
-  if (name === "npm") return null;
-  log.info(`» installing ${installSpec} via npm install -g (corepack does not manage ${name})`);
-  const args =
-    name === "deno"
-      ? ["-c", "curl -fsSL https://deno.land/install.sh | sh"]
-      : ["install", "-g", installSpec];
-  const cmd = name === "deno" ? "sh" : "npm";
-  const result = await spawn({
-    cmd,
-    args,
-    env: { PATH: process.env.PATH || "", HOME: process.env.HOME || "" },
-    onStderr: (chunk) => process.stderr.write(chunk),
-  });
-  if (result.exitCode !== 0) {
-    return result.stderr || `failed to install ${name}`;
-  }
-  if (name === "deno") {
-    const denoPath = join(process.env.HOME || "", ".deno", "bin");
-    process.env.PATH = `${denoPath}:${process.env.PATH}`;
-  }
-  log.info(`» installed ${name}`);
-  return null;
 }
 
 export const installNodeDependencies: PrepDefinition = {
@@ -83,8 +53,8 @@ export const installNodeDependencies: PrepDefinition = {
     // provisioning: corepack for pnpm/yarn, legacy npm-install-g for bun/deno.
     // when shell is disabled we can't run installers (they execute code), so
     // we require the binary to already be on PATH.
-    if (!(await isCommandAvailable(packageManager))) {
-      if (options.ignoreScripts) {
+    if (options.ignoreScripts) {
+      if (!(await isCommandAvailable(packageManager))) {
         return {
           language: "node",
           packageManager,
@@ -94,27 +64,22 @@ export const installNodeDependencies: PrepDefinition = {
           ],
         };
       }
-
-      let provisioned = false;
-      if (declared)
-        provisioned = await ensurePackageManager({ spec: declared, binDir: options.binDir });
-      if (!provisioned) {
-        const fallbackSpec = declared ? `${declared.name}@${declared.version}` : packageManager;
-        const installError = await installFallback(packageManager, fallbackSpec);
-        if (installError) {
-          return {
-            language: "node",
-            packageManager,
-            dependenciesInstalled: false,
-            issues: [installError],
-          };
-        }
+    } else {
+      // idempotent, and main.ts already ran this before the setup hook — so on
+      // the common path this costs one `which`. see #1121.
+      const installError = await provisionPackageManager({
+        name: packageManager,
+        declared,
+        binDir: options.binDir,
+      });
+      if (installError) {
+        return {
+          language: "node",
+          packageManager,
+          dependenciesInstalled: false,
+          issues: [installError],
+        };
       }
-    } else if (declared) {
-      // PATH already has the binary — but it may be the wrong version.
-      // ensurePackageManager is idempotent (caches on `--version` match) so
-      // this is cheap when main.ts already activated it.
-      await ensurePackageManager({ spec: declared, binDir: options.binDir });
     }
 
     // frozen-lockfile install only. eager prep is non-mutating by contract:
@@ -161,7 +126,7 @@ export const installNodeDependencies: PrepDefinition = {
     const result = await spawn({
       cmd: resolved.command,
       args: resolved.args,
-      env: { PATH: process.env.PATH || "", HOME: process.env.HOME || "" },
+      env: filterEnvForUntrustedCode(),
     });
 
     const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();

@@ -137,6 +137,7 @@ export function CheckoutRepoTool(ctx: ToolContext) {
           owner,
           name: repo,
           gitToken: rc.gitToken,
+          refreshGitToken: rc.refreshGitToken,
           octokit: rc.octokit,
           toolState: ctx.toolState,
           shell: ctx.payload.shell,
