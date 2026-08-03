@@ -49,6 +49,7 @@ import {
 import { SelectModeTool } from "./selectMode.ts";
 import { addTools, type PullfrogTool } from "./shared.ts";
 import { KillBackgroundTool, ShellTool } from "./shell.ts";
+import { SimilarIssuesTool } from "./similarIssues.ts";
 import { UploadFileTool } from "./upload.ts";
 import { CheckoutRepoTool, ListReposTool } from "./xrepo.ts";
 
@@ -82,6 +83,7 @@ export interface ToolContext {
   // commits are created via the GitHub API (server-side signed, Verified)
   // instead of local git commit + push_branch. see CommitChangesTool.
   signedCommits: boolean;
+  repoIntelligence: boolean;
   modeInstructions: Record<string, string>;
   toolState: ToolState;
   runId: number | undefined;
@@ -169,6 +171,10 @@ function buildCommonTools(ctx: ToolContext, outputSchema?: JsonSchema): Pullfrog
   // list unchanged). list_repos + checkout_repo gate further on ctx.xrepo.
   if (ctx.xrepo) {
     tools.push(ListReposTool(ctx), CheckoutRepoTool(ctx));
+  }
+
+  if (ctx.repoIntelligence && ctx.payload.event.issue_number && !ctx.payload.event.is_pr) {
+    tools.push(SimilarIssuesTool(ctx));
   }
 
   const isStandalone = ctx.payload.event.trigger === "unknown";

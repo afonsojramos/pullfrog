@@ -71,6 +71,7 @@ export {
   stringifyCodexAuthBody,
 } from "../utils/codexOAuth.ts";
 export type { ResourceUsage, UsageSummary } from "../utils/github.ts";
+export { isPullfrog } from "../utils/isPullfrog.ts";
 export {
   isLeapingIntoActionCommentBody,
   LEAPING_INTO_ACTION_PREFIX,

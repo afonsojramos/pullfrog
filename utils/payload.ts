@@ -5,6 +5,7 @@ import { type } from "arktype";
 import { type AuthorPermission, type PayloadEvent, parseEffortPosition } from "../external.ts";
 import packageJson from "../package.json" with { type: "json" };
 import { log } from "./cli.ts";
+import { isPullfrog } from "./isPullfrog.ts";
 import type { RepoSettings } from "./runContext.ts";
 import { validateCompatibility } from "./versioning.ts";
 
@@ -160,16 +161,6 @@ function resolveNonPromptInputs() {
     progress_comments: core.getInput("progress_comments") || undefined,
   });
 }
-
-/**
- * true when `actor` is Pullfrog's own GitHub identity — the bot login
- * (`pullfrog[bot]` / `pullfrogdev[bot]`) or the bare account. used to skip
- * self-triggered events and to recognize Pullfrog-originated review threads.
- */
-export const isPullfrog = (actor: string | null | undefined): boolean => {
-  actor = actor?.replace("[bot]", "");
-  return !!actor && (actor === "pullfrog" || actor === "pullfrogdev");
-};
 
 export function resolvePayload(
   resolvedPromptInput: ResolvedPromptInput,

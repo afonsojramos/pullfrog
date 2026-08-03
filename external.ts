@@ -246,6 +246,7 @@ interface FixReviewEvent extends BasePayloadEvent {
 interface ImplementPlanEvent extends BasePayloadEvent {
   trigger: "implement_plan";
   issue_number: number;
+  is_pr?: true;
   plan_comment_id: number;
   /** plan content is the primary content (null if already in prompt) */
   body: string | null;

@@ -473,6 +473,7 @@ export async function main(): Promise<MainResult> {
       prApproveEnabled: runContext.repoSettings.prApproveEnabled,
       autoMergeEnabled: runContext.repoSettings.autoMergeEnabled,
       signedCommits: runContext.repoSettings.signedCommits,
+      repoIntelligence: runContext.repoSettings.repoIntelligence,
       modeInstructions: runContext.repoSettings.modeInstructions,
       toolState,
       runId: runInfo.runId,
