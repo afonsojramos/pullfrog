@@ -376,12 +376,7 @@ ${
     ? `
 #### Duplicate detection (enabled for this repository)
 
-This repository indexes its issues, so triage starts by checking whether this one already exists:
-- Call \`${t("find_similar_issues")}\` for issue #${ctx.payload.event.issue_number} BEFORE planning or implementing. It is cheap, and a duplicate makes the rest of the work unnecessary.
-- Candidates are semantic matches, not verdicts. Read the promising ones with \`${t("get_issue")}\` and decide yourself — most issues have a nearest neighbour that is merely related.
-- If it IS a duplicate, say so and link the original instead of producing a plan. Mention whether the original is already closed or fixed.
-- If it is not, continue with the task normally and do not mention the check.
-- Never close, label, or otherwise mutate either issue on similarity alone — report and let a human act.
+Call \`${t("find_similar_issues")}\` for #${ctx.payload.event.issue_number} before planning. If it duplicates an existing issue, link that instead of producing a plan; never close or label on similarity alone.
 `
     : ""
 }
