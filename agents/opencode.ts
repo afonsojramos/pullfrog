@@ -66,7 +66,11 @@ import { Agent, fetch as undiciFetch } from "undici";
 import { pullfrogMcpName } from "../external.ts";
 import { BEDROCK_MODEL_ID_ENV } from "../models.ts";
 import type { ToolState } from "../toolState.ts";
-import { AGENT_ACTIVITY_TIMEOUT_MS, markActivity } from "../utils/activity.ts";
+import {
+  AGENT_ACTIVITY_TIMEOUT_MS,
+  AGENT_FIRST_EVENT_TIMEOUT_MS,
+  markActivity,
+} from "../utils/activity.ts";
 import type { AgentDiagnostic } from "../utils/agentHangReport.ts";
 import { formatJsonValue, log } from "../utils/cli.ts";
 import { installCodexAuth } from "../utils/codexHome.ts";
@@ -379,6 +383,10 @@ interface RunnerContext {
   eventCount: number;
   /** last activity timestamp (event-stream silence detector). */
   lastEventAt: number;
+  /** whether the model has produced a part of its own; selects the watchdog's budget. */
+  sawModelOutput: boolean;
+  /** message our own submitted prompt echoes back on — see `isModelOutput`. */
+  promptMessageID: string | undefined;
   /** active task dispatch metadata keyed by callID (for subagent timing). */
   taskDispatchByCallID: Map<string, { label: string; startedAt: number }>;
   /**
@@ -434,6 +442,31 @@ async function consumeEvents(ctx: RunnerContext, signal: AbortSignal): Promise<v
   }
 }
 
+/**
+ * Whether a part is the model's own output rather than our submission echoed
+ * back. `session.prompt` publishes the prompt we just sent as a `text` part
+ * immediately, before the provider has been contacted — so "any part arrived"
+ * is not the signal the first-event budget wants.
+ *
+ * The echo is the first `text` part of a turn; everything on a later message is
+ * the model's. Non-text parts (`step-start` leads every assistant step) are
+ * always the model's, which also covers the lazy-SSE-subscribe race past our
+ * own echo.
+ *
+ * Supplying our own `messageID` to `session.prompt` would make this an exact
+ * identity test, and the SDK accepts one — but measured, it silently breaks the
+ * post-run reflection turn (11ms and no assistant output, vs 420ms and normal
+ * output without it), so the heuristic stays.
+ */
+function isModelOutput(ctx: RunnerContext, part: Part): boolean {
+  if (part.type !== "text") return true;
+  if (ctx.promptMessageID === undefined) {
+    ctx.promptMessageID = part.messageID;
+    return false;
+  }
+  return part.messageID !== ctx.promptMessageID;
+}
+
 async function dispatchEvent(ctx: RunnerContext, event: EventSubscribeResponse): Promise<void> {
   // event union covers heartbeats, session lifecycle, message lifecycle, tui,
   // mcp, etc. we only care about a small subset.
@@ -442,6 +475,7 @@ async function dispatchEvent(ctx: RunnerContext, event: EventSubscribeResponse):
     // part transitions all arrive as part.updated. this is the only event
     // class that refreshes the inner-watchdog clock.
     ctx.lastEventAt = performance.now();
+    if (isModelOutput(ctx, event.properties.part)) ctx.sawModelOutput = true;
     await onPartUpdated(ctx, event.properties.part);
     return;
   }
@@ -705,6 +739,11 @@ async function runPromptTurn(
   const turn = ctx.currentTurn;
 
   const part: TextPartInput = { type: "text", text: params.text };
+
+  // re-arm the pre-first-token budget for every turn: a resumed turn waits on
+  // the provider exactly the way the first one does.
+  ctx.promptMessageID = undefined;
+  ctx.sawModelOutput = false;
 
   let assistant: AssistantMessage | undefined;
   let returnedParts: Part[] | undefined;
@@ -975,6 +1014,10 @@ function formatConfigError(name: string | undefined, data: unknown): string | un
  * timeout as the outer watchdog, sized to exceed the worst-case legitimate
  * silent tool window (#760), so a real tool can't trip it; a genuinely stalled
  * provider or a hung tool does, at the flat budget.
+ *
+ * Before the first `part.updated` the tighter {@link AGENT_FIRST_EVENT_TIMEOUT_MS}
+ * applies instead: the flat budget exists to protect an in-flight tool call, and
+ * no tool has been called yet.
  */
 function startInnerActivityWatchdog(params: {
   ctx: RunnerContext;
@@ -985,11 +1028,16 @@ function startInnerActivityWatchdog(params: {
   const id = setInterval(() => {
     if (fired) return;
     const idleMs = performance.now() - params.ctx.lastEventAt;
-    if (idleMs <= params.timeoutMs) return;
+    const budgetMs = params.ctx.sawModelOutput ? params.timeoutMs : AGENT_FIRST_EVENT_TIMEOUT_MS;
+    if (idleMs <= budgetMs) return;
     fired = true;
     const idleSec = Math.round(idleMs / 1000);
+    params.ctx.diagnostic.idleSec = idleSec;
+    params.ctx.diagnostic.sawModelOutput = params.ctx.sawModelOutput;
     log.info(
-      `» no opencode events for ${idleSec}s — aborting in-flight prompt and notifying harness`
+      params.ctx.sawModelOutput
+        ? `» no opencode events for ${idleSec}s — aborting in-flight prompt and notifying harness`
+        : `» no opencode events for ${idleSec}s — the provider never returned a first token; aborting in-flight prompt and notifying harness`
     );
     params.abortController.abort();
     try {
@@ -1200,6 +1248,8 @@ export const opencode = agent({
         currentTurn: null,
         eventCount: 0,
         lastEventAt: performance.now(),
+        sawModelOutput: false,
+        promptMessageID: undefined,
         taskDispatchByCallID: new Map(),
         loggedToolCallIDs: new Set(),
         recentStderr: server.recentStderr,
@@ -1207,6 +1257,8 @@ export const opencode = agent({
           label: "Pullfrog",
           recentStderr: server.recentStderr,
           lastProviderError: undefined,
+          idleSec: undefined,
+          sawModelOutput: false,
           eventCount: 0,
         },
       };

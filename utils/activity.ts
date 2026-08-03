@@ -27,6 +27,32 @@ export const DEFAULT_ACTIVITY_TIMEOUT_MS = 300_000;
  * genuinely hung run is only GitHub Actions minutes, not tokens.
  */
 export const AGENT_ACTIVITY_TIMEOUT_MS = 900_000;
+
+/**
+ * Budget for the window before the agent's FIRST streamed event, which the flat
+ * budget above cannot justify: no tool has been called yet, so there is no
+ * in-flight tool call to protect (#1120).
+ *
+ * The window it guards is a provider that accepts the request and then never
+ * completes the stream. Reproduced against a stalling endpoint: the request goes
+ * out (81KB of prompt accepted), and opencode emits neither `part.updated` nor
+ * `session.error` — so the run looks alive while doing nothing. A per-request
+ * client timeout does NOT help; measured, opencode reacts to one by silently
+ * RETRYING (4 requests in 85s against an 8s budget vs 1 with none), so only a
+ * total-elapsed bound ends it.
+ *
+ * Sized off a direct measurement of time-to-first-model-part over 83 successful
+ * runs across 60+ repos (2026-07-30 onward): p50 5.6s, p90 8.4s, max 39.0s, and
+ * ZERO runs above 60s. 120s is ~3x the observed max and ~14x p90.
+ *
+ * Note this is NOT the "520s legitimate outlier" figure quoted in #1120 — that
+ * measured time to the first LOGGED line (`» thinking` is emitted when the
+ * reasoning block *ends*, carrying its own duration), on a runner concurrently
+ * busy with `npm ci`. The clock here starts on the first streamed part, which
+ * lands much earlier. Upstream's own proposal for this bug used a 30s
+ * first-byte budget (anomalyco/opencode#29420), so 120s stays conservative.
+ */
+export const AGENT_FIRST_EVENT_TIMEOUT_MS = 120_000;
 export const DEFAULT_ACTIVITY_CHECK_INTERVAL_MS = 5_000;
 
 /**

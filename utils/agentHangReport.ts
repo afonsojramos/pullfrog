@@ -20,6 +20,19 @@ export type AgentDiagnostic = {
   lastProviderError: string | undefined;
   /** count of stdout events successfully parsed before the failure. */
   eventCount: number;
+  /**
+   * idle span the watchdog measured, in seconds. set structurally because the
+   * opencode harness's error string carries only prose — re-parsing it dropped
+   * the duration from the rendered explanation entirely.
+   */
+  idleSec: number | undefined;
+  /**
+   * whether the model produced a part of its own before the stall. `eventCount`
+   * cannot answer this: it counts every SSE event, and our own prompt echo plus
+   * session lifecycle events land before the provider is contacted, so it is
+   * never 0 on a live stream.
+   */
+  sawModelOutput: boolean;
 };
 
 /**
@@ -59,6 +72,7 @@ export function formatAgentHangBody(input: {
   const explanation = formatExplanation({
     isHang: input.isHang,
     errorMessage: input.errorMessage,
+    idleSec: input.diagnostic.idleSec,
   });
   const parts = [headline, "", `${explanation} ${formatEventsPart(input.diagnostic)}`];
 
@@ -83,29 +97,38 @@ export function formatAgentHangBody(input: {
   return parts.join("\n");
 }
 
-function formatExplanation(input: { isHang: boolean; errorMessage: string }): string {
+function formatExplanation(input: {
+  isHang: boolean;
+  errorMessage: string;
+  idleSec: number | undefined;
+}): string {
   if (!input.isHang) return `The agent exited unexpectedly: ${input.errorMessage}`;
-  const idleSec = parseIdleSec(input.errorMessage);
+  const idleSec = input.idleSec ?? parseIdleSec(input.errorMessage);
   if (idleSec === undefined) {
     return "The agent stopped emitting events and was killed by the activity-timeout watchdog.";
   }
   return `The agent stopped emitting events for ${idleSec}s and was killed by the activity-timeout watchdog.`;
 }
 
+/** fallback for the v1 spawn path, whose reject string embeds the span. */
 function parseIdleSec(message: string): number | undefined {
   const match = /no output for (\d+)s/.exec(message);
   return match ? Number(match[1]) : undefined;
 }
 
 function formatEventsPart(diagnostic: AgentDiagnostic): string {
-  if (diagnostic.eventCount > 0) {
+  // when the provider-error label already names the cause in the headline,
+  // the nudges below contradict it (e.g. an immediate 401 also produces no
+  // model output but isn't a reachability problem). suppress them.
+  if (diagnostic.lastProviderError) {
     return `${diagnostic.eventCount} events were processed before the failure.`;
   }
-  // when the provider-error label already names the cause in the headline,
-  // the reachability nudge below contradicts it (e.g. an immediate 401 also
-  // produces zero events but isn't a reachability problem). suppress it.
-  if (diagnostic.lastProviderError) return "No events were emitted before the failure.";
-  return "No events were emitted — check whether the model provider is reachable.";
+  // the stall in #1120: the turn is under way but the model never produced a
+  // part. keyed off `sawModelOutput`, not `eventCount` — see AgentDiagnostic.
+  if (!diagnostic.sawModelOutput) {
+    return "The model produced no output at all before the stall — the request was sent but nothing came back. This is usually transient; re-running often succeeds.";
+  }
+  return `${diagnostic.eventCount} events were processed before the failure.`;
 }
 
 function renderStderrTail(lines: readonly string[]): string {
