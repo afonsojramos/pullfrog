@@ -19,7 +19,7 @@ import {
  *     see `runStatusCheck.ts` for why a second create would leave two contradictory rows.
  *     the terminal-create fallback covers a payload with no `checkRun` (older server
  *     build mid-rolling-deploy, or a workflow driven outside Pullfrog's dispatch path).
- *   - `pullfrog-approval` stays opt-in (`status_checks: enabled`) and terminal-only:
+ *   - `pullfrog-approval` stays opt-in (`Repo.approvalCheck`, default off) and terminal-only:
  *     it asserts a review verdict, which only exists once a run produces one. anchored
  *     to the exact reviewed sha so a mid-run push leaves the new head unapproved until
  *     a follow-up re-review reports.

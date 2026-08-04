@@ -149,6 +149,28 @@ function resolvePromptFile(input: string): string {
   return content;
 }
 
+/**
+ * `status_checks` is deprecated: both checks it governed are now repo settings, editable in
+ * the console, and the server reads those directly (it never parses workflow YAML, so an
+ * input could never gate the server-seeded `pullfrog` check anyway).
+ *
+ * Honoured INDEFINITELY on v0, not on a countdown. The backfill covered every repo the app
+ * can currently read, but a dormant install (uninstalled or suspended, so its workflow is
+ * unreadable) can return at any time carrying this input, and would lose a required check the
+ * moment it went inert. That condition never expires, so do not promise a removal here —
+ * dropping it is a v1 question. Warn instead; the annotation surfaces on the run.
+ */
+function warnIfDeprecatedStatusChecks(value: string | undefined): string | undefined {
+  if (value !== undefined) {
+    core.warning(
+      "`status_checks` is deprecated. Both checks are now repository settings — open the " +
+        "Pullfrog console for this repo (Automations → Review PRs) and set them there, then " +
+        "remove `status_checks` from your workflow. It keeps working until you do."
+    );
+  }
+  return value;
+}
+
 function resolveNonPromptInputs() {
   return Inputs.omit("prompt", "prompt_file").assert({
     model: core.getInput("model") || undefined,
@@ -157,7 +179,7 @@ function resolveNonPromptInputs() {
     cwd: core.getInput("cwd") || undefined,
     push: core.getInput("push") || undefined,
     shell: core.getInput("shell") || undefined,
-    status_checks: core.getInput("status_checks") || undefined,
+    status_checks: warnIfDeprecatedStatusChecks(core.getInput("status_checks") || undefined),
     progress_comments: core.getInput("progress_comments") || undefined,
   });
 }
@@ -247,9 +269,11 @@ export function resolvePayload(
         ? repoSettings.statusChecks
         : inputs.status_checks === "enabled",
 
-    // the `pullfrog-approval` verdict check stays opt-in and workflow-only. it exists to
-    // be *required* by branch protection, so it must never turn itself on.
-    approvalCheck: inputs.status_checks === "enabled",
+    // the `pullfrog-approval` verdict check. `Repo.approvalCheck` is authoritative; the
+    // `status_checks` input is DEPRECATED but still honoured, for the dormant installs the
+    // backfill could not read (see `warnIfDeprecatedStatusChecks`). OR rather than override:
+    // this can only ever turn the check ON, never off, so no existing user loses it.
+    approvalCheck: repoSettings.approvalCheck || inputs.status_checks === "enabled",
 
     // temporary progress chrome. the workflow input is the source of truth when
     // set (mirrors `push`); otherwise the repo setting decides. defaults to true.

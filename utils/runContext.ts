@@ -50,6 +50,9 @@ export interface RepoSettings {
   // false suppresses the `pullfrog` run-lifecycle check-run (server-side at dispatch,
   // action-side at run end). see utils/runStatusCheck.ts.
   statusChecks: boolean;
+  // true posts the `pullfrog-approval` verdict check. off by default — it is a merge
+  // gate, so it must never turn itself on.
+  approvalCheck: boolean;
   modeInstructions: Record<string, string>;
   learnings: string | null;
   learningsHeadings: LearningsHeading[];
@@ -112,6 +115,7 @@ const defaultSettings: RepoSettings = {
   repoIntelligence: false,
   progressComments: true,
   statusChecks: true,
+  approvalCheck: false,
   modeInstructions: {},
   learnings: null,
   learningsHeadings: [],
