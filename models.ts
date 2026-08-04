@@ -163,7 +163,11 @@ export const providers = {
     envVars: ["OPENAI_API_KEY"],
     managedCredentials: ["CODEX_AUTH_JSON"],
     models: {
-      gpt: {
+      // Sol/Terra/Luna are OpenAI's durable capability tiers, so they ARE the
+      // brand-tier names the slug convention asks for — the pre-5.6 `gpt` /
+      // `gpt-pro` / `gpt-mini` slugs are holdovers from the retired GPT / GPT Pro
+      // / GPT Mini tiering and are carried below as deprecated aliases.
+      "gpt-sol": {
         displayName: "GPT Sol",
         resolve: "openai/gpt-5.6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
@@ -174,24 +178,23 @@ export const providers = {
       // Sol served at reasoning.mode=pro — same $/token as Sol, just more tokens
       // burned; not a pricier premium tier. models.dev has no -pro id, so direct-key
       // (BYOK) resolves to plain Sol; only the Router/OpenRouter path gets sol-pro.
-      "gpt-pro": {
+      "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
         resolve: "openai/gpt-5.6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
-        subagentModel: "gpt",
+        subagentModel: "gpt-sol",
       },
-      // gpt-5.6's balanced mid-tier (Sol/Terra/Luna are durable capability tiers,
-      // not version bumps). selectable on its own and doubles as `gpt`'s cheaper
-      // lens-fanout subagent — replaces the old hidden gpt-5.4 subagent target.
+      // gpt-5.6's balanced mid-tier. selectable on its own and doubles as Sol's
+      // cheaper lens-fanout subagent — replaces the old hidden gpt-5.4 target.
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "openai/gpt-5.6-terra",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
-      "gpt-mini": {
+      "gpt-luna": {
         displayName: "GPT Luna",
         resolve: "openai/gpt-5.6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
@@ -206,20 +209,40 @@ export const providers = {
         displayName: "GPT Codex",
         resolve: "openai/gpt-5.3-codex",
         openRouterResolve: "openrouter/openai/gpt-5.3-codex",
-        fallback: "openai/gpt",
+        fallback: "openai/gpt-sol",
       },
       "gpt-codex-mini": {
         displayName: "GPT Codex Mini",
         resolve: "openai/gpt-5.1-codex-mini",
         openRouterResolve: "openrouter/openai/gpt-5.1-codex-mini",
-        fallback: "openai/gpt-mini",
+        fallback: "openai/gpt-luna",
       },
-      // dropped hidden subagent tier — folds stored pins forward to gpt (Sol).
+      // pre-5.6 tier slugs. the tiers themselves were renamed Sol/Sol Pro/Luna,
+      // so these fold forward rather than describing anything that still runs.
+      gpt: {
+        displayName: "GPT",
+        resolve: "openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        fallback: "openai/gpt-sol",
+      },
+      "gpt-pro": {
+        displayName: "GPT Pro",
+        resolve: "openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
+        fallback: "openai/gpt-sol-pro",
+      },
+      "gpt-mini": {
+        displayName: "GPT Mini",
+        resolve: "openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        fallback: "openai/gpt-luna",
+      },
+      // dropped hidden subagent tier — folds stored pins forward to Sol.
       "gpt-5.4": {
         displayName: "GPT 5.4",
         resolve: "openai/gpt-5.4",
         openRouterResolve: "openrouter/openai/gpt-5.4",
-        fallback: "openai/gpt",
+        fallback: "openai/gpt-sol",
       },
       o3: {
         displayName: "O3",
@@ -295,12 +318,20 @@ export const providers = {
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
         preferred: true,
       },
+      // DeepSeek upgraded the `deepseek-v4-flash` API model in place to the
+      // 0731 release, but OpenRouter forked it into a separate `-0731` id and
+      // left the April preview live at a HIGHER price — so the direct
+      // `resolve` needs no version and the OpenRouter route must be pinned.
+      // 0731 publishes a DIFFERENT OpenRouter ladder to both the April preview
+      // and Pro (`high, xhigh`) — it gained a `low` rung and renamed the top to
+      // `max`. that makes `low`, not `high`, position 0 on this route, which is
+      // why the OSS effort floor in `main.ts` pins the `high` rung by name.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
         resolve: "deepseek/deepseek-v4-flash",
         effort: ["high", "max"],
-        openRouterEffort: ["high", "xhigh"],
-        openRouterResolve: "openrouter/deepseek/deepseek-v4-flash",
+        openRouterEffort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/deepseek/deepseek-v4-flash-0731",
       },
       // legacy aliases — deepseek retires these on 2026-07-24; transparently
       // upgrade existing users to the v4 family via the fallback chain.
@@ -369,30 +400,30 @@ export const providers = {
         resolve: "opencode/claude-haiku-4-5",
         openRouterResolve: "openrouter/anthropic/claude-haiku-4.5",
       },
-      gpt: {
+      "gpt-sol": {
         displayName: "GPT Sol",
         resolve: "opencode/gpt-5.6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         subagentModel: "gpt-terra",
       },
-      // see openai/gpt-pro — Zen has no -pro id, so direct resolves to plain Sol.
-      "gpt-pro": {
+      // see openai/gpt-sol-pro — Zen has no -pro id, so direct resolves to plain Sol.
+      "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
         resolve: "opencode/gpt-5.6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
-        subagentModel: "gpt",
+        subagentModel: "gpt-sol",
       },
-      // gpt-5.6 balanced mid-tier — selectable + `gpt`'s subagent. see openai above.
+      // gpt-5.6 balanced mid-tier — selectable + Sol's subagent. see openai above.
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "opencode/gpt-5.6-terra",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
-      "gpt-mini": {
+      "gpt-luna": {
         displayName: "GPT Luna",
         resolve: "opencode/gpt-5.6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
@@ -403,20 +434,39 @@ export const providers = {
         displayName: "GPT Codex",
         resolve: "opencode/gpt-5.3-codex",
         openRouterResolve: "openrouter/openai/gpt-5.3-codex",
-        fallback: "opencode/gpt",
+        fallback: "opencode/gpt-sol",
       },
       "gpt-codex-mini": {
         displayName: "GPT Codex Mini",
         resolve: "opencode/gpt-5.1-codex-mini",
         openRouterResolve: "openrouter/openai/gpt-5.1-codex-mini",
-        fallback: "opencode/gpt-mini",
+        fallback: "opencode/gpt-luna",
       },
-      // dropped hidden subagent tier — folds stored pins forward to gpt (Sol).
+      // pre-5.6 tier slugs — see openai provider above.
+      gpt: {
+        displayName: "GPT",
+        resolve: "opencode/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        fallback: "opencode/gpt-sol",
+      },
+      "gpt-pro": {
+        displayName: "GPT Pro",
+        resolve: "opencode/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
+        fallback: "opencode/gpt-sol-pro",
+      },
+      "gpt-mini": {
+        displayName: "GPT Mini",
+        resolve: "opencode/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        fallback: "opencode/gpt-luna",
+      },
+      // dropped hidden subagent tier — folds stored pins forward to Sol.
       "gpt-5.4": {
         displayName: "GPT 5.4",
         resolve: "opencode/gpt-5.4",
         openRouterResolve: "openrouter/openai/gpt-5.4",
-        fallback: "opencode/gpt",
+        fallback: "opencode/gpt-sol",
       },
       "gemini-pro": {
         displayName: "Gemini Pro",
@@ -572,30 +622,30 @@ export const providers = {
       // alias): after the Sol/Terra/Luna rename, ~gpt-mini-latest no longer maps
       // to Luna, so rolling aliases would silently diverge `gpt`/`gpt-mini` from
       // the chosen tiers across funding paths.
-      gpt: {
+      "gpt-sol": {
         displayName: "GPT Sol",
         resolve: "openrouter/openai/gpt-5.6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         subagentModel: "gpt-terra",
       },
-      // see openai/gpt-pro. openrouter serves sol-pro directly on both routes.
-      "gpt-pro": {
+      // see openai/gpt-sol-pro. openrouter serves sol-pro directly on both routes.
+      "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
         resolve: "openrouter/openai/gpt-5.6-sol-pro",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
-        subagentModel: "gpt",
+        subagentModel: "gpt-sol",
       },
-      // gpt-5.6 balanced mid-tier — selectable + `gpt`'s subagent. see openai above.
+      // gpt-5.6 balanced mid-tier — selectable + Sol's subagent. see openai above.
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "openrouter/openai/gpt-5.6-terra",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-terra",
       },
-      "gpt-mini": {
+      "gpt-luna": {
         displayName: "GPT Luna",
         resolve: "openrouter/openai/gpt-5.6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
@@ -606,20 +656,39 @@ export const providers = {
         displayName: "GPT Codex",
         resolve: "openrouter/openai/gpt-5.3-codex",
         openRouterResolve: "openrouter/openai/gpt-5.3-codex",
-        fallback: "openrouter/gpt",
+        fallback: "openrouter/gpt-sol",
       },
       "gpt-codex-mini": {
         displayName: "GPT Codex Mini",
         resolve: "openrouter/openai/gpt-5.1-codex-mini",
         openRouterResolve: "openrouter/openai/gpt-5.1-codex-mini",
-        fallback: "openrouter/gpt-mini",
+        fallback: "openrouter/gpt-luna",
       },
-      // dropped hidden subagent tier — folds stored pins forward to gpt (Sol).
+      // pre-5.6 tier slugs — see openai provider above.
+      gpt: {
+        displayName: "GPT",
+        resolve: "openrouter/openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        fallback: "openrouter/gpt-sol",
+      },
+      "gpt-pro": {
+        displayName: "GPT Pro",
+        resolve: "openrouter/openai/gpt-5.6-sol-pro",
+        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
+        fallback: "openrouter/gpt-sol-pro",
+      },
+      "gpt-mini": {
+        displayName: "GPT Mini",
+        resolve: "openrouter/openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        fallback: "openrouter/gpt-luna",
+      },
+      // dropped hidden subagent tier — folds stored pins forward to Sol.
       "gpt-5.4": {
         displayName: "GPT 5.4",
         resolve: "openrouter/openai/gpt-5.4",
         openRouterResolve: "openrouter/openai/gpt-5.4",
-        fallback: "openrouter/gpt",
+        fallback: "openrouter/gpt-sol",
       },
       "o4-mini": {
         displayName: "O4 Mini",
@@ -654,9 +723,9 @@ export const providers = {
       },
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
-        resolve: "openrouter/deepseek/deepseek-v4-flash",
-        effort: ["high", "xhigh"],
-        openRouterResolve: "openrouter/deepseek/deepseek-v4-flash",
+        resolve: "openrouter/deepseek/deepseek-v4-flash-0731",
+        effort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/deepseek/deepseek-v4-flash-0731",
       },
       // legacy alias — deepseek retires this on 2026-07-24; transparently
       // upgrade existing users to the v4 family via the fallback chain.
@@ -783,18 +852,18 @@ export const modelAliases: ModelAlias[] = Object.entries(providers).flatMap(
  * concrete alias by `resolveDisplayAlias` below, so every downstream consumer
  * (CLI resolve, OpenRouter resolve, footer label) handles them transparently.
  *
- * `efficient` mirrors the OSS/default subsidy model (DeepSeek V4 Pro — beats
- * Kimi K2.7 on agentic-review quality at ~4-5x lower cost, run at whatever
- * effort the repo asks for, clamped to its published ladder); `intelligent` is the
- * frontier pick (Claude Opus). a `null` model means the tier hasn't been
- * pinned: callers default by card status via `defaultAutoTier`.
+ * `efficient` mirrors the OSS/default subsidy model (DeepSeek Flash — the 0731
+ * release is DeepSeek's first officially-shipped V4, where Pro is still the
+ * April preview, and it costs ~0.45x Pro on our cache-heavy review workload);
+ * `intelligent` is the frontier pick (Claude Opus). a `null` model means the
+ * tier hasn't been pinned: callers default by card status via `defaultAutoTier`.
  */
 export const AUTO_EFFICIENT = "auto/efficient";
 export const AUTO_INTELLIGENT = "auto/intelligent";
 export type AutoTier = typeof AUTO_EFFICIENT | typeof AUTO_INTELLIGENT;
 
 const AUTO_TIER_TARGET: Record<AutoTier, string> = {
-  [AUTO_EFFICIENT]: "deepseek/deepseek-pro",
+  [AUTO_EFFICIENT]: "deepseek/deepseek-flash",
   [AUTO_INTELLIGENT]: "anthropic/claude-opus",
 };
 
@@ -943,6 +1012,60 @@ if (!defaultProxyAlias?.openRouterResolve) {
 }
 export const DEFAULT_PROXY_MODEL = defaultProxyAlias.openRouterResolve;
 const defaultProxyDisplayName = defaultProxyAlias.displayName;
+
+// ── OSS allowlist ──────────────────────────────────────────────────────────────
+
+/**
+ * the models Pullfrog is willing to fund on the OSS program. an accepted OSS
+ * repo may pick any of these and run-context honors the pick; anything else
+ * falls back to `DEFAULT_PROXY_MODEL`, so a subsidized run can never land on a
+ * frontier model.
+ *
+ * membership is a spend decision, so it lives here as a literal rather than a
+ * DB toggle — changing it is a deploy, which is the right friction. costs below
+ * are modelled on the measured OSS token mix, where cache reads are ~87.5% of
+ * input and list price therefore ranks models WRONG: Luna 0.39x, Flash 0.45x,
+ * Pro 1.00x, MiniMax M2 1.30x, Kimi 3.88x modelled — but 7.25x as actually
+ * measured over the pre-#1063 Kimi era, which is the number to trust.
+ */
+// MiniMax has no direct-vendor block (it ships only through the routers), so
+// it is listed under `openrouter/` where every other entry uses its vendor.
+export const OSS_MODEL_ALLOWLIST: readonly string[] = [
+  "deepseek/deepseek-flash",
+  "deepseek/deepseek-pro",
+  "openai/gpt-luna",
+  "openrouter/minimax-m2.5",
+  "moonshotai/kimi-k2",
+];
+
+/** the pick the console badges. DERIVED from the efficient tier rather than
+ * restated, so the badge cannot drift from the model that actually runs — a
+ * second literal here would be an invariant nothing enforces. */
+export const OSS_RECOMMENDED_MODEL = AUTO_TIER_TARGET[AUTO_EFFICIENT];
+
+/**
+ * the OpenRouter targets the allowlist admits. keying on the target rather than
+ * the slug is what makes `openrouter/deepseek-flash` and `deepseek/deepseek-flash`
+ * the same funded model — both spellings are stored in the wild.
+ */
+const ossAllowedTargets = new Set(
+  OSS_MODEL_ALLOWLIST.map((slug) => {
+    const target = resolveOpenRouterModel(slug);
+    if (!target) throw new Error(`OSS_MODEL_ALLOWLIST: ${slug} has no openRouterResolve`);
+    return target;
+  })
+);
+
+/**
+ * whether an OSS repo's stored pick is one the program funds. resolves through
+ * the fallback chain first, so `auto/*` sentinels and deprecated slugs are
+ * judged by the model that actually runs.
+ */
+export function isOssAllowedModel(slug: string | null | undefined): slug is string {
+  if (!slug) return false;
+  const target = resolveOpenRouterModel(slug);
+  return target !== undefined && ossAllowedTargets.has(target);
+}
 
 /** short label for the model auto-select picks today (console hint copy). */
 export function getAutoSelectHintModel(): string {

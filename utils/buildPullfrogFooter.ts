@@ -108,7 +108,10 @@ function formatModelLabel(params: {
     const configured = isAutoTier(params.clamped.from)
       ? "the intelligent tier"
       : `\`${resolveDisplayAlias(params.clamped.from)?.displayName ?? params.clamped.from}\``;
-    return `${ossBase} (${configured} not used — the program covers this model; add its [provider key](https://docs.pullfrog.com/models) to run your pick)`;
+    // the clamp only fires for an OFF-allowlist pick now, so switching to a
+    // funded model is the cheap remedy and has to be named first — naming only
+    // BYOK is what left maintainers thinking the console offered them nothing.
+    return `${ossBase} (${configured} not used — pick one of the [funded models](https://docs.pullfrog.com/models#pullfrog-for-oss) or add a [provider key](https://docs.pullfrog.com/keys) to run your own)`;
   }
   const base = alias?.isFree ? `\`${displayName}\` (free)` : `\`${displayName}\``;
   if (params.fallbackFrom) {

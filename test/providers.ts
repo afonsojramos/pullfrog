@@ -45,7 +45,7 @@ export const providers: ProviderEntry[] = [
   },
   {
     name: "openai",
-    flagship: "openai/gpt",
+    flagship: "openai/gpt-sol",
     agent: "opencode",
     coverage: SHARED_OPENCODE_COVERAGE,
   },

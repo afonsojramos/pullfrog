@@ -60,6 +60,7 @@ import { runProxyResolution } from "./utils/proxy.ts";
 import { fetchPreviousSnapshot, persistSummary, seedSummaryFile } from "./utils/prSummary.ts";
 import { handleAgentResult } from "./utils/run.ts";
 import { isActionPinnedToSha, resolveRunContextData } from "./utils/runContextData.ts";
+import { ossEffortFloor } from "./utils/runEffort.ts";
 import { renderRunError } from "./utils/runErrorRenderer.ts";
 import {
   finalizeSuccessRun,
@@ -352,11 +353,13 @@ export async function main(): Promise<MainResult> {
     if (access.kind === "proxy") payload.proxyModel = access.target;
     if (access.kind === "byok") payload.proxyModel = undefined;
 
-    // a subsidised run is Pullfrog's spend, so it takes the floor of whatever
-    // ladder the subsidy model publishes — `high` on DeepSeek, matching what
-    // every OSS run got before this setting existed. a position rather than a
-    // rung name, so it holds if the subsidy model changes.
-    if (runContext.oss && payload.proxyModel) payload.effort = 0;
+    // a subsidised run is Pullfrog's spend, so it is pinned to `high` on
+    // whatever ladder the funded model publishes — matching what every OSS run
+    // got before this setting existed. see `ossEffortFloor` for why this asks
+    // for the rung by name rather than taking position 0.
+    if (runContext.oss && payload.proxyModel) {
+      payload.effort = ossEffortFloor({ payload });
+    }
 
     const resolvedModel = payload.proxyModel ? undefined : resolveModel({ slug: payload.model });
 

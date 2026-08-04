@@ -132,7 +132,7 @@ export function kimiOpenRouterProviderOverrides(): Record<string, { options: obj
  *
  * Per-subagent `model:` override is driven by the registry in
  * `action/models.ts` via each alias's `subagentModel` field. Currently wired:
- * Anthropic opus → sonnet, OpenAI gpt-pro → gpt and gpt → gpt-terra, Google
+ * Anthropic opus → sonnet, OpenAI gpt-sol-pro → gpt-sol and gpt-sol → gpt-terra, Google
  * gemini-pro → gemini-flash. Other providers inherit (no override).
  */
 export function buildReviewerAgentConfig(

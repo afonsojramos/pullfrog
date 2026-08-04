@@ -124,7 +124,7 @@ describe("resolveDisplayAlias", () => {
 
   it("walks fallback chain to terminal alias for deprecated slug", () => {
     const alias = resolveDisplayAlias("openai/gpt-codex");
-    expect(alias?.slug).toBe("openai/gpt");
+    expect(alias?.slug).toBe("openai/gpt-sol");
     expect(alias?.displayName).toBe("GPT Sol");
   });
 
@@ -151,10 +151,10 @@ describe("resolveOpenRouterModel", () => {
       "openrouter/deepseek/deepseek-v4-pro"
     );
     expect(resolveOpenRouterModel("deepseek/deepseek-chat")).toBe(
-      "openrouter/deepseek/deepseek-v4-flash"
+      "openrouter/deepseek/deepseek-v4-flash-0731"
     );
     expect(resolveOpenRouterModel("openrouter/deepseek-chat")).toBe(
-      "openrouter/deepseek/deepseek-v4-flash"
+      "openrouter/deepseek/deepseek-v4-flash-0731"
     );
   });
 

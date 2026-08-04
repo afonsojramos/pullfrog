@@ -15,7 +15,13 @@
  * throws and `runErrorRenderer.ts` re-surfaces on both run surfaces.
  */
 
-import { OPENAI_COMPATIBLE_PROVIDER, resolveOpenRouterModel } from "../models.ts";
+import {
+  isOssAllowedModel,
+  OPENAI_COMPATIBLE_PROVIDER,
+  OSS_MODEL_ALLOWLIST,
+  resolveDisplayAlias,
+  resolveOpenRouterModel,
+} from "../models.ts";
 import { getApiUrl } from "./apiUrl.ts";
 
 export type ModelAccessReason = "oss" | "byok_no_key" | "router";
@@ -32,8 +38,10 @@ export type ModelAccessDecision =
  * decide whether an (already-resolved) requested model can run, and how.
  *
  * - non-explicit / no model → `ok` (caller's missing-key validation applies).
- * - proxy active + OSS → only the funded subsidy target routes; a different
- *   model needs the repo's own key (`byok`) else `error("oss")`.
+ * - proxy active + OSS → the funded subsidy target and anything else on
+ *   `OSS_MODEL_ALLOWLIST` route; a model off the list needs the repo's own key
+ *   (`byok`) else `error("oss")`. the allowlist arm is what keeps
+ *   `--model=<allowlisted>` from hard-failing on a pick the console offers.
  * - proxy active + Router → honor any Router-servable model (`proxy`); fall to
  *   BYOK when locally authorized, else `error("router")`.
  * - no proxy → the resolved model must be locally authorized, else
@@ -66,7 +74,9 @@ export function decideModelAccess(input: {
   if (input.proxyActive) {
     const target = resolveOpenRouterModel(input.model);
     if (input.oss) {
-      if (target && target === input.subsidyTarget) return { kind: "proxy", target };
+      if (target && (target === input.subsidyTarget || isOssAllowedModel(input.model))) {
+        return { kind: "proxy", target };
+      }
       if (byokAuthorized) return { kind: "byok" };
       return { kind: "error", reason: "oss" };
     }
@@ -81,6 +91,13 @@ export function decideModelAccess(input: {
 
 /** marker on the throw message so `runErrorRenderer` can reclassify it. */
 export const MODEL_ACCESS_MARKER = "requested model is not available";
+
+/** display names of the OSS-funded set, for the `oss` failure copy. */
+function ossAllowedLabels(): string {
+  return OSS_MODEL_ALLOWLIST.map(
+    (slug) => `\`${resolveDisplayAlias(slug)?.displayName ?? slug}\``
+  ).join(", ");
+}
 
 /**
  * render the model-access failure body (used for both the thrown error and the
@@ -100,8 +117,8 @@ export function buildModelAccessError(input: {
 
   const branch: Record<ModelAccessReason, { why: string; cta: string }> = {
     oss: {
-      why: "This repo runs on Pullfrog's OSS subsidy, which only funds the default model. Switch back to the funded model, or add your own provider key to run a different one.",
-      cta: `[Add a provider key →](${secretsUrl}) · [Setup docs →](${docsUrl})`,
+      why: `This repo runs on Pullfrog's OSS subsidy, which funds a set of pre-approved models: ${ossAllowedLabels()}. Pick one of those, or add your own provider key to run a different one.`,
+      cta: `[Configure model →](${settingsUrl}) · [Add a provider key →](${secretsUrl}) · [Setup docs →](${docsUrl})`,
     },
     byok_no_key: {
       why: `No provider key for \`${input.model}\` is present in this run's environment. Add the matching provider key as a GitHub Actions secret, or pick a model you already have a key for.`,

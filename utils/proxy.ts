@@ -247,8 +247,9 @@ async function resolveProxyModel(ctx: {
     if (ctx.oss) {
       ctx.toolState.modelClamped = { from: ctx.payload.model, reason: "oss" };
       log.info(
-        `» ${ctx.payload.model} overridden — Pullfrog for OSS covers ${ctx.proxyModel}; ` +
-          "add a provider key in your Pullfrog settings to run your configured model."
+        `» ${ctx.payload.model} overridden — it is not one of the models Pullfrog for OSS ` +
+          `funds, so this run uses ${ctx.proxyModel}; pick a funded model in your Pullfrog ` +
+          "settings, or add a provider key to run your own."
       );
     } else if (isCardGatedModel(ctx.payload.model)) {
       ctx.toolState.modelClamped = { from: ctx.payload.model, reason: "card" };

@@ -5,7 +5,7 @@
  * see wiki/effort.md.
  */
 
-import { DEFAULT_EFFORT_POSITION, type EffortPosition } from "../effort.ts";
+import { DEFAULT_EFFORT_POSITION, type EffortPosition, rungPosition } from "../effort.ts";
 import { type ModelAlias, modelAliases, resolveModelRung } from "../models.ts";
 import type { ResolvedPayload } from "./payload.ts";
 
@@ -52,8 +52,8 @@ function matchHostedAnthropicAlias(modelId: string): ModelAlias | undefined {
  * model it isn't using.
  *
  * both inputs are concrete specifiers rather than slugs, so this is a reverse
- * lookup. aliases sharing a target publish the same ladder (`openai/gpt` and
- * `openai/gpt-pro` both resolve to `openai/gpt-5.6-sol`), pinned by the catalog
+ * lookup. aliases sharing a target publish the same ladder (`openai/gpt-sol` and
+ * `openai/gpt-sol-pro` both resolve to `openai/gpt-5.6-sol`), pinned by the catalog
  * test; deprecated aliases are skipped because they never run as-is.
  */
 function resolveRunAlias(ctx: {
@@ -72,6 +72,25 @@ function resolveRunAlias(ctx: {
   return (
     modelAliases.find((a) => !a.fallback && a.resolve === model) ?? matchHostedAnthropicAlias(model)
   );
+}
+
+/**
+ * the position a subsidised run is pinned to — the `high` rung on the ladder of
+ * the funded model. only reachable on the subsidy proxy, so the ladder is always
+ * the OpenRouter one.
+ *
+ * `high` by name, not position 0. position 0 was equivalent for as long as every
+ * subsidy candidate's ladder started at `high`, but DeepSeek V4 Flash 0731
+ * publishes `low, high, max` on the OpenRouter route, so the floor would have
+ * silently dropped a level the moment that became the funded default — undoing
+ * the `high`-effort result #1063 chose the tier on. a model publishing no `high`
+ * falls back to its own floor.
+ */
+export function ossEffortFloor(ctx: { payload: ResolvedPayload }): EffortPosition {
+  const alias = resolveRunAlias(ctx);
+  const published = alias?.openRouterEffort ?? alias?.effort;
+  if (!published) return 0;
+  return rungPosition({ rung: "high", published }) ?? 0;
 }
 
 export function resolveRunEffort(ctx: {
