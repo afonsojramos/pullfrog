@@ -21,6 +21,12 @@ const StatusChecksInput = type.enumerated("disabled", "enabled");
 // see, so this input can suppress live updates but not a comment already seeded.
 const ProgressCommentsInput = type.enumerated("disabled", "enabled");
 
+// raises THIS run's logging. enumerated like its sibling toggles so a typo
+// hard-fails at Inputs.assert rather than silently leaving debug off — the one
+// failure mode you cannot afford in a switch whose purpose is seeing into a run
+// you cannot see into.
+const DebugInput = type.enumerated("disabled", "enabled");
+
 // schema for JSON payload passed via prompt (internal dispatch invocation)
 // note: permissions are intentionally NOT included here to prevent injection attacks
 // permissions are derived from event.authorPermission instead
@@ -30,6 +36,7 @@ export const JsonPayload = type({
   "model?": "string | undefined",
   "modelExplicit?": "boolean | undefined",
   "effort?": "number | string | undefined",
+  "debug?": "boolean | undefined",
   prompt: "string",
   "triggerer?": "string | undefined",
 
@@ -75,6 +82,7 @@ export const Inputs = type({
   "prompt_file?": type.string.or("undefined"),
   "model?": type.string.or("undefined"),
   "effort?": type.string.or("undefined"),
+  "debug?": DebugInput.or("undefined"),
   "timeout?": type.string.or("undefined"),
   "push?": PushPermissionInput.or("undefined"),
   "shell?": ShellPermissionInput.or("undefined"),
@@ -175,6 +183,7 @@ function resolveNonPromptInputs() {
   return Inputs.omit("prompt", "prompt_file").assert({
     model: core.getInput("model") || undefined,
     effort: core.getInput("effort") || undefined,
+    debug: core.getInput("debug") || undefined,
     timeout: core.getInput("timeout") || undefined,
     cwd: core.getInput("cwd") || undefined,
     push: core.getInput("push") || undefined,
@@ -208,6 +217,13 @@ export function resolvePayload(
   const rawEffort = jsonPayload?.effort ?? inputs.effort ?? repoSettings.effort ?? undefined;
   const effort = rawEffort === undefined ? undefined : parseEffortPosition(String(rawEffort));
 
+  // `--debug` (or the `debug` input) raises this run's logging. routed through
+  // LOG_LEVEL rather than a threaded boolean so the one existing switch —
+  // `isDebugEnabled` in utils/activity.ts — turns up every diagnostic we own:
+  // `log.debug` output and opencode's own server log level.
+  const debug = jsonPayload?.debug ?? inputs.debug === "enabled";
+  if (debug) process.env.LOG_LEVEL = "debug";
+
   // determine shell permission - strictest setting wins
   // precedence: disabled > restricted > enabled
   // non-collaborators always get at least "restricted"
@@ -240,6 +256,7 @@ export function resolvePayload(
     // the JSON payload). a GHA `model` input or the repo default is not explicit.
     modelExplicit: jsonPayload?.modelExplicit ?? false,
     effort,
+    debug: debug || undefined,
     prompt,
     triggerer:
       jsonPayload?.triggerer ??

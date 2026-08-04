@@ -40,6 +40,11 @@ export const ALWAYS_RUN_ALL: string[] = [
   "action/utils/install.ts",
   "action/utils/runFixture.ts",
   "action/utils/globals.ts",
+  // every run's model / effort / permission / prompt resolution, and the payload
+  // contract it resolves into — a break here misroutes every test equally, so
+  // precision globs can't express it
+  "action/utils/payload.ts",
+  "action/external.ts",
   // local docker container plumbing (changes invalidate every test's environment)
   "action/Dockerfile",
   "action/docker-entrypoint.sh",

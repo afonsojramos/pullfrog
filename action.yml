@@ -18,6 +18,9 @@ inputs:
   effort:
     description: "Reasoning effort: low, medium, high, xhigh, max, or a position on [0,1]. Lands on the running model's own range, rounding down. Overrides repo settings."
     required: false
+  debug:
+    description: "Set to `enabled` to raise this run's logging — makes `log.debug` output visible and puts the opencode server at INFO, which is the only way to see a run that fails with an empty log. Equivalent to the `--debug` run flag."
+    required: false
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false

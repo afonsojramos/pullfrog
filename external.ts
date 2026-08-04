@@ -331,6 +331,14 @@ export interface WriteablePayload {
   modelExplicit?: boolean | undefined;
   /** reasoning-effort position on [0,1]; 0 is the model's cheapest rung, 1 its priciest */
   effort?: EffortPosition | undefined;
+  /**
+   * raise this one run's logging (`--debug`, or the `debug` action input): makes
+   * `log.debug` output visible and puts the opencode server at INFO. the only
+   * way to diagnose a run that fails with an empty log — see
+   * wiki/opencode-silent-stall.md. affects what we print, never what the agent
+   * may do, so it carries no access/permission consequence.
+   */
+  debug?: boolean | undefined;
   /** the user's actual request (body if @pullfrog tagged) */
   prompt: string;
   /** github username of the human who triggered this workflow run */
