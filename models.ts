@@ -322,14 +322,15 @@ export const providers = {
       // 0731 release, but OpenRouter forked it into a separate `-0731` id and
       // left the April preview live at a HIGHER price — so the direct
       // `resolve` needs no version and the OpenRouter route must be pinned.
-      // 0731 publishes a DIFFERENT OpenRouter ladder to both the April preview
-      // and Pro (`high, xhigh`) — it gained a `low` rung and renamed the top to
-      // `max`. that makes `low`, not `high`, position 0 on this route, which is
+      // 0731 gained a `low` rung and renamed the top to `max`, unlike Pro
+      // (`high, max` direct / `high, xhigh` via OpenRouter). that ladder now
+      // reads the same on BOTH routes — the in-place direct upgrade caught up
+      // to the fork — so `low`, not `high`, is position 0 either way, which is
       // why the OSS effort floor in `main.ts` pins the `high` rung by name.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
         resolve: "deepseek/deepseek-v4-flash",
-        effort: ["high", "max"],
+        effort: ["low", "high", "max"],
         openRouterEffort: ["low", "high", "max"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-flash-0731",
       },
