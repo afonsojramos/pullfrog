@@ -36,4 +36,8 @@ export const test: TestRunnerOptions = {
     "action/agents/claude.ts",
     "action/utils/{agent,apiKeys}.ts",
   ],
+  // disabled: our AWS account rejects every Bedrock invoke with
+  // `400 Operation not allowed`, which is an account-side entitlement problem,
+  // not a Pullfrog regression. delete this line once the account is fixed.
+  skipIf: () => "bedrock disabled — AWS account not entitled for InvokeModel",
 };
