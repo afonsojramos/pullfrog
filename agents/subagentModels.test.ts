@@ -98,7 +98,7 @@ describe("deriveSubagentModels", () => {
 
   describe("providers / models without a subagentModel — inherit", () => {
     it("xai grok (already cheap flagship)", () => {
-      expect(deriveSubagentModels("xai/grok-4.3")).toEqual({ reviewer: undefined });
+      expect(deriveSubagentModels("xai/grok-4.5")).toEqual({ reviewer: undefined });
     });
     it("deepseek", () => {
       expect(deriveSubagentModels("deepseek/deepseek-v4-pro")).toEqual({ reviewer: undefined });

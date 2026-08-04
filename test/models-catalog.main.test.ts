@@ -234,6 +234,47 @@ describe("opencode Zen served list", async () => {
   }
 });
 
+// an `opencode/*` entry mirrors a model some other provider serves directly, so
+// the same slug can end up on two models at once: a BYOK Zen run takes
+// `resolve` while a router/oss run takes `openRouterResolve`. the bump cron only
+// moves a mirror when its upstream moved in the same PR, which can never fire
+// once the mirror is the side that trails — `opencode/kimi-k2` sat on k2.6 while
+// all three siblings were on k2.7-code and Zen served it. so assert it directly:
+// no sibling alias may name a Zen-served model newer than the mirror's own.
+describe("opencode mirrors don't trail their siblings", async () => {
+  const data = await api;
+  const zenIds = new Set((await zenApi).data.map((m) => m.id));
+  const modelId = (spec: string) => spec.slice(spec.lastIndexOf("/") + 1);
+  const aliasKey = (slug: string) => slug.slice(slug.indexOf("/") + 1);
+  const released = (spec: string) => {
+    const parsed = parseResolve(spec);
+    return data[parsed.provider]?.models[parsed.modelId]?.release_date;
+  };
+
+  for (const alias of modelAliases) {
+    if (alias.provider !== "opencode" || alias.fallback || alias.routing) continue;
+
+    it(`${alias.slug} is on the newest Zen-served model its siblings use`, () => {
+      // a sibling on an OLDER model is the intentional direction (OpenRouter
+      // lags the direct provider), so only a strictly newer one counts.
+      const ahead = modelAliases.filter((sibling) => {
+        if (sibling === alias || sibling.fallback || sibling.routing) return false;
+        if (aliasKey(sibling.slug) !== aliasKey(alias.slug)) return false;
+        const candidate = modelId(sibling.resolve);
+        if (candidate === modelId(alias.resolve) || !zenIds.has(candidate)) return false;
+        const theirs = released(`opencode/${candidate}`);
+        const ours = released(alias.resolve);
+        return !!theirs && !!ours && theirs > ours;
+      });
+
+      expect(
+        ahead.map((sibling) => `${sibling.slug} -> ${modelId(sibling.resolve)}`),
+        `"${alias.slug}" resolves to "${alias.resolve}", but Zen serves a newer model its siblings already use — bump this mirror's resolve to match.`
+      ).toEqual([]);
+    });
+  }
+});
+
 describe("isFree models.dev cost", async () => {
   const data = await api;
   const seen = new Set<string>();

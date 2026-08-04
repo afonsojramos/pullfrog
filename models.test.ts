@@ -151,10 +151,10 @@ describe("resolveOpenRouterModel", () => {
       "openrouter/deepseek/deepseek-v4-pro"
     );
     expect(resolveOpenRouterModel("deepseek/deepseek-chat")).toBe(
-      "openrouter/deepseek/deepseek-v4-flash-0731"
+      "openrouter/~deepseek/deepseek-v4-flash-latest"
     );
     expect(resolveOpenRouterModel("openrouter/deepseek-chat")).toBe(
-      "openrouter/deepseek/deepseek-v4-flash-0731"
+      "openrouter/~deepseek/deepseek-v4-flash-latest"
     );
   });
 

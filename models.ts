@@ -270,9 +270,9 @@ export const providers = {
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
-        resolve: "google/gemini-3.5-flash",
+        resolve: "google/gemini-3.6-flash",
         effort: ["minimal", "low", "medium", "high"],
-        openRouterResolve: "openrouter/google/gemini-3.5-flash",
+        openRouterResolve: "openrouter/google/gemini-3.6-flash",
       },
     },
   }),
@@ -282,26 +282,26 @@ export const providers = {
     models: {
       grok: {
         displayName: "Grok",
-        resolve: "xai/grok-4.3",
-        effort: ["none", "low", "medium", "high"],
-        openRouterResolve: "openrouter/x-ai/grok-4.3",
+        resolve: "xai/grok-4.5",
+        effort: ["low", "medium", "high"],
+        openRouterResolve: "openrouter/x-ai/grok-4.5",
         preferred: true,
       },
       // legacy aliases — xAI retired the entire fast/code-fast line on
       // 2026-05-15 (https://docs.x.ai/developers/migration/may-15-deprecation)
       // and now redirects every deprecated text-model slug to grok-4.3 at
       // standard pricing. fall back to the live `xai/grok` so the alias
-      // chain resolves to grok-4.3 for both direct-key and OpenRouter users.
+      // chain resolves to grok-4.5 for both direct-key and OpenRouter users.
       "grok-fast": {
         displayName: "Grok Fast",
         resolve: "xai/grok-4-1-fast",
-        openRouterResolve: "openrouter/x-ai/grok-4.3",
+        openRouterResolve: "openrouter/x-ai/grok-4.5",
         fallback: "xai/grok",
       },
       "grok-code-fast": {
         displayName: "Grok Code Fast",
         resolve: "xai/grok-code-fast-1",
-        openRouterResolve: "openrouter/x-ai/grok-4.3",
+        openRouterResolve: "openrouter/x-ai/grok-4.5",
         fallback: "xai/grok",
       },
     },
@@ -318,10 +318,14 @@ export const providers = {
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
         preferred: true,
       },
-      // DeepSeek upgraded the `deepseek-v4-flash` API model in place to the
-      // 0731 release, but OpenRouter forked it into a separate `-0731` id and
-      // left the April preview live at a HIGHER price — so the direct
-      // `resolve` needs no version and the OpenRouter route must be pinned.
+      // DeepSeek upgrades the `deepseek-v4-flash` API model in place, so the
+      // direct `resolve` needs no version. OpenRouter instead forked the 0731
+      // release into its own id and left the April preview live under the
+      // unversioned one at a HIGHER price ($0.14/$0.28 vs $0.09/$0.18) — so the
+      // OpenRouter route can never use the bare id. it tracks the rolling
+      // `~deepseek/*-latest` pointer (rule 4), which resolves to 0731 at the
+      // same price today and follows the next in-place upgrade on its own,
+      // rather than pinning a dated snapshot that goes stale every release.
       // 0731 gained a `low` rung and renamed the top to `max`, unlike Pro
       // (`high, max` direct / `high, xhigh` via OpenRouter). that ladder now
       // reads the same on BOTH routes — the in-place direct upgrade caught up
@@ -332,7 +336,7 @@ export const providers = {
         resolve: "deepseek/deepseek-v4-flash",
         effort: ["low", "high", "max"],
         openRouterEffort: ["low", "high", "max"],
-        openRouterResolve: "openrouter/deepseek/deepseek-v4-flash-0731",
+        openRouterResolve: "openrouter/~deepseek/deepseek-v4-flash-latest",
       },
       // legacy aliases — deepseek retires these on 2026-07-24; transparently
       // upgrade existing users to the v4 family via the fallback chain.
@@ -478,21 +482,19 @@ export const providers = {
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
-        resolve: "opencode/gemini-3.5-flash",
+        resolve: "opencode/gemini-3.6-flash",
         effort: ["minimal", "low", "medium", "high"],
-        openRouterResolve: "openrouter/google/gemini-3.5-flash",
+        openRouterResolve: "openrouter/google/gemini-3.6-flash",
       },
       "kimi-k2": {
         displayName: "Kimi K2",
-        // opencode Zen serves only up to k2.6; the OpenRouter fallback (used for
-        // router/oss proxy runs) takes the newer k2.7-code.
-        resolve: "opencode/kimi-k2.6",
+        resolve: "opencode/kimi-k2.7-code",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
       },
-      // Zen serves m2.5; the funded OpenRouter path tracks the current m2.7.
+      // slug pins the m2 line for DB stability; resolve tracks the current m2.7.
       "minimax-m2.5": {
         displayName: "MiniMax M2",
-        resolve: "opencode/minimax-m2.5",
+        resolve: "opencode/minimax-m2.7",
         openRouterResolve: "openrouter/minimax/minimax-m2.7",
       },
       "gpt-5-nano": {
@@ -712,9 +714,9 @@ export const providers = {
       },
       grok: {
         displayName: "Grok",
-        resolve: "openrouter/x-ai/grok-4.3",
-        effort: ["none", "low", "medium", "high"],
-        openRouterResolve: "openrouter/x-ai/grok-4.3",
+        resolve: "openrouter/x-ai/grok-4.5",
+        effort: ["low", "medium", "high"],
+        openRouterResolve: "openrouter/x-ai/grok-4.5",
       },
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
@@ -722,11 +724,13 @@ export const providers = {
         effort: ["high", "xhigh"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
       },
+      // rolling pointer, not the bare id — see `deepseek/deepseek-flash` for why
+      // OpenRouter's unversioned `deepseek-v4-flash` is the stale April preview.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
-        resolve: "openrouter/deepseek/deepseek-v4-flash-0731",
+        resolve: "openrouter/~deepseek/deepseek-v4-flash-latest",
         effort: ["low", "high", "max"],
-        openRouterResolve: "openrouter/deepseek/deepseek-v4-flash-0731",
+        openRouterResolve: "openrouter/~deepseek/deepseek-v4-flash-latest",
       },
       // legacy alias — deepseek retires this on 2026-07-24; transparently
       // upgrade existing users to the v4 family via the fallback chain.
