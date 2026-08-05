@@ -284,11 +284,22 @@ export async function runAgentStreaming(options: RunStreamingOptions): Promise<A
   });
 }
 
+/**
+ * the agent hit the fixture's wall-clock budget rather than erroring. `main.ts`
+ * rejects with this exact phrase, and it is the only signal distinguishing "ran
+ * out of time" from a genuine failure.
+ */
+export function isAgentTimeout(result: AgentResult): boolean {
+  return !result.success && result.output.includes("agent run timed out after");
+}
+
 export type ValidateResultOptions = {
   test: string;
   // if true, test passes when validation checks pass regardless of agent success
   // (used for tests like timeout that expect the agent run to fail)
   expectFailure?: boolean | undefined;
+  // if true, a timed-out run is not itself a failure — see TestRunnerOptions
+  passOnTimeout?: boolean | undefined;
 };
 
 export function validateResult(
@@ -301,7 +312,10 @@ export function validateResult(
 
   // for tests with expectFailure: passed = agent failed AND all validation checks pass
   // for normal tests: passed = agent succeeded AND all validation checks pass
-  const passed = options.expectFailure ? !result.success && allPassed : result.success && allPassed;
+  const survivedTimeout = !!options.passOnTimeout && isAgentTimeout(result);
+  const passed = options.expectFailure
+    ? !result.success && allPassed
+    : (result.success || survivedTimeout) && allPassed;
 
   return {
     test: options.test,
@@ -331,6 +345,10 @@ export interface TestRunnerOptions {
   // retry explicit fixture timeouts by default; disable when the timeout
   // already represents one complete, expensive attempt.
   retryOnTimeout?: boolean;
+  // if true, a timed-out run is judged by its validator checks alone instead of
+  // failing outright. for adversarial tests where the agent exhausting the clock
+  // still proves the property under test — it only means it was still trying.
+  passOnTimeout?: boolean;
   // shell commands to run in the repo directory after cloning but before the
   // agent starts. used to simulate pre-existing repo state (e.g., malicious
   // symlinks from a PR). passed to play.ts via PULLFROG_TEST_REPO_SETUP env var.

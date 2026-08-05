@@ -7,6 +7,7 @@ import {
   type AgentResult,
   agents,
   getPrefix,
+  isAgentTimeout,
   printResults,
   printSingleValidation,
   runAgentStreaming,
@@ -222,11 +223,7 @@ function shouldRetry(params: {
   const result = params.result;
   const validation = params.validation;
 
-  if (
-    !params.retryOnTimeout &&
-    !result.success &&
-    result.output.includes("agent run timed out after")
-  ) {
+  if (!params.retryOnTimeout && isAgentTimeout(result)) {
     return { retry: false };
   }
 
@@ -380,6 +377,7 @@ async function runTestForAgent(ctx: RunContext): Promise<ValidationResult> {
     const validation = validateResult(result, testConfig.validator, {
       test: ctx.testInfo.name,
       expectFailure: testConfig.expectFailure,
+      passOnTimeout: testConfig.passOnTimeout,
     });
 
     // check if we should retry
