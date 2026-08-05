@@ -32,10 +32,14 @@ type SpawnParams = {
   stdio: StdioOptions;
 };
 
-export type SandboxMethod = "unshare" | "sudo-unshare" | "none";
+export type SandboxMethod = "unshare" | "sudo-unshare" | "userns-unshare" | "none";
 
 /** cached result of sandbox capability check */
 let detectedSandboxMethod: SandboxMethod | undefined;
+
+/** stderr from the userns probe, surfaced in the CI-gate error so an operator sees
+ * which wall they actually hit rather than our guess at one. */
+let usernsProbeError: string | undefined;
 
 /** get the current sandbox method (for testing/diagnostics) */
 export function getSandboxMethod(): SandboxMethod {
@@ -81,6 +85,65 @@ function detectSandboxMethod(): SandboxMethod {
       log.debug("PID namespace isolation enabled (sudo unshare)");
       return "sudo-unshare";
     }
+  } catch {
+    // continue to try userns
+  }
+
+  // userns-nested PID namespace: the fallback for containerized / Kubernetes
+  // self-hosted runners (no host CAP_SYS_ADMIN, no passwordless sudo). creating a
+  // user namespace first grants CAP_SYS_ADMIN scoped to that userns — enough for the
+  // nested --pid and the mount namespace — without any host capability.
+  //
+  // deliberately NOT --mount-proc: every OCI runtime masks paths under /proc, which
+  // makes the visible procfs not "fully visible", so mnt_already_visible() refuses a
+  // fresh procfs from a non-initial userns. that is true of EVERY k8s pod, so
+  // --mount-proc would fail-close this path everywhere it is meant to help.
+  // it is not needed: two independent locks block the /proc/<pid>/environ read this
+  // sandbox exists to stop, and only the second survives in a pod —
+  //   1. the PID namespace (needs the procfs remount, impossible here)
+  //   2. the userns credential boundary — a process in a child userns lacks
+  //      CAP_SYS_PTRACE in the target's userns, so ptrace_may_access denies the read
+  //      even for the same uid on a fully visible target
+  // PROC_CLEANUP still runs in spawnShell as a best-effort attempt at lock 1, which
+  // succeeds on runners whose /proc is unmasked. see wiki/userns-sandbox.md.
+  //
+  // the probe exercises the FULL sealed pipeline including the `setpriv` cap-drop that
+  // spawnShell exec's unconditionally — so a runner with capable unshare but a
+  // missing/incapable setpriv (e.g. busybox on Alpine images, which lacks
+  // --ambient-caps) fails over to "none" + the actionable error rather than caching
+  // userns-unshare and then breaking every shell command on the unrunnable setpriv.
+  try {
+    const result = spawnSync(
+      "unshare",
+      [
+        "--user",
+        "--map-root-user",
+        "--pid",
+        "--fork",
+        "--mount",
+        "setpriv",
+        "--no-new-privs",
+        "--bounding-set",
+        "-all",
+        "--inh-caps",
+        "-all",
+        "--ambient-caps",
+        "-all",
+        "true",
+      ],
+      { timeout: 5000, stdio: ["ignore", "ignore", "pipe"] }
+    );
+    if (result.status === 0) {
+      detectedSandboxMethod = "userns-unshare";
+      log.debug("PID namespace isolation enabled (unprivileged userns unshare)");
+      return "userns-unshare";
+    }
+    // keep the probe's own words: the walls (seccomp / CAP_SETFCAP / node kernel /
+    // a missing binary) are indistinguishable from the outside, so a guessed cause
+    // in the CI-gate error sends operators to change a setting that cannot help them.
+    // spawnSync does not throw on ENOENT — it returns status null with no stderr and
+    // the reason in `error`, which is the whole clue when unshare/setpriv is absent.
+    usernsProbeError = result.stderr?.toString().trim() || result.error?.message;
   } catch {
     // no sandbox available
   }
@@ -165,7 +228,9 @@ const SOCKET_CLEANUP = [
 //
 // in the unprivileged-unshare path (Docker --privileged test environments),
 // the user retains CAP_SYS_ADMIN inside the user namespace and could
-// `umount` these. production uses sudo-unshare where the drop seals them.
+// `umount` these. production seals them one of two ways: sudo-unshare via the
+// `su -p` drop, and userns-unshare via the `setpriv` cap-drop plus MNT_LOCKED
+// on every inherited mount (see the userns branch in spawnShell).
 //
 // repoDir is interpolated by the action process from resolveRepoRoot() —
 // NOT $PWD — because spawnShell's cwd is agent-controllable via
@@ -223,7 +288,16 @@ function spawnShell(params: SpawnParams): ChildProcess {
 
   if (ci && sandboxMethod === "none") {
     throw new Error(
-      "pid namespace isolation is required in CI but unavailable (both unshare and sudo unshare failed)"
+      "PID-namespace isolation is required in CI but unavailable: unprivileged unshare, sudo unshare, " +
+        "and userns-nested unshare all failed. " +
+        (usernsProbeError ? `userns probe said: ${usernsProbeError}. ` : "") +
+        "on a containerized / Kubernetes self-hosted runner the cause is usually one of: the pod's " +
+        "seccomp profile blocks user-namespace creation (Pod Security Standards baseline/restricted); " +
+        "the pod runs as root without CAP_SETFCAP, which the kernel requires to map uid 0; or the node " +
+        "kernel disallows unprivileged user namespaces (Ubuntu >= 23.10, Bottlerocket, Talos). " +
+        "elsewhere, check that `unshare` and `setpriv` (util-linux >= 2.31, which is what " +
+        "added --ambient-caps) are on PATH. " +
+        "see https://docs.pullfrog.com/security#self-hosted-runners"
     );
   }
 
@@ -244,6 +318,52 @@ function spawnShell(params: SpawnParams): ChildProcess {
         "bash",
         "-c",
         `${PROC_CLEANUP} ${SOCKET_CLEANUP} ${fsMounts} ${params.command}`,
+      ],
+      spawnOpts
+    );
+  }
+
+  if (sandboxMethod === "userns-unshare") {
+    // --user --map-root-user creates a user namespace and makes us root inside it,
+    // which grants the in-userns CAP_SYS_ADMIN that the nested --pid and --mount
+    // require — no host capability needed. the setup (PROC_CLEANUP / SOCKET_CLEANUP /
+    // fsMounts) runs with that in-userns root, then `setpriv` drops the entire
+    // bounding set + sets no_new_privs before the untrusted command (the userns
+    // analog of the sudo path's `su -p` seal). uid 0-in-userns maps to the action's
+    // real uid outside, so created files are owned correctly and no su drop is needed.
+    //
+    // TWO mechanisms keep the untrusted command off the mounts, and the cap-drop is
+    // only the first. it does NOT survive a nested userns: the kernel hands out a
+    // full capability set on every CLONE_NEWUSER regardless of the bounding set, so
+    // the sealed command can re-acquire CAP_SYS_ADMIN in a userns of its own. what
+    // stops it there is that ns_capable() only walks ancestor-ward — a descendant
+    // userns confers nothing over the mount namespace its parent owns — and that
+    // `unshare --mount` marks every inherited mount MNT_LOCKED. the cap-drop still
+    // earns its place: without it the command holds CAP_SYS_ADMIN in the userns that
+    // OWNS this mount namespace, where the binds we just made are not locked.
+    //
+    // --mount is EXPLICIT and load-bearing: it is normally implied by --mount-proc,
+    // which detectSandboxMethod deliberately omits (see there). without it there is
+    // no mount namespace at all and fsMounts silently no-ops — the tmpfs over
+    // /var/lib/pullfrog and the .git ro-bind just vanish, taking the filesystem
+    // sandbox with them while every other guarantee still appears to hold.
+    // --map-current-user is NOT a substitute for --map-root-user: mapping a non-zero
+    // uid makes execve use non-root capability rules, so the setup lands with an
+    // empty effective set and every mount fails.
+    const escaped = params.command.replace(/'/g, "'\\''");
+    return spawn(
+      "unshare",
+      [
+        "--user",
+        "--map-root-user",
+        "--pid",
+        "--fork",
+        "--mount",
+        "bash",
+        "-c",
+        `${PROC_CLEANUP} ${SOCKET_CLEANUP} ${fsMounts} ` +
+          `exec setpriv --no-new-privs --bounding-set -all --inh-caps -all --ambient-caps -all ` +
+          `bash -c '${escaped}'`,
       ],
       spawnOpts
     );
