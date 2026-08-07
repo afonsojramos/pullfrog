@@ -1030,8 +1030,13 @@ const defaultProxyDisplayName = defaultProxyAlias.displayName;
  * DB toggle — changing it is a deploy, which is the right friction. costs below
  * are modelled on the measured OSS token mix, where cache reads are ~87.5% of
  * input and list price therefore ranks models WRONG: Luna 0.39x, Flash 0.45x,
- * Pro 1.00x, MiniMax M2 1.30x, Kimi 3.88x modelled — but 7.25x as actually
- * measured over the pre-#1063 Kimi era, which is the number to trust.
+ * Pro 1.00x, MiniMax M2 1.30x.
+ *
+ * Kimi K2 was funded and then dropped: 13.2x the funded default as MEASURED
+ * over 2,203 real runs ($0.4782 vs $0.0362), almost entirely on its cache-read
+ * RATE — 8.5x Flash's. it also fails 2.9% of runs against Flash's 0.0%. best
+ * achievable was 10.9x (cheapest OpenRouter endpoint), so no routing fixes it.
+ * see wiki/oss-model-allowlist.md.
  */
 // MiniMax has no direct-vendor block (it ships only through the routers), so
 // it is listed under `openrouter/` where every other entry uses its vendor.
@@ -1040,7 +1045,6 @@ export const OSS_MODEL_ALLOWLIST: readonly string[] = [
   "deepseek/deepseek-pro",
   "openai/gpt-luna",
   "openrouter/minimax-m2.5",
-  "moonshotai/kimi-k2",
 ];
 
 /** the pick the console badges. DERIVED from the efficient tier rather than
