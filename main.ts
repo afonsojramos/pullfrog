@@ -401,6 +401,7 @@ export async function main(): Promise<MainResult> {
         owner: runContext.repo.owner,
         name: runContext.repo.name,
         secretsUnavailable: runContext.secretsUnavailable,
+        routerUnfunded: runContext.routerUnfunded,
       });
     }
 

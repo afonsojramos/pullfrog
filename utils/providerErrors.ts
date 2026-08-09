@@ -3,6 +3,9 @@ type ProviderErrorPattern = { regex: RegExp; label: string };
 /** Stable label for the BYOK provider-billing-exhausted classification. */
 export const PROVIDER_BILLING_EXHAUSTED_LABEL = "provider billing exhausted";
 
+/** Stable label for "OpenRouter can route this model nowhere you permit". */
+export const PROVIDER_NO_ENDPOINTS_LABEL = "provider no routable endpoints";
+
 // status codes are only treated as provider errors when they are adjacent to
 // a recognised status key. this rejects commit SHAs that happen to contain
 // "429", version strings, file hashes, etc.
@@ -19,7 +22,12 @@ const PROVIDER_ERROR_PATTERNS: ProviderErrorPattern[] = [
   // with no billing hint. see #778, #835.
   { regex: /\bCreditsError\b/, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
   { regex: /\bFreeUsageLimitError\b/, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
-  { regex: /Insufficient balance/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // `balance` is DeepSeek's noun, `credits` is OpenRouter's for the SAME
+  // terminal state — #1164's run 7 (`Insufficient credits. Add more using
+  // …/settings/credits`) matched neither this nor `requires more credits`, so
+  // the one run in that episode that was a genuinely empty wallet rendered with
+  // no CTA at all while runs 1-6 rendered correctly.
+  { regex: /Insufficient (?:balance|credits)/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
   { regex: /credit balance is too low/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
   // "spending cap" (Gemini) and "spending limit" (xAI, #1076) are the same
   // condition in two house styles — a configured ceiling was reached.
@@ -35,6 +43,15 @@ const PROVIDER_ERROR_PATTERNS: ProviderErrorPattern[] = [
   {
     regex: /requires more credits|Key limit exceeded \(total limit\)/i,
     label: PROVIDER_BILLING_EXHAUSTED_LABEL,
+  },
+  // OpenRouter has no endpoint it is allowed to route to: the customer's
+  // data-policy / guardrail settings exclude every provider serving the model.
+  // dies ~2s into the session with nothing billed, so it is neither a billing
+  // nor an auth condition — and both of those patterns would otherwise be
+  // reached first for a message that mentions neither. see #1164.
+  {
+    regex: /No endpoints available matching your (?:guardrail restrictions|data policy)/i,
+    label: PROVIDER_NO_ENDPOINTS_LABEL,
   },
   // auth patterns must come BEFORE rate-limit patterns. OpenRouter 401 error
   // payloads carry `x-ratelimit-*` response headers in the dump, and the
@@ -179,6 +196,38 @@ export function isRouterKeylimitExhaustedError(text: string): boolean {
  */
 export function isProviderBillingExhausted(text: string): boolean {
   return findProviderErrorMatch(text)?.label === PROVIDER_BILLING_EXHAUSTED_LABEL;
+}
+
+/**
+ * OpenRouter accepted the request and found nowhere to send it: the account's
+ * data policy or guardrail settings exclude every provider serving the picked
+ * model. Nothing is billed and no credential is at fault — the only fix is the
+ * privacy settings page or a different model. See #1164.
+ */
+export function isProviderNoRoutableEndpoints(text: string): boolean {
+  return findProviderErrorMatch(text)?.label === PROVIDER_NO_ENDPOINTS_LABEL;
+}
+
+/**
+ * OpenRouter's per-key ceiling, not an empty wallet. Topping up credits alone
+ * will not clear it, so it needs a different headline and a second lever than
+ * the generic billing-exhausted copy. Both shapes classify as
+ * `PROVIDER_BILLING_EXHAUSTED_LABEL`; this narrows within that class.
+ *
+ * TWO wire forms, and the obvious one is the rarer one. #1071's `Key limit
+ * exceeded (total limit)` names itself; #1164's is the `requires more credits,
+ * or fewer max_tokens` form, which is indistinguishable from a drained wallet
+ * except for the remedy the provider appends — a link to that key's own page.
+ * Anchor on the `/keys/<id>` URL rather than the "adjust the key's total limit"
+ * sentence, because the apostrophe in it arrives from provider JSON and may be
+ * typographic. A genuinely empty wallet (`Insufficient credits. Add more using
+ * …/settings/credits`) carries no `/keys/` path and correctly stays out.
+ */
+export function isOpenRouterKeyLimitExceeded(text: string): boolean {
+  return (
+    /Key limit exceeded \(total limit\)/i.test(text) ||
+    /openrouter\.ai\/[^\s"')]*\/keys\//i.test(text)
+  );
 }
 
 /**

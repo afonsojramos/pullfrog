@@ -28,6 +28,9 @@ export interface RunContextData {
   /** stored secrets couldn't be materialized for this run — not the same as
    * the user having none. see `RunContext.secretsUnavailable`. */
   secretsUnavailable?: boolean | undefined;
+  /** the Router was declined because the wallet is empty. see
+   * `RunContext.routerUnfunded`. */
+  routerUnfunded?: boolean | undefined;
 }
 
 interface ResolveRunContextDataParams {
@@ -117,5 +120,6 @@ export async function resolveRunContextData(
     secretsUnavailable:
       runContext.secretsUnavailable ||
       (!!process.env.ACTIONS_ID_TOKEN_REQUEST_URL && oidcToken === undefined),
+    routerUnfunded: runContext.routerUnfunded,
   };
 }

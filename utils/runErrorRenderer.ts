@@ -64,6 +64,7 @@ import { formatAgentHangBody } from "./agentHangReport.ts";
 import {
   formatApiKeyErrorSummary,
   isApiKeyAuthError,
+  ROUTER_UNFUNDED_MARKER,
   SECRETS_UNAVAILABLE_MARKER,
 } from "./apiKeys.ts";
 import { getApiUrl } from "./apiUrl.ts";
@@ -71,7 +72,9 @@ import { BillingError, formatBillingErrorSummary } from "./billingErrors.ts";
 import { MODEL_ACCESS_MARKER } from "./modelAccess.ts";
 import {
   extractProviderId,
+  isOpenRouterKeyLimitExceeded,
   isProviderBillingExhausted,
+  isProviderNoRoutableEndpoints,
   isRouterKeylimitExhaustedError,
 } from "./providerErrors.ts";
 
@@ -222,9 +225,29 @@ function detectProviderId(message: string): string | null {
   return null;
 }
 
+/** OpenRouter's key management page, where a key's total limit is raised. */
+const OPENROUTER_KEYS_URL = "https://openrouter.ai/workspaces/default/keys";
+/** OpenRouter's data-policy page, which decides what it may route to. */
+const OPENROUTER_PRIVACY_URL = "https://openrouter.ai/settings/privacy";
+
 function formatProviderBillingExhausted(input: { errorMessage: string }): string {
   const providerId = detectProviderId(input.errorMessage);
   const dashboardUrl = providerId ? PROVIDER_BILLING_URLS[providerId] : undefined;
+
+  // a per-key ceiling is not an empty wallet, and topping up alone does not
+  // clear it — the affordable figure drifts run to run while the wallet holds
+  // credit. name both levers, key limit first. see #1164.
+  if (isOpenRouterKeyLimitExceeded(input.errorMessage)) {
+    return [
+      "**Your OpenRouter key's total limit is too low for this request.**",
+      "",
+      "OpenRouter refused the request against the key's own spending ceiling, not your account balance — raising or removing that limit is the fix, and topping up credits alone may not be.",
+      "",
+      `[Raise the key's limit →](${OPENROUTER_KEYS_URL}) · [Add credits →](${PROVIDER_BILLING_URLS.openrouter})`,
+      "",
+      `\`\`\`\n${input.errorMessage}\n\`\`\``,
+    ].join("\n");
+  }
 
   const headline = providerId
     ? `**Your \`${providerId}\` account is out of credit.**`
@@ -239,6 +262,27 @@ function formatProviderBillingExhausted(input: { errorMessage: string }): string
     "Pullfrog detected a billing-exhausted response from your provider — the agent stopped before completing this run.",
     "",
     cta,
+    "",
+    `\`\`\`\n${input.errorMessage}\n\`\`\``,
+  ].join("\n");
+}
+
+/**
+ * OpenRouter has nowhere it is permitted to route the picked model. Nothing is
+ * billed and no key is at fault, so neither the billing nor the api-key copy
+ * fits — both would send the user to fix something that is not broken.
+ */
+function formatProviderNoRoutableEndpoints(input: {
+  owner: string;
+  name: string;
+  errorMessage: string;
+}): string {
+  return [
+    "**OpenRouter can't route this model anywhere your account allows.**",
+    "",
+    "Your OpenRouter data policy excludes every provider currently serving the configured model, so the request was refused before any model work happened. Allow more providers, or pick a model your policy already covers.",
+    "",
+    `[OpenRouter data policy →](${OPENROUTER_PRIVACY_URL}) · [Configure model →](${getApiUrl()}/console/${input.owner}/${input.name})`,
     "",
     `\`\`\`\n${input.errorMessage}\n\`\`\``,
   ].join("\n");
@@ -299,6 +343,14 @@ export function renderRunError(input: {
     return { summary: input.errorMessage, comment: input.errorMessage };
   }
 
+  // an unfunded Router account whose BYOK search also came up empty. same
+  // verbatim contract, and likewise ahead of the api-key branch — that branch
+  // rebuilds any body carrying `no API key found` into the generic
+  // "add a provider key" copy, which is the exact wrong CTA here.
+  if (input.errorMessage.includes(ROUTER_UNFUNDED_MARKER)) {
+    return { summary: input.errorMessage, comment: input.errorMessage };
+  }
+
   // gated on isHang because the harness sets `agentDiagnostic` on entry, so
   // any non-hang throw that hits the outer catch (e.g. post-success
   // output_schema validator, or a late cleanup throw after the run already
@@ -327,6 +379,18 @@ export function renderRunError(input: {
   // a "rotate your key" CTA when the actual fix is "top up credits".
   if (isProviderBillingExhausted(input.errorMessage)) {
     const body = formatProviderBillingExhausted({ errorMessage: input.errorMessage });
+    return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
+  }
+
+  // routable-endpoint refusal, checked alongside the billing branch for the
+  // same reason: it is user-fixable provider configuration, and the generic
+  // renderer below would surface the raw wire text with no CTA at all.
+  if (isProviderNoRoutableEndpoints(input.errorMessage)) {
+    const body = formatProviderNoRoutableEndpoints({
+      owner: input.repo.owner,
+      name: input.repo.name,
+      errorMessage: input.errorMessage,
+    });
     return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
   }
 

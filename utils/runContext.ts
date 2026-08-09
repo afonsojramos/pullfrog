@@ -97,6 +97,16 @@ export interface RunContext {
    * distinction a transient failure renders as "you have no API key".
    */
   secretsUnavailable?: boolean | undefined;
+  /**
+   * the Router was this account's funding path and its wallet is empty, so the
+   * server declined the mint rather than 402ing — the run falls through to
+   * BYOK, which is the documented affordance for a router-mode account whose
+   * key lives in workflow `env:`. only meaningful when the key search then
+   * comes up dry, where it turns "go add an API key" into copy that also names
+   * topping up. defaults false: an unreachable server must not assert a
+   * funding state. see wiki/billing.md.
+   */
+  routerUnfunded?: boolean | undefined;
 }
 
 const defaultSettings: RepoSettings = {
@@ -204,6 +214,7 @@ export async function fetchRunContext(params: {
       proxyModel?: string;
       dbSecrets?: Record<string, string>;
       secretsUnavailable?: boolean;
+      routerUnfunded?: boolean;
     } | null;
 
     if (data === null) {
@@ -230,6 +241,7 @@ export async function fetchRunContext(params: {
       proxyModel: data.proxyModel,
       dbSecrets: data.dbSecrets,
       secretsUnavailable: data.secretsUnavailable,
+      routerUnfunded: data.routerUnfunded,
     };
   } catch {
     // network drop, abort at the 30s timeout, or an unparseable body — we never

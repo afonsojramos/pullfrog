@@ -31,18 +31,56 @@ const MISSING_KEY_MARKER = "no API key found";
 export const SECRETS_UNAVAILABLE_MARKER = "couldn't load your Pullfrog secrets";
 
 /**
- * "you have no key" vs "we couldn't read your key" — same failure to the
- * runner, opposite CTA to the user, so every throw site picks by this flag.
+ * marker for the "your Router wallet is empty AND you have no provider key"
+ * body. its own marker rather than the missing-key one because
+ * `formatApiKeyErrorSummary` rebuilds any body carrying `MISSING_KEY_MARKER`
+ * that doesn't start with it, which would silently discard this copy.
+ */
+export const ROUTER_UNFUNDED_MARKER = "your Pullfrog Router balance is empty";
+
+/**
+ * Three ways to arrive at "the runner has no key", each with a different CTA:
+ * we couldn't read the key you stored, your Router wallet ran dry and you have
+ * no key of your own, or you genuinely have no key. Every throw site picks by
+ * these flags.
  */
 function buildKeyError(params: {
   owner: string;
   name: string;
   model?: string | undefined;
   secretsUnavailable?: boolean | undefined;
+  routerUnfunded?: boolean | undefined;
 }): string {
-  return params.secretsUnavailable
-    ? buildSecretsUnavailableError(params)
-    : buildMissingApiKeyError(params);
+  if (params.secretsUnavailable) return buildSecretsUnavailableError(params);
+  if (params.routerUnfunded) return buildRouterUnfundedError(params);
+  return buildMissingApiKeyError(params);
+}
+
+/**
+ * The account is on the Router, its wallet hit zero, and run-context therefore
+ * declined the mint — so the run fell through to BYOK and found nothing.
+ * `router_requires_card` (the 402 with this copy) is only reachable on the one
+ * run whose balance crosses zero; every run after it lands here, and before
+ * this body they were all told to go add an `OPENAI_API_KEY`. Leads with the
+ * funding remedy because that is the one that matches how the account is
+ * actually configured.
+ */
+function buildRouterUnfundedError(params: {
+  owner: string;
+  name: string;
+  model?: string | undefined;
+}): string {
+  const billingUrl = `${getApiUrl()}/console/${params.owner}#billing`;
+  const settingsUrl = `${getApiUrl()}/console/${params.owner}/${params.name}`;
+  const modelClause = params.model ? ` \`${params.model}\` never ran.` : " The agent never ran.";
+
+  return [
+    `**${ROUTER_UNFUNDED_MARKER}**, and this repo has no provider key to fall back on, so${modelClause}`,
+    "",
+    "**To fix, any one of:** add a payment method or top up your Router balance · add a provider API key (GitHub Actions secret or Pullfrog secret) · switch this repo to a free model.",
+    "",
+    `[Top up Router →](${billingUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+  ].join("\n");
 }
 
 function buildSecretsUnavailableError(params: {
@@ -237,6 +275,7 @@ export function validateAgentApiKey(params: {
   /** run-context couldn't hand over Pullfrog-stored secrets, so a missing key
    * says nothing about what the user actually configured. */
   secretsUnavailable?: boolean | undefined;
+  routerUnfunded?: boolean | undefined;
 }): void {
   if (params.model) {
     const alias = resolveDisplayAlias(params.model);
@@ -292,6 +331,7 @@ export function validateAgentApiKey(params: {
           name: params.name,
           model: params.model,
           secretsUnavailable: params.secretsUnavailable,
+          routerUnfunded: params.routerUnfunded,
         })
       );
     }
@@ -304,6 +344,7 @@ export function validateAgentApiKey(params: {
         name: params.name,
         model: params.model,
         secretsUnavailable: params.secretsUnavailable,
+        routerUnfunded: params.routerUnfunded,
       })
     );
   }
@@ -320,6 +361,7 @@ export function validateAgentApiKey(params: {
         owner: params.owner,
         name: params.name,
         secretsUnavailable: params.secretsUnavailable,
+        routerUnfunded: params.routerUnfunded,
       })
     );
   }
@@ -329,6 +371,7 @@ export function validateAgentApiKey(params: {
       owner: params.owner,
       name: params.name,
       secretsUnavailable: params.secretsUnavailable,
+      routerUnfunded: params.routerUnfunded,
     })
   );
 }
