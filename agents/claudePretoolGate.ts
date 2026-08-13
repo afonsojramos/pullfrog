@@ -116,10 +116,10 @@ process.stdin.on("end", () => {
  * their `Agent(...)` forms) to deny at a settings-source rule — the
  * authoritative, bypass-immune layer. `--disallowedTools` alone (a `cliArg`
  * deny) was observed to leak under `--dangerously-skip-permissions`, so the
- * deny is carried here too. Both consumers use both returned fields: the flag
- * `--settings` JSON (covers non-CI runs) writes the whole object, and
- * `buildManagedSettings` (CI, /etc managed settings) spreads `hooks` and folds
- * `permissions.deny` into its richer deny list.
+ * deny is carried here too. The single consumer is `buildClaudeSettings`, which
+ * spreads `hooks` and folds `permissions.deny` into its richer deny list; that
+ * one object is then written to BOTH the `--settings` flag and the `/etc`
+ * managed file, which is what keeps the two surfaces from drifting (#1179).
  */
 export function buildClaudePretoolGateSettings(
   scriptAbsolutePath: string,

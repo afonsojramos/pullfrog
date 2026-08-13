@@ -116,6 +116,16 @@ export async function persistLearnings(ctx: ToolContext): Promise<void> {
     log.debug("learnings tmpfile unchanged from seed — skipping persist");
     return;
   }
+  // an empty apiToken means run-context never authenticated this run (a 404
+  // degrades to `defaultRunContext`), so this PATCH is a guaranteed 401 — it
+  // was the single largest source of production 401s. skip it and say why
+  // once, rather than firing a request we already know cannot succeed (#1198).
+  if (!ctx.apiToken) {
+    log.warning(
+      "» learnings not persisted: this run has no Pullfrog API token (run-context did not authenticate it)"
+    );
+    return;
+  }
   try {
     const response = await apiFetch({
       path: `/api/repo/${ctx.repo.owner}/${ctx.repo.name}/learnings`,
@@ -164,6 +174,13 @@ export async function persistXrepoLearnings(ctx: ToolContext): Promise<void> {
   const seed = ctx.toolState.xrepoLearningsSeed?.trim() ?? "";
   if (current === seed) {
     log.debug("xrepo learnings tmpfile unchanged from seed — skipping persist");
+    return;
+  }
+  // same guaranteed-401 skip as `persistLearnings` (#1198).
+  if (!ctx.apiToken) {
+    log.warning(
+      "» xrepo learnings not persisted: this run has no Pullfrog API token (run-context did not authenticate it)"
+    );
     return;
   }
   try {

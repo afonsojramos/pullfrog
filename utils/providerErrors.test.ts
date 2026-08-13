@@ -1,9 +1,11 @@
 import {
   detectProviderError,
   extractProviderId,
+  findAnthropicSpendCap,
   findProviderErrorMatch,
   isProviderBillingExhausted,
   isRouterKeylimitExhaustedError,
+  isTransientUpstreamError,
 } from "./providerErrors.ts";
 
 describe("detectProviderError", () => {
@@ -113,6 +115,25 @@ describe("detectProviderError", () => {
       const stderr =
         "APIError: 400 Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.";
       expect(detectProviderError(stderr)).toBe("provider billing exhausted");
+    });
+
+    it("classifies Gemini's free-tier quota cap as billing exhausted, not a bare quota error (#1114)", () => {
+      const stderr =
+        'error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.5-flash"';
+      expect(detectProviderError(stderr)).toBe("provider billing exhausted");
+    });
+
+    it("classifies Anthropic's Console spend cap as billing exhausted (#1208)", () => {
+      const stderr =
+        "API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-09-01 at 00:00 UTC.";
+      expect(detectProviderError(stderr)).toBe("provider billing exhausted");
+      expect(findAnthropicSpendCap(stderr)?.regainAt).toBe("2026-09-01 at 00:00 UTC");
+    });
+
+    it("reads a spend cap with no regain date (#1208)", () => {
+      expect(findAnthropicSpendCap("You have reached your specified API usage limits.")).toEqual({
+        regainAt: null,
+      });
     });
   });
 
@@ -316,5 +337,29 @@ describe("isRouterKeylimitExhaustedError", () => {
     expect(
       isRouterKeylimitExhaustedError("You requested up to 32000 tokens,\nbut can only afford 22800")
     ).toBe(true);
+  });
+});
+
+describe("isTransientUpstreamError (#1173)", () => {
+  it("matches the three observed transports", () => {
+    expect(
+      isTransientUpstreamError(
+        "API Error: 529 Overloaded. This is a server-side issue, usually temporary."
+      )
+    ).toBe(true);
+    expect(
+      isTransientUpstreamError(
+        'provider error: {"code":502,"message":"Upstream error from Ambient","metadata":{"error_type":"provider_unavailable"}}'
+      )
+    ).toBe(true);
+    expect(isTransientUpstreamError("Streaming response failed: [500] error code: 500")).toBe(true);
+  });
+
+  it("leaves the classifications that own 4xx alone", () => {
+    expect(isTransientUpstreamError("API Error: 401 unauthorized")).toBe(false);
+    expect(isTransientUpstreamError("Insufficient balance")).toBe(false);
+    expect(isTransientUpstreamError("You have reached your specified API usage limits.")).toBe(
+      false
+    );
   });
 });

@@ -171,10 +171,45 @@ export async function fetchIdTokenFromStash(creds: OidcCredentials): Promise<str
   return body.value;
 }
 
+/**
+ * `core.getIDToken` re-wraps an HTTP failure as a plain `Error` with the status
+ * stringified into the body (`Error Code : 503`), so `isTransientTokenError`
+ * saw no status, `acquireNewToken` bailed on attempt 1, and its `[1000, 2000]`
+ * backoff was dead code on this path — while the stashed-credentials sibling
+ * retried the identical upstream 503. translating restores one predicate for
+ * both paths. see #1182.
+ */
+function translateIdTokenError(error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const status = error.message.match(/Error Code\s*:\s*(\d{3})/)?.[1];
+  if (!status) return error;
+  return new TokenExchangeError(Number(status), error.message);
+}
+
+/**
+ * One ID token per run for our single audience. `acquireTokenViaOIDC` runs two
+ * to four times per run (git token, MCP token, xrepo read token) on top of
+ * `resolveRunContextData`'s own mint, and each call used to hit the runner's
+ * OIDC endpoint again — back-to-back requests are exactly what provoked the
+ * Envoy load-shed (`reset reason: overflow`) that killed 19 runs in 24h, all of
+ * them AFTER setup had already succeeded (#1182). The token is valid for
+ * minutes, so the TTL costs nothing; failures are never cached, so a caller's
+ * own retry still re-mints. Mid-run refreshes take the stashed-credentials path
+ * (`opts.oidc`) and deliberately bypass this.
+ */
+export const mintIdToken = yes.op(
+  async () => {
+    try {
+      return await core.getIDToken(OIDC_AUDIENCE);
+    } catch (error) {
+      throw translateIdTokenError(error);
+    }
+  },
+  { ttl: 60_000, name: "OIDC ID token" }
+);
+
 async function acquireTokenViaOIDC(opts?: AcquireTokenOptions): Promise<string> {
-  const oidcToken = opts?.oidc
-    ? await fetchIdTokenFromStash(opts.oidc)
-    : await core.getIDToken(OIDC_AUDIENCE);
+  const oidcToken = opts?.oidc ? await fetchIdTokenFromStash(opts.oidc) : await mintIdToken();
 
   const repos = [...(opts?.repos ?? [])];
   const targetRepo = process.env.GITHUB_REPOSITORY?.split("/")[1];
@@ -538,6 +573,9 @@ export async function writeGitHubUsageSummaryToFile(path: string): Promise<void>
   await rename(tmpPath, path);
 }
 
+/** longest single throttle sleep we will sit through inside a caller's request. */
+const MAX_THROTTLE_WAIT_SECONDS = 30;
+
 export function createOctokit(
   token: string,
   refreshAuth?: (stale: string) => Promise<string>
@@ -550,11 +588,17 @@ export function createOctokit(
   // refreshed token takes effect on the retry and all subsequent requests
   const octokit = new OctokitWithPlugins({
     throttle: {
-      onRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
-        return retryCount <= 2;
+      // `retryCount <= 2` bounds ATTEMPTS, not duration: an exhausted
+      // installation bucket hands back a `retry-after` measured in minutes and
+      // the plugin sleeps for all of it, inside whatever tool call is holding
+      // the request. that is a silent multi-minute stall no caller can see or
+      // attribute (#1154), so cap how long a single wait may be — beyond the
+      // cap, failing fast lets the caller's own retry/classification run.
+      onRateLimit: (retryAfter, _options, _octokit, retryCount) => {
+        return retryCount <= 2 && retryAfter <= MAX_THROTTLE_WAIT_SECONDS;
       },
-      onSecondaryRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
-        return retryCount <= 2;
+      onSecondaryRateLimit: (retryAfter, _options, _octokit, retryCount) => {
+        return retryCount <= 2 && retryAfter <= MAX_THROTTLE_WAIT_SECONDS;
       },
     },
   });

@@ -7,6 +7,7 @@
 // silently-broken fallback.
 
 import {
+  getModelEnvVars,
   modelAliases,
   OPENAI_COMPATIBLE_API_KEY_ENV,
   OPENAI_COMPATIBLE_BASE_URL_ENV,
@@ -191,10 +192,21 @@ export function autoSelectModel(): string | undefined {
     // resolve through to their replacement, never run as-is). mirrors the
     // selectable-list filter (`!a.fallback && !a.hidden`) in
     // components/ModelSelector.tsx and action/commands/init.ts.
+    // `opencode models` lists a provider's catalog whether or not the run holds
+    // that provider's credential, so `authorized` alone is not "servable": a
+    // preferred OpenCode Zen alias won auto-select on repos with 43 working
+    // OpenRouter models and then died at session start with `No provider
+    // available` (#1077). require the credential too — a model with no declared
+    // env var stays eligible, so this only excludes candidates we can already
+    // see we cannot serve.
+    const servable = (a: (typeof modelAliases)[number]) => {
+      if (!authorized.has(a.resolve)) return false;
+      const envVars = getModelEnvVars(a.resolve);
+      return envVars.length === 0 || envVars.some((name) => process.env[name]);
+    };
     const match =
-      modelAliases.find(
-        (a) => !a.hidden && !a.fallback && a.preferred && authorized.has(a.resolve)
-      ) ?? modelAliases.find((a) => !a.hidden && !a.fallback && authorized.has(a.resolve));
+      modelAliases.find((a) => !a.hidden && !a.fallback && a.preferred && servable(a)) ??
+      modelAliases.find((a) => !a.hidden && !a.fallback && servable(a));
     if (match) {
       log.info(
         `» model: ${match.resolve} (auto-selected${match.preferred ? " — preferred" : ""} curated match)`

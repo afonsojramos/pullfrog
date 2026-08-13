@@ -34,13 +34,29 @@
  */
 export const RUN_STATUS_CHECK_NAME = "pullfrog";
 
+/**
+ * GitHub's own Actions app. It publishes a check run per job, named after the
+ * job — and the generated workflow's job is also called `pullfrog`, so the
+ * collision is structural rather than incidental. Renaming our check is not
+ * available: it was tried on 2026-08-02 and blocked merges on four customer
+ * repos (see above), so the reuse lookup filters instead. See #1196.
+ */
+const GITHUB_ACTIONS_APP_SLUG = "github-actions";
+
 /** the review-verdict check. opt-in, terminal-only, and deliberately separate from the above. */
 export const APPROVAL_CHECK_NAME = "pullfrog-approval";
 
 /**
- * The terminal states we report. Exactly GitHub's check-run `conclusion` enum, which
- * happens to be `WorkflowRunStatus` minus `running` — so the server can map a finished
- * run's status straight across (`checkConclusionFromStatus` in utils/workflowRunStatus.ts).
+ * The terminal states we report: exactly GitHub's check-run `conclusion` enum.
+ *
+ * NOT `WorkflowRunStatus`. `stale` is a valid `workflow_run.conclusion` and is
+ * NOT a member of the Checks API enum, which GitHub's own 422 enumerates as
+ * `["success", "failure", "neutral", "cancelled", "timed_out",
+ * "action_required", "skipped"]`. Admitting it here let
+ * `checkConclusionFromStatus` type-check while producing a value the wire
+ * always rejects, so 100% of reaper-expired rows failed close-out — and since
+ * the failure left `checkRunId` set, the hourly sweep re-sent the same illegal
+ * conclusion forever. See [#1178](https://github.com/pullfrog/app/issues/1178).
  */
 export type RunStatusCheckConclusion =
   | "success"
@@ -49,8 +65,7 @@ export type RunStatusCheckConclusion =
   | "timed_out"
   | "action_required"
   | "neutral"
-  | "skipped"
-  | "stale";
+  | "skipped";
 
 /**
  * Parse the on-the-wire `{ id: string }` shape (the form carried in `JsonPayload`) into
@@ -113,7 +128,9 @@ export interface RunStatusCheckOctokit {
         ref: string;
         check_name?: string;
         status?: "queued" | "in_progress" | "completed";
-      }) => Promise<{ data: { check_runs: { id: number }[] } }>;
+      }) => Promise<{
+        data: { check_runs: { id: number; app?: { slug?: string | null } | null }[] };
+      }>;
     };
   };
 }
@@ -162,11 +179,6 @@ const TERMINAL_OUTPUT: Record<RunStatusCheckConclusion, { title: string; summary
   skipped: {
     title: "Pullfrog run skipped",
     summary: "This run was superseded by another Pullfrog run.",
-  },
-  stale: {
-    title: "Pullfrog run didn't finish",
-    summary:
-      "Pullfrog never received a completion signal for this run. See the run logs for details.",
   },
 };
 
@@ -220,7 +232,15 @@ export async function createRunStatusCheck(params: {
       status: "in_progress",
     })
     .catch(() => undefined);
-  const reusable = existing?.data.check_runs[0];
+  // ...but only a check we can actually PATCH. the generated workflow names its
+  // job `pullfrog`, so GitHub Actions publishes a check run with the SAME name
+  // for every Pullfrog run, owned by app 15368. adopting that one meant our own
+  // check was never created, `WorkflowRun.checkRunId` pointed at a foreign row,
+  // and every close-out path — action, webhook, both reaper sweeps — 403'd with
+  // `Invalid app_id 15368`. see #1196.
+  const reusable = existing?.data.check_runs.find(
+    (run) => run.app?.slug !== GITHUB_ACTIONS_APP_SLUG
+  );
   if (reusable) return reusable.id;
 
   const createParams: CreateCheckRunParams = {

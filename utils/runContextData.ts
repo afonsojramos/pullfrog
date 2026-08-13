@@ -1,9 +1,8 @@
-import * as core from "@actions/core";
 import type { Octokit } from "@octokit/rest";
 import packageJson from "../package.json" with { type: "json" };
 import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
-import { type OctokitWithPlugins, parseRepoContext } from "./github.ts";
+import { mintIdToken, type OctokitWithPlugins, parseRepoContext } from "./github.ts";
 import { isTransientOctokitError } from "./isTransientNetworkError.ts";
 import {
   type AccountPlan,
@@ -56,8 +55,9 @@ function warnIfPinnedToSha(): void {
   if (isActionPinnedToSha()) {
     log.warning(
       `» pinned to a commit SHA (${process.env.GITHUB_ACTION_REF}); the post-run cleanup step is ` +
-        "frozen at that commit and won't receive fixes. pin to `pullfrog/pullfrog@v0`, or keep the " +
-        "SHA fresh with Dependabot — see https://docs.pullfrog.com/versioning"
+        "frozen at that commit and won't receive fixes. keep the SHA fresh with Dependabot, or " +
+        "pin to `pullfrog/pullfrog@v0` if your org doesn't require full-SHA action pinning — " +
+        "see https://docs.pullfrog.com/versioning"
     );
   }
 }
@@ -80,7 +80,7 @@ export async function resolveRunContextData(
   // attempt, no retry.
   let oidcToken: string | undefined;
   try {
-    oidcToken = await yes.op(() => core.getIDToken("pullfrog-api"), {
+    oidcToken = await yes.op(() => mintIdToken(), {
       name: "OIDC mint",
       retries: process.env.ACTIONS_ID_TOKEN_REQUEST_URL ? [200, 1000] : [],
     })();

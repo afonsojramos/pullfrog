@@ -477,7 +477,9 @@ Do NOT use this tool for git commands — use the dedicated git tools instead.`,
       if (isGitCommand(params.command)) {
         throw new Error(
           "git commands are not allowed in the shell tool. use the dedicated git tools instead:\n" +
-            "- git: local operations (status, log, diff, add, commit, checkout, merge, rebase, etc.)\n" +
+            // the bare tool name here was the on-ramp to malformed `git` calls:
+            // models read it as a command word and sent `command: "git"` (#1199).
+            '- git: local operations, e.g. git({ command: "log", args: ["--oneline"] }) — `command` is the subcommand ONLY\n' +
             "- push_branch: push to remote (handles authentication)\n" +
             "- git_fetch: fetch from remote (handles authentication)\n" +
             "- checkout_pr: check out PR branches"

@@ -7,7 +7,7 @@ import { primaryRepoState, type RepoToolState, requireRepoState } from "../toolS
 import { createChangeImpactArtifact } from "../utils/changeImpact.ts";
 import { log } from "../utils/cli.ts";
 import { countLines, createDiffCoverageState } from "../utils/diffCoverage.ts";
-import { $git, $gitFetchWithDeepen } from "../utils/gitAuth.ts";
+import { $git, $gitFetchWithDeepen, DEEPEN_RETRY_DEPTH } from "../utils/gitAuth.ts";
 import { executeLifecycleHook } from "../utils/lifecycle.ts";
 import { computeIncrementalDiff } from "../utils/rangeDiff.ts";
 import { $ } from "../utils/shell.ts";
@@ -263,8 +263,20 @@ async function ensureBeforeShaReachable(params: EnsureBeforeShaParams): Promise<
       sha: params.sha,
       ref: tempBranch,
     });
+    // NOT `--depth=1`: that lands `beforeSha` as a brand-new shallow root with
+    // zero ancestry, which is strictly worse than not fetching it — `cat-file`
+    // then succeeds, so nothing retries, while every `merge-base` against it
+    // fails and the incremental diff silently never computes. 174 of 744
+    // IncrementalReview runs lost their delta this way (#1139).
+    // `DEEPEN_RETRY_DEPTH` is this repo's existing "clears the merge base on
+    // most real-world PRs without downloading full history" bound.
     await $gitFetchWithDeepen(
-      ["--no-tags", ...(params.isShallow ? ["--depth=1"] : []), "origin", tempBranch],
+      [
+        "--no-tags",
+        ...(params.isShallow ? [`--depth=${DEEPEN_RETRY_DEPTH}`] : []),
+        "origin",
+        tempBranch,
+      ],
       { token: params.gitToken, refreshGitToken: params.refreshGitToken },
       `before_sha temp branch ${tempBranch}`
     );
@@ -639,6 +651,38 @@ export async function checkoutPrBranch(
  */
 const inFlightCheckouts = new Map<number, Promise<CheckoutPrResult>>();
 
+/**
+ * The tool's own budget, enforced by US rather than by fastmcp. fastmcp's
+ * `timeoutMs` is a `Promise.race`: it bounds the response the client sees and
+ * never settles the loser, so a `runCheckout` that stopped settling left a dead
+ * entry in `inFlightCheckouts` for the rest of the run — and every later
+ * `checkout_pr` for that PR short-circuited onto it. 222 client aborts over 110
+ * runs, two of which burned the entire 1h cap re-issuing one checkout whose git
+ * work had finished 35 minutes earlier (#1171). Racing here settles the promise
+ * the `finally` is waiting on, so the entry always clears and a retry gets a
+ * real attempt.
+ */
+const CHECKOUT_DEADLINE_MS = 570_000;
+
+function withCheckoutDeadline(
+  promise: Promise<CheckoutPrResult>,
+  pullNumber: number
+): Promise<CheckoutPrResult> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `checkout_pr #${pullNumber} exceeded ${CHECKOUT_DEADLINE_MS / 1000}s. the fetch may still be running in the background; retry the call to start a fresh attempt.`
+          )
+        ),
+      CHECKOUT_DEADLINE_MS
+    );
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 type InitialHead = NonNullable<RepoToolState["initialHead"]>;
 
 function headsEqual(a: InitialHead, b: InitialHead): boolean {
@@ -910,7 +954,7 @@ export function CheckoutPrTool(ctx: ToolContext) {
       "Returns diffPath pointing to the formatted diff file. " +
       "Example: `checkout_pr({ pull_number: 1234 })`. " +
       "Large repos can take several minutes — wait for the call to finish; do not treat a slow response as failure. " +
-      "If you see `MCP error -32001: Request timed out`, that is a client-side abort while the server's `git fetch` is still running in the background; retry the SAME call (it will share the in-flight result) and DO NOT touch `.git/*.lock` files — removing them kills the still-running fetch and creates an inescapable retry loop. " +
+      "If a call times out, retry it — the retry starts a fresh attempt. DO NOT touch `.git/*.lock` files: removing them kills a still-running fetch and creates an inescapable retry loop. " +
       "Stale lock files from prior crashed runs are swept automatically by the tool itself before each fetch; you do not need to remove them by hand.",
     parameters: CheckoutPr,
     execute: execute(async ({ pull_number }) => {
@@ -968,7 +1012,7 @@ export function CheckoutPrTool(ctx: ToolContext) {
         }
       }
 
-      const promise = runCheckout(pull_number);
+      const promise = withCheckoutDeadline(runCheckout(pull_number), pull_number);
       inFlightCheckouts.set(pull_number, promise);
       try {
         return await promise;

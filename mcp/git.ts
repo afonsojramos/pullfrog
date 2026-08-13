@@ -892,7 +892,13 @@ function detectSymmetricDiffTrap(
       const leftAhead = countAhead(right, left, cwd);
       const rightAhead = countAhead(left, right, cwd);
       if (leftAhead === null || rightAhead === null) continue;
-      if (leftAhead > 0 && rightAhead > 0) {
+      // `countAhead` is a reachability walk that stops at the shallow boundary
+      // and needs no common ancestor, so on a grafted checkout it happily
+      // reports divergence across the graft — and then every remedy this trap
+      // prescribes is merge-base-based and guaranteed to fail on that same
+      // checkout. the symmetric tree diff is the only meaningful answer left,
+      // so let it through rather than sending the agent into a dead end (#1139).
+      if (leftAhead > 0 && rightAhead > 0 && hasMergeBase(left, right, cwd)) {
         const aheadRef = leftAhead >= rightAhead ? left : right;
         return { arg: p, aheadRef, ahead: Math.max(leftAhead, rightAhead) };
       }
@@ -900,9 +906,22 @@ function detectSymmetricDiffTrap(
     }
     const ahead = countAhead("HEAD", p, cwd);
     if (ahead === null) continue;
-    if (ahead > 0) return { arg: p, aheadRef: p, ahead };
+    if (ahead > 0 && hasMergeBase("HEAD", p, cwd)) return { arg: p, aheadRef: p, ahead };
   }
   return null;
+}
+
+/**
+ * do the two endpoints share a common ancestor? on a shallow, grafted checkout
+ * they may not, and every remedy `detectSymmetricDiffTrap` prescribes is
+ * merge-base-based. see #1139.
+ */
+function hasMergeBase(a: string, b: string, cwd: string): boolean {
+  try {
+    return $("git", ["merge-base", a, b], { cwd, log: false }).trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** `rev-list --count head..base` = commits on `base` not on `head`. returns
@@ -952,6 +971,56 @@ function spillGitOutput(params: {
 //   -> achieves arbitrary code execution even with shell=disabled
 const subcommandPattern = regex("^[a-z][a-z0-9-]*$");
 
+/**
+ * Two malformed-but-unambiguous shapes the models keep emitting: `args[0]`
+ * repeating the subcommand, and the whole cmdline pushed into `args` behind
+ * `command: "git"`. Both were rejected (or, for the second, run as `git git
+ * log …`) and the models re-emitted the byte-identical call rather than
+ * adapting — 368 dead round trips over 190 runs in 24h (#1199). The intent is
+ * knowable, so normalize rather than reject.
+ *
+ * The promotion out of `command: "git"` re-clears `subcommandPattern`: without
+ * that, `args: ["-c", "alias.x=!evil", "x"]` would move a global git option
+ * into the subcommand slot that pattern exists to guard.
+ */
+export function normalizeGitInvocation(input: { command: string; args: string[] }): {
+  command: string;
+  args: string[];
+} {
+  let command = input.command;
+  let args = input.args;
+  while (command === "git" && args[0] !== undefined && subcommandPattern.test(args[0])) {
+    command = args[0];
+    args = args.slice(1);
+  }
+  // git would otherwise read the duplicate as a pathspec and silently return
+  // clean/empty output on a dirty tree. a real pathspec stays reachable via the
+  // documented `args: ["--", "<path>"]` form.
+  if (args[0]?.toLowerCase() === command.toLowerCase()) args = args.slice(1);
+  return { command, args };
+}
+
+/**
+ * git subcommands whose exit 1 is a documented result rather than a failure.
+ * The status code IS the answer and both streams are empty by design, so
+ * anything that reads "non-zero means broken" reports a successful negative as
+ * an error. See #1152; `merge-base --is-ancestor` keeps its own branch because
+ * it returns a boolean rather than a note.
+ */
+export function describeEmptyResult(command: string, args: string[]): string | null {
+  if (command === "grep") return "no matches";
+  if (command === "check-ignore") return "none of the given paths are ignored";
+  if (command === "show-ref") return "no matching ref";
+  if (command === "merge-base" && args.includes("--fork-point")) return "no fork point";
+  if (
+    (command === "diff" || command === "diff-index" || command === "diff-tree") &&
+    (args.includes("--quiet") || args.includes("--exit-code"))
+  ) {
+    return "differences found";
+  }
+  return null;
+}
+
 const Git = type({
   command: type(subcommandPattern).describe("Git command (e.g., 'status', 'log', 'diff')"),
   args: type.string.array().describe("Additional arguments for the git command").optional(),
@@ -977,22 +1046,20 @@ export function GitTool(ctx: ToolContext) {
       "git pull is not available — use git_fetch then this tool with command 'merge'.",
     parameters: Git,
     execute: execute(async (params) => {
-      const command = params.command;
-      const args = params.args ?? [];
+      const invocation = normalizeGitInvocation({
+        command: params.command,
+        args: params.args ?? [],
+      });
+      const command = invocation.command;
+      const args = invocation.args;
       const cwd = resolveRepoCtx(ctx, params.repo).dir;
 
-      // guard: {command:"status",args:["status"]} → `git status status`, where
-      // git silently treats args[0] as a pathspec. when nothing matches the
-      // path, status prints "nothing to commit, working tree clean" even on a
-      // dirty tree — a real model failure mode that burned a ~$3 run before
-      // self-correction. generalises to every subcommand (`diff diff`,
-      // `log log`, etc.).
-      if (args[0]?.toLowerCase() === command.toLowerCase()) {
+      // only reachable when args[0] is not a subcommand (a flag, a path); git's
+      // own `git: 'git' is not a git command` says nothing about our contract.
+      if (command === "git") {
         throw new Error(
-          `git ${command}: '${args[0]}' duplicates the subcommand — drop args[0] ` +
-            `(the subcommand only belongs in 'command'). git would otherwise parse it as ` +
-            `a pathspec and silently return empty/clean output when nothing matches. ` +
-            `if you really meant a pathspec named '${args[0]}', use args: ["--", "${args[0]}"].`
+          "git: 'command' is the subcommand only — pass e.g. " +
+            'git({ command: "log", args: ["--oneline"] }), not command: "git".'
         );
       }
 
@@ -1099,7 +1166,32 @@ export function GitTool(ctx: ToolContext) {
         return { success: true, isAncestor };
       }
 
-      const output = $("git", [command, ...args], { cwd, log: false });
+      // exit 1 from these carries the ANSWER, and both streams are
+      // deliberately empty, so `$()`'s `detail || "Unknown error"` fallback
+      // handed the model the word "error" for a successful negative result.
+      // that cost a turn every time and, worse, let a review conclude it had
+      // been unable to check rather than that it checked and found nothing
+      // (#1152). same idea as the `--is-ancestor` branch above, generalized.
+      const emptyResult = describeEmptyResult(command, args);
+      let noResult = false;
+      const output = $("git", [command, ...args], {
+        cwd,
+        log: false,
+        onError: (r) => {
+          if (r.status === 1 && emptyResult && !r.stderr.trim() && !r.stdout.trim()) {
+            noResult = true;
+            return;
+          }
+          const detail = [r.stderr, r.stdout]
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .join("\n");
+          throw new Error(
+            `Command failed with exit code ${r.status}: ${detail || `no output from \`git ${command} ${args.join(" ")}\``}`
+          );
+        },
+      });
+      if (noResult) return { success: true, output: "", note: emptyResult };
       const lineCount = output.split("\n").length;
       if (output.length > MAX_GIT_OUTPUT_CHARS) {
         const spilled = spillGitOutput({ command, args, output, lineCount });

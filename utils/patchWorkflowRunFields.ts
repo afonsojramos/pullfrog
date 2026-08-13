@@ -47,6 +47,10 @@ export async function patchWorkflowRunFields(
   fields: WorkflowRunPatch
 ): Promise<void> {
   if (ctx.runId === undefined || !ctx.apiToken) return;
+  // a 404 means the reservation was never claimed, and the claim happens at
+  // setup — strictly before any PATCH — so it can never become claimable later
+  // in this run. see #1153.
+  if (ctx.toolState.workflowRunUnclaimed) return;
   const body: Record<string, string | number> = {};
   for (const key of STRING_KEYS) {
     const value = fields[key];
@@ -74,6 +78,7 @@ export async function patchWorkflowRunFields(
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(10_000),
         });
+        if (response.status === 404) ctx.toolState.workflowRunUnclaimed = true;
         if (!response.ok) throw new Error(`PATCH workflow-run: ${response.status}`);
       },
       {

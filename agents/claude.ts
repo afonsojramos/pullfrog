@@ -128,27 +128,35 @@ function writeMcpConfig(ctx: AgentRunContext): string {
  * action/agents/claudePretoolGate.ts for the contract.
  *
  * Two paths register the gate:
- *   1. flag settings (`--settings <path>`) — covers non-CI runs (`pnpm play`,
- *      local dev) where `installManagedSettings` is a no-op.
- *   2. managed settings (/etc/claude-code/managed-settings.json) — covers CI,
- *      where `allowManagedHooksOnly: true` filters flag-settings hooks. The
- *      same hook entry is embedded in `buildManagedSettings` below.
+ *   1. flag settings (`--settings <path>`) — the only surface on non-CI runs
+ *      (`pnpm play`, local dev), where `installManagedSettings` is a no-op,
+ *      and the surviving one in CI when the `/etc` write fails.
+ *   2. managed settings (/etc/claude-code/managed-settings.json) — needed in
+ *      CI because `allowManagedHooksOnly: true` filters flag-settings hooks
+ *      once it is in force. The same hook entry is embedded in
+ *      `buildManagedSettings` below.
  *
- * The flag settings also carry the native exec-tool `permissions.deny`
- * (via `buildClaudePretoolGateSettings`) so non-CI runs (where managed
- * settings are absent) still block native Bash et al. at a settings-source
- * deny, not just the `--disallowedTools` cliArg deny that proved leaky under
- * `--dangerously-skip-permissions`.
+ * The flag settings carry the WHOLE boundary (`buildClaudeSettings`), not just
+ * the gate: the native exec-tool deny, the `/proc` `/sys` `.git` and
+ * `secretDenyPaths` denies, the sandbox `denyRead` and the Stop hook. A
+ * settings-source deny holds under `--dangerously-skip-permissions` where the
+ * `--disallowedTools` cliArg deny proved leaky, so this is a real second
+ * surface rather than a courtesy copy — and it is what keeps the boundary in
+ * force on a runner where the `/etc` write fails (#1179).
  */
-function writePretoolGateAssets(ctx: AgentRunContext): {
+function writePretoolGateAssets(params: { ctx: AgentRunContext; stopHookPath: string }): {
   scriptPath: string;
   settingsPath: string;
 } {
-  const scriptPath = join(ctx.tmpdir, CLAUDE_PRETOOL_GATE_FILENAME);
-  writeFileSync(scriptPath, buildClaudePretoolGateSource(ctx.subagentDeniedTools));
+  const scriptPath = join(params.ctx.tmpdir, CLAUDE_PRETOOL_GATE_FILENAME);
+  writeFileSync(scriptPath, buildClaudePretoolGateSource(params.ctx.subagentDeniedTools));
   chmodSync(scriptPath, 0o755);
-  const settingsPath = join(ctx.tmpdir, "pullfrog-claude-settings.json");
-  const settings = buildClaudePretoolGateSettings(scriptPath, CLAUDE_EXEC_TOOL_DENY_RULES);
+  const settingsPath = join(params.ctx.tmpdir, "pullfrog-claude-settings.json");
+  const settings = buildClaudeSettings({
+    ctx: params.ctx,
+    stopHookPath: params.stopHookPath,
+    pretoolGateScriptPath: scriptPath,
+  });
   writeFileSync(settingsPath, JSON.stringify(settings));
   return { scriptPath, settingsPath };
 }
@@ -980,7 +988,16 @@ interface ManagedSettingsParams {
   pretoolGateScriptPath: string;
 }
 
-function buildManagedSettings(params: ManagedSettingsParams): Record<string, unknown> {
+/**
+ * The permission boundary itself, minus the two `allowManaged*Only` policy
+ * flags that only mean anything in `/etc`. BOTH surfaces write this: the
+ * managed file and the `--settings` flag. They used to disagree — the native
+ * FS denies (`/proc`, `/sys`, `.git`, `secretDenyPaths`), the sandbox
+ * `denyRead` and the Stop hook lived ONLY in the managed file, so a runner
+ * without passwordless sudo silently ran with four of the seven rows absent
+ * and no Stop-hook gate at all (#1179). One builder, two writers.
+ */
+function buildClaudeSettings(params: ManagedSettingsParams): Record<string, unknown> {
   const secretDenyPaths = params.ctx.secretDenyPaths ?? [];
   const toolDeny = secretDenyPaths.flatMap((path) => [
     `Read(${path}/**)`,
@@ -1001,8 +1018,6 @@ function buildManagedSettings(params: ManagedSettingsParams): Record<string, unk
     CLAUDE_EXEC_TOOL_DENY_RULES
   );
   const base: Record<string, unknown> = {
-    allowManagedPermissionRulesOnly: true,
-    allowManagedHooksOnly: true,
     permissions: {
       deny: [
         // native exec tools — the authoritative, bypass-immune deny.
@@ -1053,10 +1068,37 @@ function buildManagedSettings(params: ManagedSettingsParams): Record<string, unk
   return base;
 }
 
-function installManagedSettings(params: ManagedSettingsParams): void {
-  if (process.env.CI !== "true") return;
+/**
+ * The `/etc` copy: the same boundary plus the two policy flags that make it
+ * authoritative — flag-settings hooks are filtered once `allowManagedHooksOnly`
+ * is in force, which is why the PreToolUse gate is replicated into both.
+ */
+function buildManagedSettings(params: ManagedSettingsParams): Record<string, unknown> {
+  return {
+    allowManagedPermissionRulesOnly: true,
+    allowManagedHooksOnly: true,
+    ...buildClaudeSettings(params),
+  };
+}
+
+/**
+ * `/etc/claude-code` is privileged only because it is `/etc` — plenty of
+ * self-hosted images run the job as root, where the sudo shell-out is pure
+ * overhead and its password prompt is a gratuitous failure. try the plain
+ * write first, then sudo. see #1179.
+ */
+function installManagedSettings(params: ManagedSettingsParams): boolean {
+  if (process.env.CI !== "true") return false;
 
   const content = JSON.stringify(buildManagedSettings(params), null, 2);
+  try {
+    mkdirSync(MANAGED_SETTINGS_DIR, { recursive: true });
+    writeFileSync(MANAGED_SETTINGS_PATH, content);
+    log.debug(`» wrote managed settings to ${MANAGED_SETTINGS_PATH}`);
+    return true;
+  } catch {
+    // not writable as this user — fall through to sudo.
+  }
   try {
     execFileSync("sudo", ["mkdir", "-p", MANAGED_SETTINGS_DIR]);
     execFileSync("sudo", ["tee", MANAGED_SETTINGS_PATH], {
@@ -1064,8 +1106,17 @@ function installManagedSettings(params: ManagedSettingsParams): void {
       stdio: ["pipe", "ignore", "pipe"],
     });
     log.debug(`» wrote managed settings to ${MANAGED_SETTINGS_PATH}`);
+    return true;
   } catch (err) {
-    log.warning(`» failed to install managed settings: ${err}`);
+    // the deny set and the Stop hook still reach the agent through
+    // `--settings`; what is lost here is the `allowManaged*Only` policy
+    // hardening, so say precisely that rather than implying no boundary.
+    log.warning(
+      `» failed to install managed settings (${err}) — the permission deny set and Stop-hook gate ` +
+        "still apply via --settings, but the managed-only policy hardening does not. grant the " +
+        "runner passwordless sudo, or make /etc/claude-code writable by the job user."
+    );
+    return false;
   }
 }
 
@@ -1124,8 +1175,6 @@ export const claude = agent({
     // yasasbanukaofficial/claude-code src/utils/hooks.ts createBaseHookInput).
     // Wired via two surfaces so it fires in both CI and local (see
     // writePretoolGateAssets / buildManagedSettings comments).
-    const pretoolGate = writePretoolGateAssets(ctx);
-
     // reflection + every gate retry (dirty tree, unsubmitted review, summary
     // stale) move from post-exit `--resume <sessionId>` subprocesses to a
     // managed Stop hook that curls a sidecar gate server. see
@@ -1133,6 +1182,8 @@ export const claude = agent({
     // `gateServer.ts` for the decision policy.
     const stopHookPath = join(ctx.tmpdir, "pullfrog-stop-hook.sh");
     writeFileSync(stopHookPath, buildStopHookScript(), { mode: 0o755 });
+
+    const pretoolGate = writePretoolGateAssets({ ctx, stopHookPath });
 
     installManagedSettings({ ctx, stopHookPath, pretoolGateScriptPath: pretoolGate.scriptPath });
 

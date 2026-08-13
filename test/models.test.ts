@@ -80,11 +80,15 @@ describe("isFree invariants", () => {
       ).toBe("opencode");
     });
 
-    it(`${alias.slug} has empty envVars`, () => {
+    // #1077 — `isFree` is about COST, not credentials. Zen refuses a keyless
+    // request with `No provider available`, so a free alias that declared
+    // `envVars: []` waved every static gate through and the run died at session
+    // start with no missing-key CTA. free Zen models still need the key.
+    it(`${alias.slug} requires the provider credential`, () => {
       expect(
         getModelEnvVars(alias.slug),
-        `isFree alias "${alias.slug}" must declare \`envVars: []\` so validateAgentApiKey doesn't demand OPENCODE_API_KEY`
-      ).toEqual([]);
+        `isFree alias "${alias.slug}" is free of CHARGE, not of credential — Zen still needs OPENCODE_API_KEY`
+      ).toEqual(["OPENCODE_API_KEY"]);
     });
 
     it(`${alias.slug} has no openRouterResolve`, () => {

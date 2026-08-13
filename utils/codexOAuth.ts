@@ -19,6 +19,17 @@ export interface CodexAuthBody {
     account_id?: string;
   };
   last_refresh?: string;
+  /**
+   * ISO timestamp of an `invalid_grant` rejection. OpenAI rotates the refresh
+   * token on every use, so a rejection is PERMANENT — without a latch the
+   * server re-issued the identical doomed refresh on every run (455 futile
+   * round trips in 7 days, one per run, each holding a Postgres row lock across
+   * a 10s external call). Cleared implicitly: `pullfrog auth codex` and
+   * `PUT /api/runtime/secret` write a fresh blob without it, which re-arms
+   * rotation. Never reaches `auth.json` — `installCodexAuth` builds that file
+   * from explicit fields. See [#1101](https://github.com/pullfrog/app/issues/1101).
+   */
+  refresh_rejected_at?: string;
 }
 
 /** OAuth client id Codex CLI and OpenCode both use against `auth.openai.com`.
@@ -131,6 +142,9 @@ export function parseCodexAuthBody(raw: string): CodexAuthBody | null {
   if (typeof t.refresh_token !== "string" || t.refresh_token.length === 0) return null;
   return {
     auth_mode: "chatgpt",
+    ...(typeof v.refresh_rejected_at === "string"
+      ? { refresh_rejected_at: v.refresh_rejected_at }
+      : {}),
     tokens: {
       access_token: t.access_token,
       refresh_token: t.refresh_token,

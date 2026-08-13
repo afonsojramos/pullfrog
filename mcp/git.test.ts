@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPushError } from "./git.ts";
+import { classifyPushError, describeEmptyResult, normalizeGitInvocation } from "./git.ts";
 
 // re-export the normalizeUrl function for testing
 // note: in a real scenario, we'd export this from git.ts or move to a shared utils file
@@ -180,5 +180,49 @@ describe("classifyPushError", () => {
         "fatal: unable to access ...: The requested URL returned error: 500";
       expect(classifyPushError(msg)).toBe("concurrent-push");
     });
+  });
+});
+
+describe("normalizeGitInvocation (#1199)", () => {
+  it("drops args[0] when it duplicates the subcommand", () => {
+    expect(normalizeGitInvocation({ command: "log", args: ["log", "--oneline"] })).toEqual({
+      command: "log",
+      args: ["--oneline"],
+    });
+  });
+
+  it("promotes the subcommand out of command: 'git'", () => {
+    expect(normalizeGitInvocation({ command: "git", args: ["cat-file", "-t", "HEAD"] })).toEqual({
+      command: "cat-file",
+      args: ["-t", "HEAD"],
+    });
+  });
+
+  it("refuses to promote a global option into the subcommand slot", () => {
+    const input = { command: "git", args: ["-c", "alias.x=!evil", "x"] };
+    expect(normalizeGitInvocation(input)).toEqual(input);
+  });
+
+  it("leaves a real pathspec alone", () => {
+    expect(normalizeGitInvocation({ command: "log", args: ["--", "log"] })).toEqual({
+      command: "log",
+      args: ["--", "log"],
+    });
+  });
+});
+
+describe("describeEmptyResult (#1152)", () => {
+  it("names the answer for subcommands whose exit 1 is a result", () => {
+    expect(describeEmptyResult("grep", ["-rn", "sym"])).toBe("no matches");
+    expect(describeEmptyResult("merge-base", ["--fork-point", "origin/main", "HEAD"])).toBe(
+      "no fork point"
+    );
+    expect(describeEmptyResult("diff", ["--quiet"])).toBe("differences found");
+  });
+
+  it("returns null for subcommands where exit 1 is a real failure", () => {
+    expect(describeEmptyResult("merge-base", ["origin/main", "HEAD"])).toBeNull();
+    expect(describeEmptyResult("status", [])).toBeNull();
+    expect(describeEmptyResult("diff", ["origin/main...HEAD"])).toBeNull();
   });
 });

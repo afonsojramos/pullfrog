@@ -20,11 +20,33 @@ import { isSensitiveEnvName } from "./secrets.ts";
  * value surfaces as a clear "missing key" downstream rather than silently
  * mutating to the empty string.
  */
+/** C0 controls + DEL — the bytes an HTTP header value cannot carry. */
+export function hasControlCharacter(value: string): boolean {
+  return [...value].some((ch) => {
+    const code = ch.charCodeAt(0);
+    return code < 0x20 || code === 0x7f;
+  });
+}
+
 export function sanitizeSecret(key: string, value: string): string | null {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
     log.warning(
       `» ${key} is whitespace-only — leaving env var unchanged. check your secret value.`
+    );
+    return null;
+  }
+  // an interior control character can never be sent in an HTTP header, so the
+  // provider rejects the request with `Header 'N' has invalid value` and the
+  // run dies ~1s in — we already know here that it cannot succeed (#1162).
+  // almost always a line-wrapped paste, and silently stripping would ship half
+  // a key with a worse error, so refuse and let the missing-key path name the
+  // fix. scoped to `*_API_KEY` because JSON-blob credentials (CODEX_AUTH_JSON)
+  // legitimately carry newlines.
+  if (key.endsWith("_API_KEY") && hasControlCharacter(trimmed)) {
+    log.warning(
+      `» ${key} contains a line break or control character and cannot be sent as an HTTP header — ` +
+        "leaving env var unchanged. re-save the secret as a single line."
     );
     return null;
   }

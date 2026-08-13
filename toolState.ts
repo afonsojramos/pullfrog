@@ -269,6 +269,13 @@ export interface ToolState {
   // surfaces the same agent-side context the harness's own catch path returns
   // via `result.error`. see `utils/agentHangReport.ts`.
   agentDiagnostic?: AgentDiagnostic | undefined;
+  /**
+   * a `PATCH /api/workflow-run/:id` came back 404 — the reservation was never
+   * claimed, which is permanent for the life of the run (the claim happens at
+   * setup, strictly before any PATCH). latched so the remaining calls stop
+   * firing: one CI run spent 28 doomed round trips on it. see #1153.
+   */
+  workflowRunUnclaimed?: boolean | undefined;
 }
 
 interface InitToolStateParams {

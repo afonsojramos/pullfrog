@@ -123,13 +123,17 @@ function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): s
       skill: "allow",
     },
     mcp: {
-      // 300s tool timeout (vs the MCP SDK's 60s default). `checkout_pr` runs a
+      // tool timeout (vs the MCP SDK's 60s default). `checkout_pr` runs a
       // multi-minute `git fetch` on large repos (remotion); a 60s client abort
       // surfaces as `MCP error -32001` and used to push the agent toward
       // deleting live git locks (the corruption in #860/#864 — the dangerous
       // `rm` guidance is gone, but the spurious aborts shouldn't happen either).
-      // server-side cap is 600s (`checkout_pr` `timeoutMs`).
-      [pullfrogMcpName]: { type: "remote", url: ctx.mcpServerUrl, timeout: 300_000 },
+      // MUST exceed `checkout_pr`'s own 600s `timeoutMs`: at 300s a checkout
+      // that legitimately took 300-600s was GUARANTEED to abort client-side
+      // while the server kept working, which is half of #1171. the tool now
+      // enforces its own deadline and always answers, so waiting for that
+      // answer beats aborting into a retry.
+      [pullfrogMcpName]: { type: "remote", url: ctx.mcpServerUrl, timeout: 660_000 },
     },
     agent: (() => {
       const cfg = buildReviewerAgentConfig(model);
@@ -825,6 +829,14 @@ async function runPromptTurn(
   //   2. AssistantMessage.error set by the provider (auth, context overflow, etc.)
   // a bare `session.error` is deliberately NOT a third mode: opencode publishes
   // it for conditions it recovers from, and sets (2) on the terminal ones (#1069).
+  // a run that dies holding a classified provider error must never be
+  // reported as "the model went silent" — the stderr subscriber knew the
+  // cause seconds after session.create, and the claude harness already names
+  // it on its own timeout path. see #1183.
+  const diagnosis = ctx.diagnostic.lastProviderError
+    ? ` — likely cause: ${ctx.diagnostic.lastProviderError}`
+    : "";
+
   if (networkError) {
     // a watchdog-fired abort surfaces here as a caught `session.prompt`
     // rejection (or an aborted `response.error`), not a throw that escapes to
@@ -835,8 +847,8 @@ async function runPromptTurn(
       success: false,
       output: finalText,
       error: params.signal.aborted
-        ? `activity timeout: the model went silent and the turn was aborted by the activity watchdog (${networkError})`
-        : `opencode prompt failed: ${networkError}`,
+        ? `activity timeout: the model went silent and the turn was aborted by the activity watchdog (${networkError})${diagnosis}`
+        : `opencode prompt failed: ${networkError}${diagnosis}`,
       usage,
     };
   }
@@ -845,6 +857,22 @@ async function runPromptTurn(
       success: false,
       output: finalText,
       error: `provider error: ${extractErrorMessage(assistant.error)}`,
+      usage,
+    };
+  }
+
+  // a turn that resolved with no model output, no text and no usage is the same
+  // provider-silence condition `AGENT_FIRST_EVENT_TIMEOUT_MS` exists for — it
+  // just RETURNED instead of hanging. calling it a success spent another gate
+  // retry on the same mute provider and then told the customer the agent
+  // "completed without reporting progress", which blames the one party that
+  // never got a turn. the `activity timeout` prefix routes it through the hang
+  // renderer, where the diagnostics already live. see #1161.
+  if (!ctx.sawModelOutput && finalText.trim().length === 0 && !usage) {
+    return {
+      success: false,
+      output: finalText,
+      error: `activity timeout: the provider returned an empty turn — no model output, no tool calls, no usage${diagnosis}`,
       usage,
     };
   }

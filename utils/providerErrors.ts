@@ -11,6 +11,24 @@ export const PROVIDER_NO_ENDPOINTS_LABEL = "provider no routable endpoints";
 // "429", version strings, file hashes, etc.
 const statusKey = `\\b(?:status[_ ]?code|http[_ ]?status|status)["']?\\s*[:=]\\s*["']?`;
 
+/**
+ * Anthropic's Console-configured spend cap: `You have reached your specified API
+ * usage limits. You will regain access on 2026-09-01 at 00:00 UTC.` A ceiling
+ * the user set, not a drained wallet — so the remedy is raising the limit or
+ * waiting, and capture group 1 is that date. Bounded by quote/newline for the
+ * same reason `CLAUDE_SESSION_LIMIT_PATTERN` is: the sentence often arrives
+ * inside a JSON dump, and a greedy tail renders the surrounding keys into the
+ * user-facing copy. See #1208.
+ */
+const ANTHROPIC_SPEND_CAP_PATTERN =
+  /reached your specified API usage limits\.?(?:\s*You will regain access on ([^"\n]+?)\.)?/i;
+
+export function findAnthropicSpendCap(text: string): { regainAt: string | null } | null {
+  const match = ANTHROPIC_SPEND_CAP_PATTERN.exec(text);
+  if (!match) return null;
+  return { regainAt: match[1]?.trim() ?? null };
+}
+
 const PROVIDER_ERROR_PATTERNS: ProviderErrorPattern[] = [
   // billing-payload patterns come BEFORE bare status-code patterns. providers
   // commonly return 401 / 429 for billing/quota exhaustion (OpenCode Zen
@@ -35,6 +53,20 @@ const PROVIDER_ERROR_PATTERNS: ProviderErrorPattern[] = [
   // xAI exhausts credits and the monthly ceiling in one 403 whose status code
   // sits nowhere near a `status:` key, so no status pattern below fires (#1076).
   { regex: /used all available credits/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // Gemini's daily / free-tier cap. it tells the user to "check your plan and
+  // billing details" in its own words but matches none of the wallet wordings
+  // above, so it fell to the catch-all `quota` label — which is not the label
+  // the actionable copy is keyed on, so the run rendered a blank comment for a
+  // condition the provider had spelled out (#1114).
+  {
+    regex: /exceeded your current quota, please check your plan and billing/i,
+    label: PROVIDER_BILLING_EXHAUSTED_LABEL,
+  },
+  { regex: /generate_content_free_tier_requests/i, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // Anthropic's Console spend cap. its noun is "API usage limits", which none of
+  // the wallet-shaped patterns above reach, and its 400 sits nowhere near a
+  // `status:` key either — so the whole message was dropped on the floor (#1208).
+  { regex: ANTHROPIC_SPEND_CAP_PATTERN, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
   // the OpenRouter shapes `isRouterKeylimitExhaustedError` matches. on a Router
   // run those mean the PULLFROG wallet is empty and `renderRunError` returns a
   // `BillingError` before ever reaching this list; on a BYOK run the very same
@@ -227,6 +259,29 @@ export function isOpenRouterKeyLimitExceeded(text: string): boolean {
   return (
     /Key limit exceeded \(total limit\)/i.test(text) ||
     /openrouter\.ai\/[^\s"')]*\/keys\//i.test(text)
+  );
+}
+
+/**
+ * The upstream is having a moment: Anthropic's `API Error: 529 Overloaded`,
+ * OpenRouter's `provider_unavailable` / `timeout`, OpenCode Zen's `Streaming
+ * response failed: [5xx]`. Three transports, one condition — nothing the user
+ * configured is wrong and the next run will probably work, which is exactly
+ * what the contentless `Run failed.` comment failed to say across 28 runs that
+ * had already done up to 38 tool calls of real work (#1173).
+ *
+ * `error_type` is matched as the machine-readable FIELD it is rather than by
+ * substring-matching the human prose around it, which varies per upstream.
+ * Deliberately narrow on 5xx so it cannot reach a 401/402 that
+ * `isApiKeyAuthError` / `isProviderBillingExhausted` own — and `renderRunError`
+ * orders it after both regardless.
+ */
+export function isTransientUpstreamError(text: string): boolean {
+  return (
+    /API Error:\s*5\d\d/i.test(text) ||
+    /\bOverloaded\b/.test(text) ||
+    /"error_type"\s*:\s*"(?:provider_unavailable|timeout)"/i.test(text) ||
+    /Streaming response failed:\s*\[5\d\d\]/i.test(text)
   );
 }
 

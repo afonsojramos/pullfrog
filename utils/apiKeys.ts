@@ -413,6 +413,7 @@ export function isApiKeyAuthError(text: string): boolean {
     /API Error:\s*401/i.test(text) ||
     /Failed to authenticate\. API Error:/i.test(text) ||
     /Your api key:.*is invalid/i.test(text) ||
+    isMalformedKeyError(text) ||
     isClaudeSubscriptionDisabledError(text) ||
     isClaudeSessionLimitError(text) ||
     isOAuthCredentialExpiredError(text)
@@ -436,7 +437,11 @@ export function isApiKeyAuthError(text: string): boolean {
  */
 export function isOAuthCredentialExpiredError(text: string): boolean {
   return (
-    /(?:authentication|OAuth access) token has (?:expired|been (?:invalidated|revoked))/i.test(
+    // the copula is parameterised for the same reason the noun and the state
+    // are: OpenAI writes `Provided authentication token IS expired.` (#1180).
+    // the noun list stays narrow so a GitHub installation-token expiry can
+    // still never be misread as an LLM credential problem.
+    /(?:authentication|OAuth access) token (?:has |is |was )?(?:expired|been (?:invalidated|revoked))/i.test(
       text
     ) ||
     // the provider no longer recognises the token at all (#1086) — same dead
@@ -444,6 +449,17 @@ export function isOAuthCredentialExpiredError(text: string): boolean {
     /Could not find the appropriate key in your authentication token/i.test(text) ||
     /Token refresh failed/i.test(text)
   );
+}
+
+/**
+ * The key itself is unsendable, not wrong: a line-wrapped paste leaves an
+ * interior newline, and the provider SDK refuses to serialize the header
+ * (`API Error: Header '14' has invalid value`). The only member of the
+ * credential-error family whose remedy is NOT "rotate the key" — re-saving the
+ * same value on one line fixes it. See #1162.
+ */
+export function isMalformedKeyError(text: string): boolean {
+  return /Header '\d+' has invalid value/i.test(text);
 }
 
 /**
@@ -511,6 +527,16 @@ export function formatApiKeyErrorSummary(params: {
       `**Your Claude subscription has hit its usage limit.**${resets} Re-trigger Pullfrog after the reset, or add an \`ANTHROPIC_API_KEY\` repo secret — Pullfrog routes around an exhausted subscription automatically when one is present.`,
       "",
       `[Add repo secret →](${githubSecretsUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    ].join("\n");
+  }
+
+  // the value is unsendable rather than wrong, so every "rotate the key" CTA
+  // below would send the user to replace a key that is probably fine.
+  if (isMalformedKeyError(params.raw)) {
+    return [
+      "**Your stored API key can't be sent as an HTTP header.** It contains a line break or control character — usually a key pasted across several lines. Re-save it as a single line; the key itself is likely fine.",
+      "",
+      `[Pullfrog secrets →](${getApiUrl()}/console/${params.owner}) · [Repo secrets →](${githubSecretsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
     ].join("\n");
   }
 

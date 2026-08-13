@@ -15,7 +15,7 @@
  * exist yet at this point in the pipeline.
  *
  *   - 402 → `BillingError` (card declined, balance empty, 3DS, etc.)
- *   - 503 → `TransientError` (transient sync issue — retry next dispatch)
+ *   - 5xx → `TransientError` (the mint is down — retried in-run first)
  *   - 404 → `TransientError` (stale repo↔account link — re-homes on next webhook)
  */
 
@@ -45,11 +45,31 @@ async function mintProxyKey(ctx: {
     const headers = await buildProxyTokenHeaders(ctx);
     if (!headers) return null;
 
-    const response = await apiFetch({
-      path: "/api/proxy-token",
-      method: "POST",
-      headers,
-    });
+    // 5xx = the mint is down, which is never a verdict about this user's
+    // billing. 503 is the documented transient case (partial OpenRouter
+    // failure, DB flake, in-flight top-up) and 500/502/504 are the same class:
+    // they used to fall through to `return null`, which silently degraded the
+    // run to BYOK — an OSS-grant repo then died telling its maintainers to add
+    // the provider key the grant exists to replace (#1192). retry, then render
+    // the "temporarily unavailable" copy instead of the "billing error" label
+    // BillingError uses.
+    const response = await yes.op(
+      async () => {
+        const r = await apiFetch({ path: "/api/proxy-token", method: "POST", headers });
+        if (r.status >= 500) {
+          const body = (await r.json().catch(() => null)) as { error?: string } | null;
+          throw new TransientError(
+            body?.error ?? "billing service temporarily unavailable — retry shortly"
+          );
+        }
+        return r;
+      },
+      {
+        name: "proxy key mint",
+        retries: [1000, 2000],
+        bail: (error) => !(error instanceof TransientError),
+      }
+    )();
 
     if (response.status === 402) {
       const body = (await response.json().catch(() => null)) as {
@@ -65,17 +85,6 @@ async function mintProxyKey(ctx: {
       });
     }
 
-    // 503 = transient sync issue (partial OpenRouter failure, DB flake,
-    // in-flight top-up). Not the user's fault — TransientError renders a
-    // "temporarily unavailable" summary instead of the "billing error"
-    // label that BillingError uses.
-    if (response.status === 503) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new TransientError(
-        body?.error ?? "billing service temporarily unavailable — retry shortly"
-      );
-    }
-
     // 404 = the server can't match this repo↔account pair. run-context set
     // `proxyModel` at dispatch, so this is stale linkage on our side (rename/
     // transfer race) — never a missing BYOK key. falling through to the no-key
@@ -86,8 +95,12 @@ async function mintProxyKey(ctx: {
       );
     }
 
+    // only 4xx other than 402/404 reaches here; the run degrades to whatever
+    // BYOK credential it has, which is a real behavior change, so it is loud.
     if (!response.ok) {
-      log.warning(`proxy key mint failed (${response.status})`);
+      log.warning(
+        `proxy key mint failed (${response.status}) — continuing on this repo's own provider credentials`
+      );
       return null;
     }
 

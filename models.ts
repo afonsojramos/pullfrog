@@ -43,7 +43,10 @@ export interface ModelAlias {
   openRouterResolve: string | undefined;
   /** top-tier pick for this provider — preferred during auto-select */
   preferred: boolean;
-  /** whether this alias is free and requires no API key */
+  /** whether this alias costs nothing to run. NOT the same as needing no
+   * credential: Zen's free models still require `OPENCODE_API_KEY`, and reading
+   * this as "keyless" is what let a keyless run boot onto one and die with
+   * `No provider available` (#1077). used to skip the proxy mint. */
   isFree: boolean;
   /** slug of a replacement model to resolve through. presence means this alias
    * never runs as-is — resolution redirects to the replacement and it's hidden
@@ -384,7 +387,12 @@ export const providers = {
         displayName: "Big Pickle",
         resolve: "opencode/big-pickle",
         preferred: true,
-        envVars: [],
+        // free to RUN, but Zen still refuses it without a key — a keyless run
+        // dies at session start with `No provider available`. the `envVars: []`
+        // override that used to sit here shadowed the provider's own
+        // `OPENCODE_API_KEY` and made every static gate wave it through (#1077).
+        // `isFree` stays: it is what skips the proxy mint in run-context, and
+        // the model does cost nothing.
         isFree: true,
       },
       "claude-opus": {
@@ -506,14 +514,16 @@ export const providers = {
       "mimo-v2-pro-free": {
         displayName: "MiMo V2 Pro",
         resolve: "opencode/mimo-v2-pro-free",
-        envVars: [],
+        // free to run, still gated on the provider's own OPENCODE_API_KEY —
+        // see the big-pickle note above (#1077).
         isFree: true,
         fallback: "opencode/big-pickle",
       },
       "minimax-m2.5-free": {
         displayName: "MiniMax M2",
         resolve: "opencode/minimax-m2.5-free",
-        envVars: [],
+        // free to run, still gated on the provider's own OPENCODE_API_KEY —
+        // see the big-pickle note above (#1077).
         isFree: true,
         fallback: "opencode/big-pickle",
         hidden: true,
@@ -709,7 +719,11 @@ export const providers = {
       "gemini-flash": {
         displayName: "Gemini Flash",
         resolve: "openrouter/~google/gemini-flash-latest",
-        effort: ["minimal", "low", "medium", "high"],
+        // no `minimal` here, unlike the google/ and opencode/ entries for the
+        // same model: OpenRouter's floating `~google/gemini-flash-latest` stopped
+        // publishing that rung. mirroring it is not cosmetic — claude-code
+        // hard-errors on an out-of-range `--effort` before it calls the API.
+        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/~google/gemini-flash-latest",
       },
       grok: {

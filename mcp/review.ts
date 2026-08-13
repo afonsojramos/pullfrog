@@ -114,12 +114,12 @@ export async function buildCommentableMap(
 }
 
 /**
- * lightweight PAGINATED query for the approval gate: we only need each thread's
+ * lightweight paginated query for the approval gate: we only need each thread's
  * resolved state and its ROOT author (oldest comment, hence `first: 1`) to count
- * outstanding Pullfrog findings. distinct from REVIEW_THREADS_QUERY (a single
- * page of 100 with full comment bodies) because the invariant must hold on PRs
- * with >100 threads — a silent first-100 cap would let a finding beyond #100
- * slip an approval through.
+ * outstanding Pullfrog findings. distinct from REVIEW_THREADS_QUERY, which pages
+ * the same connection but carries full comment bodies — the invariant must hold
+ * on PRs with >100 threads, since a silent first-100 cap would let a finding
+ * beyond #100 slip an approval through.
  */
 const OUTSTANDING_THREADS_QUERY = `
 query ($owner: String!, $name: String!, $prNumber: Int!, $cursor: String) {
@@ -533,7 +533,17 @@ export function formatDroppedCommentsNote(dropped: DroppedComment[]): string {
   );
 }
 
-// one-shot review tool
+// one-shot review tool.
+//
+// arktype REPLACES the expected clause with `.describe()` text, so a failure
+// reads `<field> must be <the whole description> (was "false")` and the word
+// `boolean` never appears. a description that leads with a RULE is then read as
+// a policy rejection: a stringified `approved: "false"` sent one model round the
+// open-thread approval gate 8 times, cost a spurious PR comment, and wrote the
+// wrong invariant into the persisted summary (#1200). so any description
+// carrying a rule LEADS with its type — that one clause is the whole fix, and
+// arktype's `expected` meta is not usable here because it leaks `$ark.expected`
+// into the JSON Schema every model reads.
 export const CreatePullRequestReview = type({
   pull_number: type.number.describe("The pull request number to review"),
   // REQUIRED on purpose, not because an empty review is invalid — pass "" for
@@ -547,12 +557,12 @@ export const CreatePullRequestReview = type({
   ),
   approved: type.boolean
     .describe(
-      "Set to true to submit as an approval. Use for `> ✅ No new issues found.` reviews where the PR is mergeable as-is and nothing in the body warrants code changes — approving also suppresses the Fix-button footer affordance so users don't dispatch a fix run on non-actionable feedback. Reserve approved: false for `> ℹ️ ...` (minor suggestions inline), `> [!IMPORTANT]` (recommended changes), and `> [!CAUTION]` (critical) reviews. Defaults to false (comment-only review). Mutually exclusive with request_changes. Approval is REJECTED while any unresolved Pullfrog review thread remains open on the PR (not just the latest commit's diff): resolve the threads the current code addresses (reply + resolve_review_thread) first, or submit a non-approving review if a real issue remains."
+      "a boolean. Set to true to submit as an approval. Use for `> ✅ No new issues found.` reviews where the PR is mergeable as-is and nothing in the body warrants code changes — approving also suppresses the Fix-button footer affordance so users don't dispatch a fix run on non-actionable feedback. Reserve approved: false for `> ℹ️ ...` (minor suggestions inline), `> [!IMPORTANT]` (recommended changes), and `> [!CAUTION]` (critical) reviews. Defaults to false (comment-only review). Mutually exclusive with request_changes. Approval is REJECTED while any unresolved Pullfrog review thread remains open on the PR (not just the latest commit's diff): resolve the threads the current code addresses (reply + resolve_review_thread) first, or submit a non-approving review if a real issue remains."
     )
     .optional(),
   request_changes: type.boolean
     .describe(
-      "Set to true to submit a blocking REQUEST_CHANGES review — the PR cannot merge until the requested changes are made and the review is dismissed or re-reviewed. Reserve for changes you consider required, not optional suggestions. Mutually exclusive with approved; a contentless request (no body and no comments) is skipped."
+      "a boolean. Set to true to submit a blocking REQUEST_CHANGES review — the PR cannot merge until the requested changes are made and the review is dismissed or re-reviewed. Reserve for changes you consider required, not optional suggestions. Mutually exclusive with approved; a contentless request (no body and no comments) is skipped."
     )
     .optional(),
   commit_id: type.string
@@ -576,14 +586,19 @@ export const CreatePullRequestReview = type({
     body: type.string
       .describe("Explanatory comment text (optional if suggestion is provided)")
       .optional(),
+    // `null` means "no suggestion" — the shape models reach for when they are
+    // filling every key of a schema. rejecting it re-emitted the whole review
+    // payload for nothing (#1200).
     suggestion: type.string
+      .or(type.null)
       .describe(
-        "Full replacement code for the line range [start_line, line]. MUST preserve the exact indentation of the original code."
+        "a string, or null for none. Full replacement code for the line range [start_line, line]. MUST preserve the exact indentation of the original code."
       )
       .optional(),
     start_line: type.number
+      .or(type.null)
       .describe(
-        "Start line for multi-line comment ranges. Omit for single-line comments. The range [start_line, line] defines which lines a suggestion replaces. Both `start_line` and `line` must sit inside the same `@@` hunk — a `start_line` outside the hunk causes the whole comment to be dropped even when `line` is valid. If you need to comment on context just above/below a hunk, shrink the range to a single line that is provably modified."
+        "a number, or null for a single-line comment. Start line for multi-line comment ranges. Omit for single-line comments. The range [start_line, line] defines which lines a suggestion replaces. Both `start_line` and `line` must sit inside the same `@@` hunk — a `start_line` outside the hunk causes the whole comment to be dropped even when `line` is valid. If you need to comment on context just above/below a hunk, shrink the range to a single line that is provably modified."
       )
       .optional(),
   })
@@ -787,7 +802,7 @@ export function CreatePullRequestReviewTool(ctx: ToolContext) {
         type ReviewComment = NonNullable<typeof params.comments>[number];
         const reviewComments = comments.map((comment) => {
           let commentBody = fixDoubleEscapedString(comment.body || "");
-          if (comment.suggestion !== undefined) {
+          if (comment.suggestion != null) {
             const suggestionBlock = "```suggestion\n" + comment.suggestion + "\n```";
             commentBody = commentBody ? commentBody + "\n\n" + suggestionBlock : suggestionBlock;
           }

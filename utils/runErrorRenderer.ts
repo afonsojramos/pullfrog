@@ -35,6 +35,12 @@
  *      `maximum context length is N tokens`. Actionable, so it renders on
  *      both surfaces rather than collapsing to the one-line comment.
  *
+ *   4c. Transient upstream failure (#1173) — Anthropic `529 Overloaded`,
+ *      OpenRouter `provider_unavailable` / `timeout`, Zen `Streaming response
+ *      failed: [5xx]`. Last of the classified branches so every more specific
+ *      one wins first. Renders on both surfaces: the remedy is re-triggering,
+ *      which the user can only know if we say so.
+ *
  *   5. Activity-timeout hang — `errorMessage` starts with
  *      `"activity timeout"` or `"agent still pending"` AND none of the
  *      above matched. The harness keeps structured diagnostic state on
@@ -52,8 +58,8 @@
  *      the hang case, since the raw internal string helps nobody on the PR.
  *
  * Net: the actionable classifications (billing, API-key, model-not-found,
- * no-provider-available, context-overflow) render identical bodies on both
- * surfaces; the non-actionable ones (hang,
+ * no-provider-available, context-overflow, transient-upstream) render identical
+ * bodies on both surfaces; the non-actionable ones (hang,
  * generic) keep the forensics in the Actions job summary and show a calm
  * one-liner in the PR comment, whose footer already carries Pullfrog
  * branding + rerun links.
@@ -72,10 +78,12 @@ import { BillingError, formatBillingErrorSummary } from "./billingErrors.ts";
 import { MODEL_ACCESS_MARKER } from "./modelAccess.ts";
 import {
   extractProviderId,
+  findAnthropicSpendCap,
   isOpenRouterKeyLimitExceeded,
   isProviderBillingExhausted,
   isProviderNoRoutableEndpoints,
   isRouterKeylimitExhaustedError,
+  isTransientUpstreamError,
 } from "./providerErrors.ts";
 
 export type RenderedRunError = {
@@ -249,6 +257,22 @@ function formatProviderBillingExhausted(input: { errorMessage: string }): string
     ].join("\n");
   }
 
+  // a Console-set spend cap is not an empty wallet — topping up clears nothing,
+  // and the provider already told us when access comes back. see #1208.
+  const spendCap = findAnthropicSpendCap(input.errorMessage);
+  if (spendCap) {
+    const regains = spendCap.regainAt ? ` Access returns on **${spendCap.regainAt}**.` : "";
+    return [
+      `**Your \`anthropic\` account has reached its configured API usage limit.**${regains}`,
+      "",
+      "Anthropic refused the request against a spend limit set in your Console, not an empty balance — raise or remove that limit to run before it resets.",
+      "",
+      `[Anthropic billing settings →](${PROVIDER_BILLING_URLS.anthropic})`,
+      "",
+      `\`\`\`\n${input.errorMessage}\n\`\`\``,
+    ].join("\n");
+  }
+
   const headline = providerId
     ? `**Your \`${providerId}\` account is out of credit.**`
     : "**Your provider account is out of credit.**";
@@ -264,6 +288,24 @@ function formatProviderBillingExhausted(input: { errorMessage: string }): string
     cta,
     "",
     `\`\`\`\n${input.errorMessage}\n\`\`\``,
+  ].join("\n");
+}
+
+/**
+ * A transient upstream failure — the model provider 5xx'd or dropped the
+ * stream. Nothing the user configured is wrong, so the only useful thing to
+ * say is which provider, that it was upstream, and that re-triggering is the
+ * remedy.
+ */
+function formatTransientUpstreamBody(errorMessage: string): string {
+  const providerId = detectProviderId(errorMessage);
+  const who = providerId ? `\`${providerId}\`` : "the model provider";
+  return [
+    `**${who} had a temporary upstream failure.**`,
+    "",
+    "The provider refused or dropped the request mid-run — nothing in your repo or your credentials is at fault. Re-trigger Pullfrog; if it keeps happening, check the provider's status page.",
+    "",
+    `\`\`\`\n${errorMessage}\n\`\`\``,
   ].join("\n");
 }
 
@@ -436,16 +478,30 @@ export function renderRunError(input: {
     return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
   }
 
+  // an upstream blip is not ours, but the silence about it was: the provider
+  // handed us accurate, actionable copy and the comment said `Run failed.`
+  // while up to 38 tool calls of finished review work went in the bin (#1173).
+  // last of the classified branches, so every specific one still wins.
+  if (isTransientUpstreamError(input.errorMessage)) {
+    const body = formatTransientUpstreamBody(input.errorMessage);
+    return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
+  }
+
   if (hangBody) {
     // a hang masking billing exhaustion (#778) renders an actionable top-up
     // CTA inside `hangBody` — keep that in the comment. every other hang is
     // non-actionable noise for the average user, so the comment collapses to
     // a one-liner and the diagnostic stays in the Actions job summary.
-    const isBillingExhausted =
-      input.agentDiagnostic?.lastProviderError === "provider billing exhausted";
+    //
+    // the test is "did we classify the provider's own refusal", not the single
+    // billing label: `quota error`, `rate limited` and the `auth error (*)`
+    // family are as actionable as an empty wallet, and pinning it to one label
+    // gave 17 customers a blank comment while we held a message naming their
+    // quota's reset time (#1183). an unexplained hang still collapses.
+    const explained = input.agentDiagnostic?.lastProviderError !== undefined;
     return {
       summary: `### ❌ Pullfrog failed\n\n${hangBody}`,
-      comment: isBillingExhausted ? hangBody : formatMinimalFailureComment(input.repo),
+      comment: explained ? hangBody : formatMinimalFailureComment(input.repo),
     };
   }
 

@@ -305,6 +305,12 @@ describe("isApiKeyAuthError", () => {
         "provider error: Your authentication token has been invalidated. Please try signing in again."
       )
     ).toBe(true);
+    // #1162 the value is unsendable, not wrong — a line-wrapped paste
+    expect(isApiKeyAuthError("API Error: Header '14' has invalid value: '***'")).toBe(true);
+    // #1180 OpenAI writes the copula as "is", not "has"
+    expect(
+      isApiKeyAuthError("» Pullfrog session error: Provided authentication token is expired.")
+    ).toBe(true);
     // #1072 org-level entitlement denial carries no 401 and no auth keyword
     expect(
       isApiKeyAuthError(

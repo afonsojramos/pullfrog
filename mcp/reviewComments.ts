@@ -9,12 +9,18 @@ import * as yes from "../yes/index.ts";
 import type { ToolContext } from "./server.ts";
 import { execute, tool } from "./shared.ts";
 
-// GraphQL query to fetch all review threads for a PR with full comment history
+/** per-thread comment page size; threads deeper than this are marked truncated in the result. */
+const COMMENTS_PER_THREAD = 50;
+
+// GraphQL query to fetch all review threads for a PR with full comment history.
+// paginated: a first-100 cap silently dropped every thread past page one on
+// exactly the long-lived PRs where prior-review context matters most (#1193).
 export const REVIEW_THREADS_QUERY = `
-query ($owner: String!, $name: String!, $prNumber: Int!) {
+query ($owner: String!, $name: String!, $prNumber: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $prNumber) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           path
@@ -23,7 +29,7 @@ query ($owner: String!, $name: String!, $prNumber: Int!) {
           diffSide
           isResolved
           isOutdated
-          comments(first: 50) {
+          comments(first: ${COMMENTS_PER_THREAD}) {
             nodes {
               fullDatabaseId
               body
@@ -94,6 +100,7 @@ export type ReviewThreadsQueryResponse = {
   repository: {
     pullRequest: {
       reviewThreads: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
         nodes: (ReviewThread | null)[] | null;
       } | null;
     } | null;
@@ -403,6 +410,13 @@ export function buildThreadBlocks(
     const status = thread.isResolved ? " [RESOLVED]" : thread.isOutdated ? " [OUTDATED]" : "";
     block.push(`## ${thread.path}:${lineRange}${status}`);
     block.push("");
+    // a cap the agent cannot observe is a cap it cannot work around (#1193).
+    if (allComments.length >= COMMENTS_PER_THREAD) {
+      block.push(
+        `_(showing the first ${COMMENTS_PER_THREAD} comments of this thread; later replies are not included)_`
+      );
+      block.push("");
+    }
 
     // show all comments in the thread (full conversation history)
     for (const comment of allComments) {
@@ -475,12 +489,24 @@ export function buildThreadBlocks(
  */
 const fetchAllReviewThreads = yes.op(
   async (key: { owner: string; name: string; pullNumber: number }, ctx: { octokit: Octokit }) => {
-    const response = await ctx.octokit.graphql<ReviewThreadsQueryResponse>(REVIEW_THREADS_QUERY, {
-      owner: key.owner,
-      name: key.name,
-      prNumber: key.pullNumber,
-    });
-    return response.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    const threads: (ReviewThread | null)[] = [];
+    let cursor: string | null = null;
+    // bound the walk so a misbehaving cursor can't loop forever; 50 pages =
+    // 5000 threads, orders of magnitude beyond any real PR. same bound as
+    // `countOutstandingPullfrogThreads`.
+    for (let page = 0; page < 50; page += 1) {
+      const response: ReviewThreadsQueryResponse = await ctx.octokit.graphql(REVIEW_THREADS_QUERY, {
+        owner: key.owner,
+        name: key.name,
+        prNumber: key.pullNumber,
+        cursor,
+      });
+      const conn = response.repository?.pullRequest?.reviewThreads;
+      threads.push(...(conn?.nodes ?? []));
+      if (!conn?.pageInfo.hasNextPage) break;
+      cursor = conn.pageInfo.endCursor;
+    }
+    return threads;
   },
   { ttl: 60_000, name: "reviewThreads" }
 );
@@ -522,15 +548,10 @@ async function getReviewThreads(input: GetReviewDataInput) {
     )
   );
 
-  if (allThreads.length >= 100) {
-    log.warning(
-      `PR ${input.owner}/${input.name}#${input.pullNumber}: reviewThreads returned 100 results (limit reached, some threads may be missing)`
-    );
-  }
   for (const thread of allThreads) {
-    if (thread?.comments?.nodes && thread.comments.nodes.length >= 50) {
+    if (thread?.comments?.nodes && thread.comments.nodes.length >= COMMENTS_PER_THREAD) {
       log.warning(
-        `PR ${input.owner}/${input.name}#${input.pullNumber}: review thread at ${thread.path}:${thread.line} has 50 comments (limit reached, some comments may be missing)`
+        `PR ${input.owner}/${input.name}#${input.pullNumber}: review thread at ${thread.path}:${thread.line} has ${COMMENTS_PER_THREAD} comments (limit reached, some comments may be missing)`
       );
     }
   }
@@ -620,7 +641,49 @@ export function formatReviewData(input: FormatReviewDataInput):
   return { threadBlocks, reviewer, formatted };
 }
 
+/**
+ * Comfortably under the MCP client's own deadline, so the tool answers rather
+ * than dying opaquely. It was the only expensive MCP tool with no bound and no
+ * diagnostic: a stall past the client timeout gave the agent nothing but
+ * `Request timed out`, it stayed wedged for the rest of the session, and 8 runs
+ * submitted reviews having never read what was already raised on the PR
+ * (#1154). The stage label is the whole point — it is what makes the next
+ * occurrence attributable from the log instead of by reconstruction.
+ */
+const REVIEW_DATA_DEADLINE_MS = 120_000;
+
 export async function getReviewData(input: GetReviewDataInput): Promise<
+  | {
+      threadBlocks: Array<{ path: string; lineRange: string; content: string[] }>;
+      reviewer: string;
+      formatted: { toc: string; content: string };
+    }
+  | undefined
+> {
+  const stage = { current: "review+threads" };
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `get_review_comments exceeded ${REVIEW_DATA_DEADLINE_MS / 1000}s during ${stage.current} for review ${input.reviewId}. prior-review context is unavailable for this call — proceed without it, or retry once.`
+          )
+        ),
+      REVIEW_DATA_DEADLINE_MS
+    );
+  });
+  try {
+    return await Promise.race([fetchReviewData(input, stage), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchReviewData(
+  input: GetReviewDataInput,
+  stage: { current: string }
+): Promise<
   | {
       threadBlocks: Array<{ path: string; lineRange: string; content: string[] }>;
       reviewer: string;
@@ -641,6 +704,7 @@ export async function getReviewData(input: GetReviewDataInput): Promise<
 
   // skip listFiles when there are no threads — prFiles is only used for
   // building thread blocks, and an empty array short-circuits below.
+  stage.current = "prFiles";
   const prFiles =
     threads.length > 0
       ? await fetchPrFiles(
@@ -649,6 +713,7 @@ export async function getReviewData(input: GetReviewDataInput): Promise<
         )
       : [];
 
+  stage.current = "assets";
   if (review.data.body) {
     review.data.body =
       (await resolveBodyAssets({

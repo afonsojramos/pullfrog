@@ -68,8 +68,15 @@ async function downloadAsset(
   const needsAuth = new URL(url).hostname === "github.com";
 
   try {
+    // unbounded, this fetch runs once per asset per comment inside
+    // `get_review_comments` — a serial loop over every comment on every thread.
+    // one slow CDN response wedged the whole tool past the 300s MCP client
+    // deadline, and the agent got an opaque `Request timed out` for the rest of
+    // the session (#1154). an undownloaded asset degrades to the original url,
+    // which is a far better outcome than a dead tool.
     const res = await fetch(url, {
       headers: needsAuth ? { Authorization: `Bearer ${githubToken}` } : {},
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       log.warning(`[assets] failed to download ${url}: ${res.status}`);

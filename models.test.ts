@@ -55,10 +55,13 @@ describe("getModelEnvVars", () => {
     expect(getModelEnvVars("unknown/model")).toEqual([]);
   });
 
-  it("returns empty env vars for free opencode models", () => {
-    expect(getModelEnvVars("opencode/big-pickle")).toEqual([]);
-    expect(getModelEnvVars("opencode/mimo-v2-pro-free")).toEqual([]);
-    expect(getModelEnvVars("opencode/minimax-m2.5-free")).toEqual([]);
+  // #1077 — free means free of CHARGE, not free of credential. Zen refuses a
+  // keyless request with `No provider available`, so the models that used to
+  // declare `envVars: []` here booted runs that could never work.
+  it("still requires OPENCODE_API_KEY for free opencode models", () => {
+    expect(getModelEnvVars("opencode/big-pickle")).toEqual(["OPENCODE_API_KEY"]);
+    expect(getModelEnvVars("opencode/mimo-v2-pro-free")).toEqual(["OPENCODE_API_KEY"]);
+    expect(getModelEnvVars("opencode/minimax-m2.5-free")).toEqual(["OPENCODE_API_KEY"]);
   });
 
   it("still requires OPENCODE_API_KEY for non-free opencode models", () => {

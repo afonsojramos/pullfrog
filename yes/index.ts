@@ -40,6 +40,21 @@ export function schedule(fn: (i: number) => number, count: number): number[] {
   return Array.from({ length: count }, (_, i) => fn(i));
 }
 
+/**
+ * Equal jitter: half the delay fixed, half random.
+ *
+ * A fixed schedule is deterministic, so every concurrent loser of the same
+ * collision backs off by the IDENTICAL amount and re-collides in lockstep —
+ * raising the retry COUNT then buys wall-clock and zero decorrelation, which is
+ * exactly why bumping `reserveRun`'s budget 3 → 5 did not help ([#1117](https://github.com/pullfrog/app/issues/1117)).
+ * Equal jitter rather than full: callers that pass a schedule are expressing a
+ * minimum they want honored, and full jitter can collapse a delay to ~0.
+ */
+function jitter(delayMs: number): number {
+  const half = delayMs / 2;
+  return Math.round(half + Math.random() * half);
+}
+
 const DEFAULT_RETRY_AFTER_CAP_MS = 20_000;
 
 function getErrorResponseHeaders(error: unknown): Record<string, unknown> | undefined {
@@ -373,6 +388,7 @@ function _op(fn: AnyAsyncFn, options: OpOptions): OpFunction<AnyAsyncFn> {
                 delay = Math.max(delay, Math.min(cap, hint));
               }
             }
+            delay = jitter(delay);
             if (namePrefix) {
               log.info(
                 `${namePrefix}attempt ${attempt + 1}/${retries.length + 1} failed, retrying in ${delay}ms`

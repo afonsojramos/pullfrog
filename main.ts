@@ -9,6 +9,7 @@ import { subagentDeniedToolNames } from "./agents/subagentToolGates.ts";
 import { reportProgress } from "./mcp/comment.ts";
 import { startInstallation } from "./mcp/dependencies.ts";
 import { startMcpHttpServer, type ToolContext } from "./mcp/server.ts";
+import { getSandboxMethod } from "./mcp/shell.ts";
 import { computeModes } from "./modes.ts";
 import { initToolState, primaryRepoState } from "./toolState.ts";
 import {
@@ -87,6 +88,7 @@ import {
   type VertexCredentials,
 } from "./utils/vertex.ts";
 import { resolveRun } from "./utils/workflow.ts";
+import { dirtyTrackedPaths, restoreDirtiedSince } from "./utils/worktree.ts";
 
 export { Inputs } from "./utils/payload.ts";
 
@@ -210,6 +212,18 @@ export async function main(): Promise<MainResult> {
   // route from the runner's pre-existing environment alone (workflow
   // `env:` block + GH Actions secrets). install is fs-cached, so the
   // duplicate call inside the opencode agent's run() is a no-op.
+  // `opencode models` runs opencode's instance bootstrap in `process.cwd()` —
+  // the customer checkout — so it injects `$schema` into a repo-root
+  // `opencode.json` and installs `@opencode-ai/plugin` into `.opencode/`. both
+  // existing restore windows (prep's `finally`, the harness's pre-boot) open
+  // AFTER this, so the dirt read as pre-existing customer work and was
+  // correctly left alone — and `checkout_pr` then refused for the whole run.
+  // 103/103 Reviews on one repo lost the authoritative diff, silently, on every
+  // released version (#1151). one window straddling both captures: nothing
+  // between them writes to the worktree, and both are done before any agent
+  // tool exists, so the #1146 "don't discard the agent's own work" hazard
+  // cannot apply.
+  const preIntrospectionDirty = await dirtyTrackedPaths();
   const opencodeCliPath = await agents.opencode.install();
   captureBaselineModels(opencodeCliPath);
 
@@ -240,6 +254,7 @@ export async function main(): Promise<MainResult> {
   // more accurate than the static envVars/managedCredentials catalog,
   // which can miss new auth shapes.
   captureAuthorizedModels(opencodeCliPath);
+  await restoreDirtiedSince({ before: preIntrospectionDirty, actor: "model introspection" });
 
   // configure env allowlist for subprocess filtering
   if (runContext.repoSettings.envAllowlist) {
@@ -268,6 +283,25 @@ export async function main(): Promise<MainResult> {
   // dangling references in the user's .git/config. see wipeRunnerLeakSurface
   // for the leak inventory and threat model.
   wipeRunnerLeakSurface();
+
+  // probe the sandbox ONCE, here, rather than lazily inside the first
+  // `spawnShell`. on an unprivileged Kubernetes/ARC runner every PID-namespace
+  // method fails, so every `pullfrog_shell` call throws — but detection used to
+  // happen minutes in, the tool stayed registered, and the prompt kept telling
+  // the agent it was the only sanctioned way to run anything. 192 runs / 757
+  // dead tool calls in 24h, all green, with agents submitting reviews whose
+  // tests they had decided to run and could not (#1093). resolving it to
+  // `disabled` up front makes the tool set and the prompt agree with reality,
+  // and gives the operator one line they can act on.
+  if (payload.shell === "restricted" && getSandboxMethod() === "none") {
+    payload.shell = "disabled";
+    log.warning(
+      "» shell commands are disabled for this run: this runner provides no PID-namespace isolation " +
+        "(unprivileged unshare, sudo unshare and userns-nested unshare all failed). " +
+        "on a self-hosted Kubernetes/ARC runner, allow user-namespace creation in the pod's seccomp " +
+        "profile — see https://docs.pullfrog.com/security#self-hosted-runners"
+    );
+  }
 
   // clear OIDC env vars in restricted mode to prevent agent from minting tokens
   if (payload.shell !== "enabled") {

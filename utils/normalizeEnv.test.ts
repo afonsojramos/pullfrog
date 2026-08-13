@@ -88,4 +88,16 @@ describe("sanitizeSecret return value", () => {
   it("returns null for whitespace-only input so caller can skip injection", () => {
     expect(sanitizeSecret("ANTHROPIC_API_KEY", "   \n")).toBeNull();
   });
+
+  // #1162 — an interior newline survives trim() and is unsendable as an HTTP
+  // header, so the provider rejects it ~1s in with an unclassifiable error.
+  it("returns null for an api key with an interior line break", () => {
+    expect(sanitizeSecret("ANTHROPIC_API_KEY", "sk-ant-part\none\ntwo")).toBeNull();
+  });
+
+  it("leaves a JSON-blob credential's newlines alone", () => {
+    expect(sanitizeSecret("CODEX_AUTH_JSON", '{\n  "refresh": "x"\n}')).toBe(
+      '{\n  "refresh": "x"\n}'
+    );
+  });
 });
