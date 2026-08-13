@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import * as core from "@actions/core";
-import type { PushPermission, XrepoConfig } from "../external.ts";
+import type { AuthorPermission, PushPermission, XrepoConfig } from "../external.ts";
 import { log } from "./cli.ts";
 import { onExitSignal } from "./exitHandler.ts";
 import { acquireNewToken, type OidcCredentials } from "./github.ts";
 import { isGitHubActions } from "./globals.ts";
+import { formatPermissions, mirrorRolePermissions } from "./roleMirror.ts";
 
 // re-export for `pullfrog gha token` subcommand
 export { acquireNewToken as acquireInstallationToken };
@@ -61,6 +62,10 @@ export type TokenRef = {
   // of read-only secondaries). only minted on `--xrepo` runs; undefined
   // otherwise. resolveRepoCtx routes read-tier secondaries to this token.
   readToken?: string | undefined;
+  // credential handed to the `gh` MCP tool, scoped to mirror the triggering
+  // user's own repo role. undefined below the mirror threshold (read/none),
+  // which is what withholds the tool entirely. see roleMirror.ts.
+  ghToken?: string | undefined;
   // re-mint the git-scoped token matching `stale` (the write gitToken or the
   // read readToken) for push retries, when GitHub hands out a token its
   // git-over-HTTPS edge never accepts. undefined on the external-GH_TOKEN path
@@ -71,6 +76,9 @@ export type TokenRef = {
 
 type ResolveTokensParams = {
   push: PushPermission;
+  // the triggering user's repo role, resolved server-side before dispatch. the
+  // `gh` token's scope is derived from it; `undefined` withholds the token.
+  authorPermission: AuthorPermission | undefined;
   // cross-repo access sets (server-resolved). when present, gitToken + mcpToken
   // are scoped to the WRITE set (∪ primary) and a readToken is minted over the
   // READ set. absent → single-repo, primary-scoped tokens (unchanged).
@@ -119,6 +127,9 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
       mcpToken: externalToken,
       // external token is whatever scope the user granted — reuse for reads too.
       readToken: params.xrepo ? externalToken : undefined,
+      // the scope is the user's to choose here, but the role threshold still
+      // decides whether the agent gets a CLI credential at all.
+      ghToken: mirrorRolePermissions(params.authorPermission) ? externalToken : undefined,
       async [Symbol.asyncDispose]() {
         mcpTokenValue = undefined;
         // GH_TOKEN isn't acquired here, so it's not revoked here either
@@ -171,6 +182,22 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
       .map((e) => e.join(":"))
       .join(", ")})`
   );
+
+  // credential for the `gh` MCP tool, mirroring the triggering user's own role.
+  // deliberately a SEPARATE token from mcpToken: the MCP token stays
+  // broad-and-unreachable, while this one is handed to a subprocess that can
+  // print it, so its scope is the entire security boundary. primary repo only —
+  // `repos: undefined` scopes it to the repo the run was dispatched for, so a
+  // leak cannot reach the cross-repo write set.
+  const ghPermissions = mirrorRolePermissions(params.authorPermission);
+  let ghToken: string | undefined;
+  if (ghPermissions) {
+    ghToken = await acquireNewToken({ permissions: ghPermissions });
+    if (isGitHubActions) core.setSecret(ghToken);
+    log.info(
+      `» acquired gh token mirroring ${params.authorPermission} (${formatPermissions(ghPermissions)})`
+    );
+  }
 
   // read-tier token for cloning read-only secondaries (cross-repo only).
   let readToken: string | undefined;
@@ -293,6 +320,8 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
         revokeGitHubInstallationToken(currentGitToken),
         revokeGitHubInstallationToken(currentMcpToken),
         ...(currentReadToken ? [revokeGitHubInstallationToken(currentReadToken)] : []),
+        // revoking this one is what bounds a `gh` leak to the run's lifetime
+        ...(ghToken ? [revokeGitHubInstallationToken(ghToken)] : []),
       ]);
     } finally {
       removeSignalHandler();
@@ -309,6 +338,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     },
     mcpToken,
     readToken,
+    ghToken,
     refreshGitToken,
     [Symbol.asyncDispose]: dispose,
   };

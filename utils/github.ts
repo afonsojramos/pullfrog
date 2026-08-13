@@ -87,7 +87,7 @@ type WriteOnly = "write";
  * @see https://docs.github.com/en/rest/apps/installations#create-an-installation-access-token-for-an-app
  * @see https://github.com/github/rest-api-description — components.schemas.app-permissions
  */
-type GitHubAppPermissions = {
+export type GitHubAppPermissions = {
   actions?: ReadWrite;
   artifact_metadata?: ReadWrite;
   attestations?: ReadWrite;

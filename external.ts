@@ -28,6 +28,50 @@ export function formatMcpToolRef(agentId: AgentId, toolName: string): string {
   }
 }
 
+/**
+ * Every MCP tool name `text` references, parsed with the same naming scheme
+ * `formatMcpToolRef` emits. Deliberately lives next to that function so the
+ * producer and the parser cannot drift apart.
+ *
+ * The convention this assumes — and enforces, via `assertPromptToolRefs` — is
+ * that a prefixed token appearing anywhere in prompt text IS a tool reference.
+ * Prose that merely looks like one would read as a tool reference to the model
+ * too, so treating it as a mistake is correct.
+ */
+export function extractMcpToolRefs(agentId: AgentId, text: string): string[] {
+  const prefix = formatMcpToolRef(agentId, "");
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...text.matchAll(new RegExp(`${escaped}([a-z0-9_]+)`, "g"))].map((match) => match[1]);
+}
+
+/**
+ * Fail the run if the assembled prompt advertises a tool the MCP server did not
+ * actually register.
+ *
+ * Prompt text and tool registration are decided in different files off
+ * overlapping conditions (`signedCommits`, `repoIntelligence`, `shell`, the
+ * `gh` mirror threshold, …), so they can silently disagree — and the failure
+ * mode is invisible: the agent burns turns calling a tool that isn't there, or
+ * never learns about one that is. `toolNames` comes straight back from
+ * `startMcpHttpServer`, i.e. the list the server registered rather than a
+ * second derivation of it, so there is nothing to keep in sync.
+ */
+export function assertPromptToolRefs(params: {
+  agentId: AgentId;
+  prompt: string;
+  toolNames: string[];
+}): void {
+  const registered = new Set(params.toolNames);
+  const dangling = [...new Set(extractMcpToolRefs(params.agentId, params.prompt))]
+    .filter((name) => !registered.has(name))
+    .sort();
+  if (dangling.length === 0) return;
+  throw new Error(
+    `prompt advertises ${dangling.length} tool(s) the MCP server did not register: ${dangling.join(", ")}. ` +
+      `registered: ${[...registered].sort().join(", ")}`
+  );
+}
+
 // reasoning effort lives in effort.ts — see wiki/effort.md
 export type { EffortPosition } from "./effort.ts";
 export {

@@ -38,39 +38,6 @@ function buildPrBodyWithFooter(ctx: ToolContext, body: string): string {
   return `${bodyWithoutFooter}${footer}`;
 }
 
-export const ClosePullRequest = type({
-  pull_number: type.number.describe("the pull request number to close"),
-});
-
-export function ClosePullRequestTool(ctx: ToolContext) {
-  return tool({
-    name: "close_pull_request",
-    mutates: true,
-    description:
-      "Close an open pull request WITHOUT merging it. " +
-      "Example: `close_pull_request({ pull_number: 1234 })`. " +
-      "Comment first to explain why — closing alone is opaque to the author. Merging is a human action and is never done here.",
-    parameters: ClosePullRequest,
-    execute: execute(async (params) => {
-      const result = await ctx.octokit.rest.pulls.update({
-        owner: ctx.repo.owner,
-        repo: ctx.repo.name,
-        pull_number: params.pull_number,
-        state: "closed",
-      });
-      ctx.toolState.wasUpdated = true;
-      log.info(`» closed pull request #${params.pull_number}`);
-
-      return {
-        success: true,
-        number: result.data.number,
-        url: result.data.html_url,
-        state: result.data.state,
-      };
-    }),
-  });
-}
-
 export const UpdatePullRequestBody = type({
   pull_number: type.number.describe("the pull request number to update"),
   body: type.string.describe("the new body content for the pull request"),

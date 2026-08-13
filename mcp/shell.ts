@@ -440,7 +440,88 @@ export const MAX_OUTPUT_CHARS = 5000;
 /** if `output` exceeds `MAX_OUTPUT_CHARS`, persist the full body to a
  * tempfile and return the last `MAX_OUTPUT_CHARS` prefixed with a sentinel
  * pointing at the saved path. otherwise return as-is. */
-function capOutput(output: string): string {
+/**
+ * Run one command inside the mandatory shell sandbox and collect its output.
+ *
+ * Shared by `shell` and `gh` so that agent-initiated process execution carries
+ * the same mount- and PID-namespace guarantees no matter which tool starts it.
+ * A bare `spawnSync` here would escape `PROC_CLEANUP`, `SOCKET_CLEANUP` and
+ * `buildFsMounts` — i.e. the tmpfs over `/var/lib/pullfrog` (codex `auth.json`),
+ * the tmpfs over `$RUNNER_TEMP/_runner_file_commands`, and the `.git` ro-bind —
+ * none of which any token's scope bounds.
+ */
+export async function runSandboxed(params: {
+  command: string;
+  env: Record<string, string | undefined>;
+  cwd: string;
+  timeout: number;
+}): Promise<{ output: string; exitCode: number; timedOut: boolean }> {
+  const proc = spawnShell({
+    command: params.command,
+    env: params.env,
+    cwd: params.cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "",
+    stderr = "",
+    timedOut = false,
+    exited = false,
+    spawnError = "";
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+
+  const timeoutId = setTimeout(async () => {
+    if (!exited) {
+      timedOut = true;
+      await killProcessGroup(proc);
+    }
+  }, params.timeout);
+
+  const exitCode = await new Promise<number | null>((resolve) => {
+    const done = (code: number | null) => {
+      exited = true;
+      clearTimeout(timeoutId);
+      resolve(code);
+    };
+    proc.on("exit", done);
+    // surface the spawn failure itself — without it an absent binary (ENOENT on
+    // a self-hosted runner without `gh`) is indistinguishable from a timeout.
+    proc.on("error", (err: Error) => {
+      spawnError = err.message;
+      done(null);
+    });
+  });
+
+  // `exit` fires when the direct `bash -c` child dies, but the stdout/stderr
+  // pipes stay open as long as any self-daemonized descendant still holds the
+  // inherited write end — and our `data` listeners keep those read streams
+  // referenced, so the event loop never drains and the action hangs after
+  // `Task complete.` (measured: up to 5.3h of billed runner time). dropping
+  // our own read ends releases the handles without killing a descendant the
+  // user deliberately backgrounded. see #1087.
+  proc.stdout?.destroy();
+  proc.stderr?.destroy();
+
+  let output = stderr ? (stdout ? `${stdout}\n${stderr}` : stderr) : stdout;
+  if (spawnError) output = output ? `${output}\n${spawnError}` : spawnError;
+  if (timedOut)
+    output = output
+      ? `${output}\n[timed out after ${params.timeout}ms]`
+      : `[timed out after ${params.timeout}ms]`;
+
+  return {
+    output: output.trim(),
+    exitCode: exitCode ?? (timedOut ? 124 : -1),
+    timedOut,
+  };
+}
+
+export function capOutput(output: string): string {
   if (output.length <= MAX_OUTPUT_CHARS) return output;
   const fullPath = join(getTempDir(), `shell-${randomUUID().slice(0, 8)}.log`);
   writeFileSync(fullPath, output);
@@ -536,68 +617,17 @@ Do NOT use this tool for git commands — use the dedicated git tools instead.`,
         };
       }
 
-      const proc = spawnShell({
-        command: params.command,
-        env,
-        cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const result = await runSandboxed({ command: params.command, env, cwd, timeout });
 
-      let stdout = "",
-        stderr = "",
-        timedOut = false,
-        exited = false;
-      proc.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
-      });
-      proc.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-
-      const timeoutId = setTimeout(async () => {
-        if (!exited) {
-          timedOut = true;
-          await killProcessGroup(proc);
-        }
-      }, timeout);
-
-      const exitCode = await new Promise<number | null>((resolve) => {
-        const done = (code: number | null) => {
-          exited = true;
-          clearTimeout(timeoutId);
-          resolve(code);
-        };
-        proc.on("exit", done);
-        proc.on("error", () => done(null));
-      });
-
-      // `exit` fires when the direct `bash -c` child dies, but the stdout/stderr
-      // pipes stay open as long as any self-daemonized descendant still holds the
-      // inherited write end — and our `data` listeners keep those read streams
-      // referenced, so the event loop never drains and the action hangs after
-      // `Task complete.` (measured: up to 5.3h of billed runner time). dropping
-      // our own read ends releases the handles without killing a descendant the
-      // user deliberately backgrounded. see #1087.
-      proc.stdout?.destroy();
-      proc.stderr?.destroy();
-
-      let output = stderr ? (stdout ? `${stdout}\n${stderr}` : stderr) : stdout;
-      if (timedOut)
-        output = output
-          ? `${output}\n[timed out after ${timeout}ms]`
-          : `[timed out after ${timeout}ms]`;
-
-      const finalExitCode = exitCode ?? (timedOut ? 124 : -1);
-      const trimmed = output.trim();
-      if (finalExitCode !== 0) {
-        log.info(`shell command failed with exit code ${finalExitCode}: ${params.command}`);
-        if (trimmed) log.info(`output: ${trimmed}`);
+      if (result.exitCode !== 0) {
+        log.info(`shell command failed with exit code ${result.exitCode}: ${params.command}`);
+        if (result.output) log.info(`output: ${result.output}`);
       }
 
       return {
-        output: capOutput(trimmed),
-        exit_code: finalExitCode,
-        timed_out: timedOut,
+        output: capOutput(result.output),
+        exit_code: result.exitCode,
+        timed_out: result.timedOut,
       };
     }),
   });

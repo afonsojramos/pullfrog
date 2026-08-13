@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { detect } from "package-manager-detector";
 import { agents } from "./agents/index.ts";
 import { subagentDeniedToolNames } from "./agents/subagentToolGates.ts";
+import { assertPromptToolRefs } from "./external.ts";
 import { reportProgress } from "./mcp/comment.ts";
 import { startInstallation } from "./mcp/dependencies.ts";
 import { startMcpHttpServer, type ToolContext } from "./mcp/server.ts";
@@ -178,8 +179,10 @@ export async function main(): Promise<MainResult> {
       : null;
 
   if (runContext.commercialRefused) {
+    // gate-refusal path: posts one comment and exits, so no agent and no gh token
     await using _commentTokenRef = await resolveTokens({
       push: "disabled",
+      authorPermission: undefined,
       oidc: oidcCredentials,
     });
     const errorMessage =
@@ -268,6 +271,7 @@ export async function main(): Promise<MainResult> {
   // resolve tokens first — acquireNewToken needs OIDC env vars for token exchange
   await using tokenRef = await resolveTokens({
     push: payload.push,
+    authorPermission: payload.event.authorPermission,
     xrepo: payload.xrepo,
     oidc: oidcCredentials,
   });
@@ -551,6 +555,7 @@ export async function main(): Promise<MainResult> {
       },
       refreshGitToken: tokenRef.refreshGitToken,
       readToken: tokenRef.readToken,
+      ghToken: tokenRef.ghToken,
       xrepo: payload.xrepo,
       apiToken: runContext.apiToken,
       modes,
@@ -688,6 +693,13 @@ export async function main(): Promise<MainResult> {
       xrepoBrief: runContext.repoSettings.xrepoBrief,
       xrepoLearningsFilePath: toolState.xrepoLearningsFilePath ?? null,
       xrepoLearningsHeadings: runContext.repoSettings.xrepoLearningsHeadings,
+    });
+    // the prompt and the tool registry are decided in different files off
+    // overlapping conditions; this is what stops them disagreeing silently.
+    assertPromptToolRefs({
+      agentId,
+      prompt: instructions.full,
+      toolNames: mcpHttpServer.toolNames,
     });
     const logParts = [
       instructions.eventInstructions

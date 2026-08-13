@@ -20,10 +20,12 @@ import {
   ReportProgressTool,
 } from "./comment.ts";
 import { CommitInfoTool } from "./commitInfo.ts";
+import { CloseCurrentTool, ReopenCurrentTool } from "./currentObject.ts";
 import {
   AwaitDependencyInstallationTool,
   StartDependencyInstallationTool,
 } from "./dependencies.ts";
+import { GhTool } from "./gh.ts";
 import {
   CommitChangesTool,
   DeleteBranchTool,
@@ -32,13 +34,13 @@ import {
   PushBranchTool,
   PushTagsTool,
 } from "./git.ts";
-import { CloseIssueTool, IssueTool, ReopenIssueTool } from "./issue.ts";
+import { IssueTool } from "./issue.ts";
 import { GetIssueCommentsTool } from "./issueComments.ts";
 import { GetIssueEventsTool } from "./issueEvents.ts";
 import { IssueInfoTool } from "./issueInfo.ts";
 import { AddLabelsTool, RemoveLabelsTool } from "./labels.ts";
 import { SetOutputTool } from "./output.ts";
-import { ClosePullRequestTool, CreatePullRequestTool, UpdatePullRequestBodyTool } from "./pr.ts";
+import { CreatePullRequestTool, UpdatePullRequestBodyTool } from "./pr.ts";
 import { PullRequestInfoTool } from "./prInfo.ts";
 import { CreatePullRequestReviewTool } from "./review.ts";
 import {
@@ -67,6 +69,11 @@ export interface ToolContext {
   // contents:read token over the cross-repo READ set (read-tier secondary
   // clones). undefined on single-repo runs. see resolveRepoCtx.
   readToken: string | undefined;
+  // credential for the `gh` tool, scoped to mirror the triggering user's own
+  // repo role. undefined below the mirror threshold, which is what withholds
+  // the tool. unlike the MCP token this one IS reachable by the agent — `gh`
+  // can print it — so its scope is the whole boundary. see roleMirror.ts.
+  ghToken: string | undefined;
   // cross-repo access sets, resolved server-side. undefined ⇒ single-repo run.
   // checkout_repo / list_repos gate on this; resolveRepoCtx routes by tier.
   xrepo: XrepoConfig | undefined;
@@ -147,8 +154,8 @@ function buildCommonTools(ctx: ToolContext, outputSchema?: JsonSchema): Pullfrog
     EditCommentTool(ctx),
     ReplyToReviewCommentTool(ctx),
     IssueTool(ctx),
-    CloseIssueTool(ctx),
-    ReopenIssueTool(ctx),
+    CloseCurrentTool(ctx),
+    ReopenCurrentTool(ctx),
     IssueInfoTool(ctx),
     GetIssueCommentsTool(ctx),
     GetIssueEventsTool(ctx),
@@ -188,6 +195,16 @@ function buildCommonTools(ctx: ToolContext, outputSchema?: JsonSchema): Pullfrog
     tools.push(KillBackgroundTool(ctx));
   }
 
+  // above the mirror threshold the triggering user already holds repo-wide
+  // rights, so `gh` grants nothing they could not do themselves — and it
+  // subsumes the arbitrary-number close/reopen tools that used to live here
+  // (`gh issue close`, `gh pr close`). below it, `close_current`/`reopen_current`
+  // (always registered above) are the only state changes available, because no
+  // token scope expresses "act only on the object you authored".
+  if (ctx.ghToken) {
+    tools.push(GhTool(ctx));
+  }
+
   return tools;
 }
 
@@ -204,7 +221,6 @@ export function buildOrchestratorTools(
     DeleteBranchTool(ctx),
     CreatePullRequestTool(ctx),
     UpdatePullRequestBodyTool(ctx),
-    ClosePullRequestTool(ctx),
   ];
   // only registered in signed-commits mode so the tool never tempts agents
   // on repos where plain git commit + push_branch is the canonical flow
@@ -328,13 +344,17 @@ type McpHttpServerOptions = {
 export async function startMcpHttpServer(
   ctx: ToolContext,
   options?: McpHttpServerOptions
-): Promise<{ url: string; [Symbol.asyncDispose]: () => Promise<void> }> {
+): Promise<{ url: string; toolNames: string[]; [Symbol.asyncDispose]: () => Promise<void> }> {
   const tools = buildOrchestratorTools(ctx, options?.outputSchema);
   const startResult = await selectMcpPort(ctx, tools);
 
   let disposed = false;
   return {
     url: startResult.url,
+    // the names actually registered, handed back so the prompt can be checked
+    // against them rather than against a second derivation. see
+    // assertPromptToolRefs.
+    toolNames: tools.map((registered) => registered.name),
     [Symbol.asyncDispose]: async () => {
       if (disposed) return;
       disposed = true;
