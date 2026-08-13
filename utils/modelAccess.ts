@@ -18,8 +18,7 @@
 import {
   isOssAllowedModel,
   OPENAI_COMPATIBLE_PROVIDER,
-  OSS_MODEL_ALLOWLIST,
-  resolveDisplayAlias,
+  ossFundedModelNames,
   resolveOpenRouterModel,
 } from "../models.ts";
 import { getApiUrl } from "./apiUrl.ts";
@@ -94,9 +93,9 @@ export const MODEL_ACCESS_MARKER = "requested model is not available";
 
 /** display names of the OSS-funded set, for the `oss` failure copy. */
 function ossAllowedLabels(): string {
-  return OSS_MODEL_ALLOWLIST.map(
-    (slug) => `\`${resolveDisplayAlias(slug)?.displayName ?? slug}\``
-  ).join(", ");
+  return ossFundedModelNames()
+    .map((name) => `\`${name}\``)
+    .join(", ");
 }
 
 /**

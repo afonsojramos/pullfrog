@@ -40,6 +40,7 @@ export {
   OSS_MODEL_ALLOWLIST,
   OSS_RECOMMENDED_MODEL,
   offeredRungs,
+  ossFundedModelNames,
   parseEffortPosition,
   parseModel,
   providers,

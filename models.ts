@@ -1060,6 +1060,18 @@ const defaultProxyDisplayName = defaultProxyAlias.displayName;
  */
 // MiniMax has no direct-vendor block (it ships only through the routers), so
 // it is listed under `openrouter/` where every other entry uses its vendor.
+//
+// CHANGING THIS LIST CHANGES PUBLIC COPY. four surfaces promise maintainers a
+// menu in prose, and a stale one is a promise we don't keep. two now read the
+// names from here via `ossFundedModelNames` and follow an edit on their own —
+// but the sentences AROUND them are hand-written, so re-read all four:
+//   - `app/for-oss/page.tsx` (derived) — the pitch + the OG/meta blurb.
+//   - `emails/ossAccepted.ts` (derived) — what an accepted maintainer holds us to.
+//   - `docs/models.mdx` (hand-written) — the "Pullfrog for OSS" table.
+//   - `app/blog/ModelUsageSection.tsx` (hand-written) — the pricing-post aside.
+// the two derived ones are derived because #1190 updated the other two and
+// missed these, leaving the application page selling one model the program had
+// stopped defaulting to, for two allowlist edits running.
 export const OSS_MODEL_ALLOWLIST: readonly string[] = [
   "deepseek/deepseek-flash",
   "deepseek/deepseek-pro",
@@ -1071,6 +1083,17 @@ export const OSS_MODEL_ALLOWLIST: readonly string[] = [
  * restated, so the badge cannot drift from the model that actually runs — a
  * second literal here would be an invariant nothing enforces. */
 export const OSS_RECOMMENDED_MODEL = AUTO_TIER_TARGET[AUTO_EFFICIENT];
+
+/**
+ * display names of the funded set, in allowlist order. the single place every
+ * surface that NAMES the menu in prose reads it from — the application page,
+ * the acceptance email, the model-access error — so none of them can promise a
+ * model the program stopped funding. callers format the list themselves; this
+ * is a catalog, not copy.
+ */
+export function ossFundedModelNames(): string[] {
+  return OSS_MODEL_ALLOWLIST.map((slug) => resolveDisplayAlias(slug)?.displayName ?? slug);
+}
 
 /**
  * the OpenRouter targets the allowlist admits. keying on the target rather than

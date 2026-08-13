@@ -60,6 +60,7 @@ export {
   modelHasStoredAuth,
   OSS_MODEL_ALLOWLIST,
   OSS_RECOMMENDED_MODEL,
+  ossFundedModelNames,
   parseModel,
   providers,
   resolveAutoTier,
