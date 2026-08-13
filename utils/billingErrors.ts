@@ -101,7 +101,15 @@ export function commercialPaywallBody(params: {
   ].join("\n");
 }
 
-/** commercial-gate copy for action runs, linked to the account billing card. */
+/**
+ * commercial-gate copy for action runs, linked to the account billing card.
+ *
+ * if this fires on a `pullfrog/preview-*` repo it is an infrastructure bug, not
+ * a billing state — those repos have no real billing state to refuse. the
+ * original cause was the gate comparing the subscription's originating host
+ * with strict equality, which no preview could satisfy against a cloned
+ * production row; see `isSubscriptionHostTrusted` and wiki/billing-model-v2.md.
+ */
 export function formatCommercialGateSummary(params: {
   reason: "commercial" | "subscription_unpaid";
   ownerLogin: string;
