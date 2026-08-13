@@ -801,6 +801,12 @@ export function getProviderDisplayName(slug: string): string | undefined {
   return (providers as Record<string, ProviderConfig>)[parsed.provider]?.displayName;
 }
 
+/** provider-prefixed specifier → bare model id (`anthropic/claude-opus-5` → `claude-opus-5`). */
+export function stripProviderPrefix(specifier: string): string {
+  const slashIndex = specifier.indexOf("/");
+  return slashIndex > 0 ? specifier.slice(slashIndex + 1) : specifier;
+}
+
 export function getModelEnvVars(slug: string): string[] {
   const parsed = parseModel(slug);
   const providerConfig = (providers as Record<string, ProviderConfig>)[parsed.provider];

@@ -17,7 +17,16 @@ if (!fallbackResolve) {
 }
 const FALLBACK_PROBE_MODEL = fallbackResolve.slice(fallbackResolve.indexOf("/") + 1);
 
-export type SubscriptionPreflight = { usable: true } | { usable: false; reason: string };
+/**
+ * `status` is the HTTP status Anthropic answered with, or `undefined` when we
+ * never got an answer at all (network failure / timeout). Callers that need to
+ * tell "the credential is dead" from "we couldn't ask" — the paste-time check
+ * in `credentialCheck.ts` — read it; `usable` alone conflates the two, because
+ * fail-open makes both `usable: true`.
+ */
+export type SubscriptionPreflight =
+  | { usable: true; status: number | undefined }
+  | { usable: false; status: number; reason: string };
 
 /**
  * preflight a Claude subscription OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`)
@@ -66,11 +75,16 @@ export async function preflightClaudeSubscription(params: {
     });
   } catch {
     // network failure / timeout says nothing about the credential
-    return { usable: true };
+    return { usable: true, status: undefined };
   }
-  if (res.status !== 401 && res.status !== 403 && res.status !== 429) return { usable: true };
+  if (res.status !== 401 && res.status !== 403 && res.status !== 429)
+    return { usable: true, status: res.status };
   const body = await res.text().catch(() => "");
-  return { usable: false, reason: `${res.status}: ${extractApiErrorMessage(body)}` };
+  return {
+    usable: false,
+    status: res.status,
+    reason: `${res.status}: ${extractApiErrorMessage(body)}`,
+  };
 }
 
 /** pull `error.message` out of an Anthropic error payload, else a raw excerpt */

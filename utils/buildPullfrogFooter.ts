@@ -30,10 +30,10 @@ export interface BuildPullfrogFooterParams {
   /** model slug from payload (e.g., "anthropic/claude-opus"). shown in footer as "Using `Model Name`" */
   model?: string | undefined;
   /**
-   * When the action engaged the BYOK fallback, this is the slug the user
-   * had configured (e.g. "anthropic/claude-opus") — the footer renders
-   * `Using <free model> (credentials for <configured> not configured)`
-   * so the substitution is visible in PR comments + reviews.
+   * When a credential was rejected and the run moved to another model, this is
+   * the slug the user had configured (e.g. "anthropic/claude-opus") — the footer
+   * renders `Using <model> (credentials for <configured> were rejected by the
+   * provider)` so the substitution is visible in PR comments + reviews.
    */
   fallbackFrom?: string | undefined;
   /**
@@ -115,7 +115,10 @@ function formatModelLabel(params: {
   }
   const base = alias?.isFree ? `\`${displayName}\` (free)` : `\`${displayName}\``;
   if (params.fallbackFrom) {
-    return `${base} (credentials for ${providerDisplayName(params.fallbackFrom)} not configured)`;
+    // "not configured" would be false here: the fallback's only producer is the
+    // rejected-credential path, where the user DID configure a credential and
+    // the provider turned it down.
+    return `${base} (credentials for ${providerDisplayName(params.fallbackFrom)} were rejected by the provider)`;
   }
   if (params.clamped) {
     // name the tier (not its backing model) when the user picked a tier, so the

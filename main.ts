@@ -19,11 +19,12 @@ import {
   DEFAULT_ACTIVITY_CHECK_INTERVAL_MS,
 } from "./utils/activity.ts";
 import { resolveAgent, resolveModel } from "./utils/agent.ts";
-import { validateAgentApiKey } from "./utils/apiKeys.ts";
+import { buildRejectedCredentialError, validateAgentApiKey } from "./utils/apiKeys.ts";
 import { formatCommercialGateSummary } from "./utils/billingErrors.ts";
 import { resolveBody } from "./utils/body.ts";
 import { log } from "./utils/cli.ts";
 import { installCodexAuth, PULLFROG_DATA_DIR } from "./utils/codexHome.ts";
+import { checkConfiguredCredentials } from "./utils/credentialFallback.ts";
 import { recordDiffReadFromToolUse } from "./utils/diffCoverage.ts";
 import { onExitSignal } from "./utils/exitHandler.ts";
 import { resolveGit, setGitAuthServer } from "./utils/gitAuth.ts";
@@ -395,7 +396,45 @@ export async function main(): Promise<MainResult> {
       payload.effort = ossEffortFloor({ payload });
     }
 
-    const resolvedModel = payload.proxyModel ? undefined : resolveModel({ slug: payload.model });
+    const configuredModel = payload.proxyModel ? undefined : resolveModel({ slug: payload.model });
+
+    // ask the providers whether the configured model's credentials still work
+    // before committing to it. a rejected credential becomes either a run on
+    // whatever the account CAN still route or an accurate error naming
+    // the credential — never the 401-three-seconds-in that used to send users
+    // to a GitHub Actions secrets page they had never put a key in. skipped
+    // for proxy runs for the same reason validateAgentApiKey is: the server
+    // minted the key and is the authority on it.
+    const credentials = payload.proxyModel
+      ? { kind: "ok" as const }
+      : await checkConfiguredCredentials({
+          model: configuredModel,
+          authorized: getAuthorizedModels(),
+        });
+    if (credentials.kind === "dead") {
+      throw new Error(
+        buildRejectedCredentialError({
+          credential: credentials.credential,
+          reason: credentials.reason,
+          owner: runContext.repo.owner,
+          name: runContext.repo.name,
+          inPullfrogStore: credentials.credential in (runContext.dbSecrets ?? {}),
+        })
+      );
+    }
+    if (credentials.kind === "fellBack" && configuredModel) {
+      log.warning(
+        `» ${credentials.credential} was rejected by its provider — running ${credentials.replacement} instead of ${configuredModel}`
+      );
+      toolState.modelFallback = { from: configuredModel };
+    }
+    // the replacement is a concrete resolve target, not `undefined`: leaving it
+    // unset would let `effectiveModel` fall through to `payload.model` (the
+    // ALIAS slug), which `authorized` doesn't hold and whose env vars were just
+    // deleted — so `validateAgentApiKey` would throw the missing-key error with
+    // the very GitHub-secrets CTA this whole change exists to stop showing.
+    const resolvedModel =
+      credentials.kind === "fellBack" ? credentials.replacement : configuredModel;
 
     vertexCredentials = materializeVertexCredentials({ model: resolvedModel });
 

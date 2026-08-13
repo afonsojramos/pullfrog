@@ -23,7 +23,12 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { pullfrogMcpName } from "../external.ts";
-import { BEDROCK_MODEL_ID_ENV, isVertexAnthropicId, VERTEX_MODEL_ID_ENV } from "../models.ts";
+import {
+  BEDROCK_MODEL_ID_ENV,
+  isVertexAnthropicId,
+  stripProviderPrefix,
+  VERTEX_MODEL_ID_ENV,
+} from "../models.ts";
 
 import { AGENT_ACTIVITY_TIMEOUT_MS, getIdleMs, markActivity } from "../utils/activity.ts";
 import { preflightClaudeSubscription } from "../utils/claudeSubscription.ts";
@@ -187,14 +192,6 @@ function buildAgentsJson(): string {
     },
   };
   return JSON.stringify(agents);
-}
-
-// ── model helpers ─────────────────────────────────────────────────────────────
-
-// claude CLI expects bare model names (e.g. "claude-sonnet-5"), not provider-prefixed specifiers
-function stripProviderPrefix(specifier: string): string {
-  const slashIndex = specifier.indexOf("/");
-  return slashIndex > 0 ? specifier.slice(slashIndex + 1) : specifier;
 }
 
 // ── effort ────────────────────────────────────────────────────────────────────
@@ -1264,9 +1261,23 @@ export const claude = agent({
     // claude-code's `Vw()` resolver prefers ANTHROPIC_API_KEY over the OAuth
     // token when both are set, so we strip the API key to fall through to the
     // Max-subscription path. bedrock route uses AWS creds and is excluded.
+    //
     // the strip is gated on a 1-token preflight: an exhausted (session/weekly
     // limit) or revoked subscription would otherwise kill the run at its first
     // model call with a working API key sitting unused in env.
+    //
+    // this preflight is UNCONDITIONAL, and deliberately so. Deciding it was
+    // redundant because `checkConfiguredCredentials` ran upstream means
+    // answering "did that check probe THIS token", and the answer is not the
+    // one it looks like: the upstream check probes only the configured model's
+    // env vars and is skipped entirely for proxy runs, so a proxy run, a
+    // non-Anthropic model under `PULLFROG_AGENT=claude`, and a run with no
+    // model at all all reach here unprobed. Guessing that wrong strips a live
+    // API key in favour of a token nothing verified — the exact failure this
+    // gate exists to prevent — and one 1-token call is far cheaper than being
+    // wrong about it. Upstream covers what this block never could (a
+    // subscription that is the ONLY credential, with no API key to fall back
+    // to); this covers the rest.
     if (env.CLAUDE_CODE_OAUTH_TOKEN && !isBedrockRoute && env.ANTHROPIC_API_KEY) {
       const preflight = await preflightClaudeSubscription({
         token: env.CLAUDE_CODE_OAUTH_TOKEN,

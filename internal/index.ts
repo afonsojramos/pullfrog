@@ -74,6 +74,8 @@ export {
   refreshCodexAuthBody,
   stringifyCodexAuthBody,
 } from "../utils/codexOAuth.ts";
+export type { CredentialVerdict } from "../utils/credentialCheck.ts";
+export { isCredentialProbeable, verifyCredential } from "../utils/credentialCheck.ts";
 export type { ResourceUsage, UsageSummary } from "../utils/github.ts";
 export { isPullfrog } from "../utils/isPullfrog.ts";
 export {

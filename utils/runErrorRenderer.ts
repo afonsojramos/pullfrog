@@ -68,6 +68,7 @@
 import type { AgentDiagnostic } from "./agentHangReport.ts";
 import { formatAgentHangBody } from "./agentHangReport.ts";
 import {
+  CREDENTIAL_REJECTED_MARKER,
   formatApiKeyErrorSummary,
   isApiKeyAuthError,
   ROUTER_UNFUNDED_MARKER,
@@ -390,6 +391,14 @@ export function renderRunError(input: {
   // rebuilds any body carrying `no API key found` into the generic
   // "add a provider key" copy, which is the exact wrong CTA here.
   if (input.errorMessage.includes(ROUTER_UNFUNDED_MARKER)) {
+    return { summary: input.errorMessage, comment: input.errorMessage };
+  }
+
+  // a credential the provider rejected before the agent started. the body
+  // already names the credential and its real remedy, and it QUOTES the
+  // provider's wording — so without this guard the api-key branch below sniffs
+  // that quote and rebuilds it into the generic "rotate your key" CTA.
+  if (input.errorMessage.includes(CREDENTIAL_REJECTED_MARKER)) {
     return { summary: input.errorMessage, comment: input.errorMessage };
   }
 

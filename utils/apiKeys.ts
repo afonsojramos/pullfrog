@@ -39,6 +39,22 @@ export const SECRETS_UNAVAILABLE_MARKER = "couldn't load your Pullfrog secrets";
 export const ROUTER_UNFUNDED_MARKER = "your Pullfrog Router balance is empty";
 
 /**
+ * marker for a credential the provider explicitly REJECTED before the agent
+ * started. needs a verbatim guard for the same reason as its three siblings,
+ * and more sharply: the body quotes the provider's own wording, which is
+ * exactly what `isApiKeyAuthError` sniffs — so an Anthropic error whose JSON
+ * carries `authentication_error` would be rebuilt into the generic
+ * "rotate the key, update the GitHub Actions secret" copy. That is #782
+ * verbatim, on the code path built to stop it.
+ *
+ * Phrased distinctively for the same reason as its siblings: `runErrorRenderer`
+ * short-circuits the whole rendering pipeline on a SUBSTRING match against
+ * arbitrary agent output, so a marker short enough to occur by accident would
+ * hand that agent the ability to suppress every other error body.
+ */
+export const CREDENTIAL_REJECTED_MARKER = "was rejected by its provider";
+
+/**
  * Three ways to arrive at "the runner has no key", each with a different CTA:
  * we couldn't read the key you stored, your Router wallet ran dry and you have
  * no key of your own, or you genuinely have no key. Every throw site picks by
@@ -495,6 +511,70 @@ export function isClaudeSessionLimitError(text: string): boolean {
 }
 
 /**
+ * Subscription credentials are re-authenticated, never rotated: there is no
+ * provider dashboard to visit and no API key to paste. Telling their owner to
+ * "rotate the key in your provider dashboard, then update the matching GitHub
+ * Actions secret" names three things that do not exist for them — which is what
+ * a revoked `CLAUDE_CODE_OAUTH_TOKEN` was answered with 47 times in a row
+ * before this existed, because Anthropic's rejection reads `Invalid bearer
+ * token` and that is also what a rotated `ANTHROPIC_API_KEY` reads (#782).
+ * The credential in play is knowable, so it decides the copy — never the prose.
+ */
+const SUBSCRIPTION_CREDENTIALS: Record<string, { label: string; command: string; docs: string }> = {
+  CLAUDE_CODE_OAUTH_TOKEN: {
+    label: "Claude Pro/Max subscription",
+    command: "pullfrog auth claude",
+    docs: "https://docs.pullfrog.com/claude-auth",
+  },
+  CODEX_AUTH_JSON: {
+    label: "ChatGPT subscription",
+    command: "pullfrog auth codex",
+    docs: "https://docs.pullfrog.com/codex-auth",
+  },
+};
+
+/**
+ * The provider rejected a credential we checked before the agent started, and
+ * nothing else on the account can serve this run. Names the credential and the
+ * place it actually lives, rather than guessing from the provider's wording.
+ */
+export function buildRejectedCredentialError(params: {
+  credential: string;
+  /** the provider's own message, when it gave one worth quoting. */
+  reason: string | undefined;
+  owner: string;
+  name: string;
+  /** stored in Pullfrog (console / `pullfrog auth`) rather than a GitHub Actions secret. */
+  inPullfrogStore: boolean;
+}): string {
+  const settingsUrl = `${getApiUrl()}/console/${params.owner}/${params.name}`;
+  const subscription = SUBSCRIPTION_CREDENTIALS[params.credential];
+  const detail = params.reason ? ` (\`${params.reason}\`)` : "";
+
+  if (subscription) {
+    return [
+      `**Your ${subscription.label} ${CREDENTIAL_REJECTED_MARKER}**${detail}, so the agent never ran.`,
+      "",
+      `**To fix:** re-authenticate with \`${subscription.command}\`. A subscription credential can't be rotated from a provider dashboard — it has to be re-issued. You can also switch this repo to a model you hold an API key for.`,
+      "",
+      `[Re-authenticate →](${subscription.docs}) · [Model settings →](${settingsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    ].join("\n");
+  }
+
+  const where = params.inPullfrogStore
+    ? `[Update it in Pullfrog →](${settingsUrl})`
+    : `[Update the GitHub Actions secret →](https://github.com/${params.owner}/${params.name}/settings/secrets/actions)`;
+
+  return [
+    `**Your \`${params.credential}\` ${CREDENTIAL_REJECTED_MARKER}**${detail}, so the agent never ran.`,
+    "",
+    `**To fix:** issue a new key in your provider dashboard and update the copy Pullfrog uses${params.inPullfrogStore ? " in the console" : " in your repo's GitHub Actions secrets"}.`,
+    "",
+    `${where} · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+  ].join("\n");
+}
+
+/**
  * Friendly Markdown summary for both the missing-key and invalid-key cases.
  * Used in the catch / result-failure paths in `main.ts` to overwrite the raw
  * agent error before it's posted to the PR progress comment.
@@ -558,6 +638,21 @@ export function formatApiKeyErrorSummary(params: {
       `**Your provider OAuth credential has expired or been revoked.** Re-authenticate the provider connection (e.g. \`pullfrog auth claude\` / \`pullfrog auth codex\`), then re-trigger the run.`,
       "",
       `[Claude subscription →](https://docs.pullfrog.com/claude-auth) · [ChatGPT subscription →](https://docs.pullfrog.com/codex-auth) · [Model settings →](${settingsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    ].join("\n");
+  }
+
+  // the provider's wording can't tell a revoked subscription token from a
+  // rotated API key — both read `Invalid bearer token` — so fall back to the
+  // credential actually in this run's env before assuming there is a key to
+  // rotate. only reachable when a credential dies mid-run: a dead one is
+  // deleted from env by `checkConfiguredCredentials` before the agent starts.
+  const subscription = Object.keys(SUBSCRIPTION_CREDENTIALS).find(hasEnvVar);
+  if (subscription && !hasEnvVar("ANTHROPIC_API_KEY")) {
+    const details = SUBSCRIPTION_CREDENTIALS[subscription];
+    return [
+      `**Your ${details?.label} was rejected during this run.** Re-authenticate with \`${details?.command}\` and re-trigger — a subscription credential can't be rotated from a provider dashboard.`,
+      "",
+      `[Re-authenticate →](${details?.docs}) · [Model settings →](${settingsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
     ].join("\n");
   }
 

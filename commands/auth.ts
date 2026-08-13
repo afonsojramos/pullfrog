@@ -14,8 +14,9 @@
 //
 // the `claude` subcommand prompts the user to paste the long-lived OAuth
 // token printed by `claude setup-token` and posts it to the same secrets
-// API. unlike Codex, the token is static (no refresh chain), so there's no
-// post-run write-back — see wiki/codex-auth.md "Claude sibling".
+// API, which verifies it with Anthropic before storing it. unlike Codex, the
+// token is static (no refresh chain), so there's no post-run write-back —
+// see wiki/codex-auth.md "Claude sibling".
 
 import { spawn } from "node:child_process";
 import * as p from "@clack/prompts";
@@ -38,9 +39,9 @@ import {
 const CODEX_AUTH_SECRET = "CODEX_AUTH_JSON";
 const CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN";
 
-/** prefix on `claude setup-token` OAuth tokens (`sk-ant-oat01-…`). used only
- * for a warn-on-mismatch paste sanity check, not enforced — a wrong token
- * fails the run's subscription preflight, not here. */
+/** prefix on `claude setup-token` OAuth tokens (`sk-ant-oat01-…`). a
+ * warn-on-mismatch shape check only; whether the token actually WORKS is
+ * settled by the secrets API, which refuses a token Anthropic rejects. */
 const CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat";
 
 /** strip CSI ANSI escapes (color, cursor) from a string so callers can re-style

@@ -231,11 +231,12 @@ export interface ToolState {
   output?: string | undefined;
   usageEntries: AgentUsage[];
   model?: string | undefined;
-  // set by main.ts when the BYOK fallback engaged (configured model needed
-  // a provider key the runner didn't have). carried into PR-comment footers
-  // so users can see "Using <free model> (credentials for <configured> not
-  // configured)" rather than just being silently downgraded. literal record
-  // of an event that happened — matches the ToolState design rule.
+  // set by main.ts when the configured model's credentials were all REJECTED by
+  // their own providers and the run moved to one this account can still serve.
+  // carried into PR-comment footers so users see "Using <model> (credentials
+  // for <configured> were rejected by the provider)" rather than being silently
+  // downgraded. literal record of an event that happened — matches the
+  // ToolState design rule.
   modelFallback?: { from: string } | undefined;
   // true when the run fell back to the default proxy model purely because the
   // repo has no model selected (Router billing + "auto"). carried into footers
