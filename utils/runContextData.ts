@@ -68,7 +68,14 @@ function warnIfPinnedToSha(): void {
 export async function resolveRunContextData(
   params: ResolveRunContextDataParams
 ): Promise<RunContextData> {
-  log.info(`» running Pullfrog v${packageJson.version}...`);
+  // the ref is load-bearing, not decoration: a `@main` dogfood run prints the
+  // un-bumped package version, so without it a run executing UNRELEASED code is
+  // indistinguishable from one running the published release of the same number.
+  // that ambiguity is what let 0.1.54 ship after main had already failed twice.
+  const actionRef = process.env.GITHUB_ACTION_REF;
+  log.info(
+    `» running Pullfrog v${packageJson.version}${actionRef ? ` (ref: ${actionRef})` : ""}...`
+  );
   warnIfPinnedToSha();
 
   const repoContext = parseRepoContext();

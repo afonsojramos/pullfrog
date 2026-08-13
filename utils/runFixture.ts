@@ -30,7 +30,14 @@ export async function run(inputsOrPrompt: Inputs | string): Promise<AgentResult>
 
   try {
     setupTestRepo({ tempDir });
-    process.chdir(tempDir);
+
+    // FIDELITY: production never starts `main()` inside the checkout. `runCli.ts`
+    // launches the CLI from a fresh empty tmpdir (published path) or `actionRoot`
+    // (a tarball action checkout with no `.git`), and only `payload.cwd` gets it
+    // into the repo. Starting here from inside the repo hid a fatal bug: a
+    // `git diff` added before that chdir passed every local test and then failed
+    // 100% of production runs with "Not a git repository" (0.1.54).
+    process.chdir(await mkdtemp(join(tmpdir(), "pullfrog-bootstrap-")));
 
     // optional pre-agent setup (e.g. seed symlinks for adversarial fixtures).
     if (process.env.PULLFROG_TEST_REPO_SETUP) {
@@ -51,6 +58,16 @@ export async function run(inputsOrPrompt: Inputs | string): Promise<AgentResult>
     }
 
     const result: AgentResult = await main();
+    // #1151 regression surface: the runtime must leave the checkout as it found
+    // it, or `checkout_pr` refuses for the rest of the run and every Review
+    // silently loses the authoritative diff. a fixture whose agent edits files
+    // legitimately ends dirty, so this reports rather than fails — but a run
+    // that dirties tracked files it did NOT mean to now says so out loud.
+    const finalDirty = execSync("git status --porcelain", {
+      cwd: tempDir,
+      encoding: "utf-8",
+    }).trim();
+    if (finalDirty) log.info(`» final worktree state (dirty):\n${finalDirty}`);
     process.chdir(originalCwd);
 
     if (result.success) {
