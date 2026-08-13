@@ -89,7 +89,6 @@ import {
   type VertexCredentials,
 } from "./utils/vertex.ts";
 import { resolveRun } from "./utils/workflow.ts";
-import { dirtyTrackedPaths, restoreDirtiedSince } from "./utils/worktree.ts";
 
 export { Inputs } from "./utils/payload.ts";
 
@@ -213,18 +212,14 @@ export async function main(): Promise<MainResult> {
   // route from the runner's pre-existing environment alone (workflow
   // `env:` block + GH Actions secrets). install is fs-cached, so the
   // duplicate call inside the opencode agent's run() is a no-op.
-  // `opencode models` runs opencode's instance bootstrap in `process.cwd()` —
-  // the customer checkout — so it injects `$schema` into a repo-root
-  // `opencode.json` and installs `@opencode-ai/plugin` into `.opencode/`. both
-  // existing restore windows (prep's `finally`, the harness's pre-boot) open
-  // AFTER this, so the dirt read as pre-existing customer work and was
-  // correctly left alone — and `checkout_pr` then refused for the whole run.
-  // 103/103 Reviews on one repo lost the authoritative diff, silently, on every
-  // released version (#1151). one window straddling both captures: nothing
-  // between them writes to the worktree, and both are done before any agent
-  // tool exists, so the #1146 "don't discard the agent's own work" hazard
-  // cannot apply.
-  const preIntrospectionDirty = await dirtyTrackedPaths();
+  //
+  // #1213 wrapped this introspection in a `dirtyTrackedPaths()` window to catch
+  // the `opencode models` bootstrap dirtying the checkout (#1151). REVERTED in
+  // 0.1.55: `dirtyTrackedPaths()` throws on a non-zero git exit, and on the
+  // runner `git diff --name-only HEAD` here exits 129 ("Not a git repository")
+  // even though the checkout step demonstrably succeeded — so every run on
+  // 0.1.54 died before the agent started, fleet-wide. #1151 still needs a fix;
+  // it must not be one that can abort the run.
   const opencodeCliPath = await agents.opencode.install();
   captureBaselineModels(opencodeCliPath);
 
@@ -255,7 +250,6 @@ export async function main(): Promise<MainResult> {
   // more accurate than the static envVars/managedCredentials catalog,
   // which can miss new auth shapes.
   captureAuthorizedModels(opencodeCliPath);
-  await restoreDirtiedSince({ before: preIntrospectionDirty, actor: "model introspection" });
 
   // configure env allowlist for subprocess filtering
   if (runContext.repoSettings.envAllowlist) {
