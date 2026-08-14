@@ -90,6 +90,7 @@ import {
   type VertexCredentials,
 } from "./utils/vertex.ts";
 import { resolveRun } from "./utils/workflow.ts";
+import { dirtyTrackedPaths, restoreDirtiedSince } from "./utils/worktree.ts";
 
 export { Inputs } from "./utils/payload.ts";
 
@@ -216,13 +217,19 @@ export async function main(): Promise<MainResult> {
   // `env:` block + GH Actions secrets). install is fs-cached, so the
   // duplicate call inside the opencode agent's run() is a no-op.
   //
-  // #1213 wrapped this introspection in a `dirtyTrackedPaths()` window to catch
-  // the `opencode models` bootstrap dirtying the checkout (#1151). REVERTED in
-  // 0.1.55: `dirtyTrackedPaths()` throws on a non-zero git exit, and on the
-  // runner `git diff --name-only HEAD` here exits 129 ("Not a git repository")
-  // even though the checkout step demonstrably succeeded — so every run on
-  // 0.1.54 died before the agent started, fleet-wide. #1151 still needs a fix;
-  // it must not be one that can abort the run.
+  // one restore window straddling both `opencode models` captures (#1151):
+  // nothing between them writes to the worktree, and both finish before any
+  // agent tool exists, so the #1146 "don't discard the agent's own work" hazard
+  // cannot apply.
+  //
+  // keyed on `payload.cwd`, NOT `process.cwd()`. that is the whole lesson of
+  // 0.1.54: this code runs BEFORE the chdir below, and `runCli.ts` starts the
+  // CLI outside the checkout (a bootstrap tmpdir, or an action checkout with no
+  // `.git`), so reading `process.cwd()` here made git exit 129 and throw — every
+  // customer run died before the agent started. with no repo dir resolved there
+  // is nothing to protect, so the window simply does not open.
+  const repoDir = payload.cwd;
+  const preIntrospectionDirty = repoDir ? await dirtyTrackedPaths({ cwd: repoDir }) : null;
   const opencodeCliPath = await agents.opencode.install();
   captureBaselineModels(opencodeCliPath);
 
@@ -253,6 +260,15 @@ export async function main(): Promise<MainResult> {
   // more accurate than the static envVars/managedCredentials catalog,
   // which can miss new auth shapes.
   captureAuthorizedModels(opencodeCliPath);
+
+  // close the window opened before the baseline capture.
+  if (preIntrospectionDirty && repoDir) {
+    await restoreDirtiedSince({
+      before: preIntrospectionDirty,
+      actor: "model introspection",
+      cwd: repoDir,
+    });
+  }
 
   // configure env allowlist for subprocess filtering
   if (runContext.repoSettings.envAllowlist) {

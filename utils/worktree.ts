@@ -1,12 +1,22 @@
 import { log } from "./cli.ts";
 import { spawn } from "./subprocess.ts";
 
-/** tracked paths with staged or unstaged modifications. */
-export async function dirtyTrackedPaths(): Promise<Set<string>> {
+/**
+ * tracked paths with staged or unstaged modifications.
+ *
+ * `cwd` is not optional decoration: the CLI does NOT start inside the checkout.
+ * `runCli.ts` launches it from a bootstrap tmpdir (published) or `actionRoot` (a
+ * tarball action checkout with no `.git`), and `main.ts` only chdirs into the
+ * repo later. A caller that runs before that chdir and relies on `process.cwd()`
+ * gets `exit 129 — Not a git repository` and, since this throws, kills the run:
+ * that is exactly what 0.1.54 did to every customer. Pass the repo dir.
+ */
+export async function dirtyTrackedPaths(params: { cwd?: string } = {}): Promise<Set<string>> {
   const result = await spawn({
     cmd: "git",
     args: ["diff", "--name-only", "HEAD"],
     env: process.env,
+    cwd: params.cwd ?? process.cwd(),
     activityTimeout: 0,
   });
   if (result.exitCode !== 0) {
@@ -34,13 +44,17 @@ export async function dirtyTrackedPaths(): Promise<Set<string>> {
 export async function restoreDirtiedSince(params: {
   before: Set<string>;
   actor: string;
+  cwd?: string;
 }): Promise<void> {
-  const dirtied = [...(await dirtyTrackedPaths())].filter((path) => !params.before.has(path));
+  const dirtied = [...(await dirtyTrackedPaths({ cwd: params.cwd ?? process.cwd() }))].filter(
+    (path) => !params.before.has(path)
+  );
   if (dirtied.length === 0) return;
   const result = await spawn({
     cmd: "git",
     args: ["restore", "--staged", "--worktree", "--", ...dirtied],
     env: process.env,
+    cwd: params.cwd ?? process.cwd(),
     activityTimeout: 0,
   });
   if (result.exitCode !== 0) {
