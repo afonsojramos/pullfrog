@@ -151,7 +151,7 @@ describe("resolveOpenRouterModel", () => {
 
   it("walks fallback chain for deprecated deepseek aliases", () => {
     expect(resolveOpenRouterModel("deepseek/deepseek-reasoner")).toBe(
-      "openrouter/deepseek/deepseek-v4-pro"
+      "openrouter/deepseek/deepseek-v4-pro-0813"
     );
     expect(resolveOpenRouterModel("deepseek/deepseek-chat")).toBe(
       "openrouter/~deepseek/deepseek-v4-flash-latest"

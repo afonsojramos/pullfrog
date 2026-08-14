@@ -313,12 +313,22 @@ export const providers = {
     displayName: "DeepSeek",
     envVars: ["DEEPSEEK_API_KEY"],
     models: {
+      // same fork trap as `deepseek-flash` below, and Pro fell into it on
+      // 2026-08-12: OpenRouter forked the 0813 release into its own id and left
+      // the April preview live under the unversioned one at 2.7x the input and
+      // 27x the CACHE-READ rate ($1.168/$2.336/$0.09855 vs
+      // $0.435/$0.87/$0.003625). the direct route upgraded in place, so only the
+      // OpenRouter side was stale — and that side is what OSS and Router runs
+      // use. measured: $0.1719/run authoritative against the funded default's
+      // $0.0405. there is no `~deepseek/*-pro-latest` pointer to track, so this
+      // one has to be a dated pin; the `models-catalog` drift test is what
+      // catches the next release.
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
         resolve: "deepseek/deepseek-v4-pro",
         effort: ["high", "max"],
-        openRouterEffort: ["high", "xhigh"],
-        openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
+        openRouterEffort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/deepseek/deepseek-v4-pro-0813",
         preferred: true,
       },
       // DeepSeek upgrades the `deepseek-v4-flash` API model in place, so the
@@ -326,14 +336,19 @@ export const providers = {
       // release into its own id and left the April preview live under the
       // unversioned one at a HIGHER price ($0.14/$0.28 vs $0.09/$0.18) — so the
       // OpenRouter route can never use the bare id. it tracks the rolling
-      // `~deepseek/*-latest` pointer (rule 4), which resolves to 0731 at the
-      // same price today and follows the next in-place upgrade on its own,
-      // rather than pinning a dated snapshot that goes stale every release.
-      // 0731 gained a `low` rung and renamed the top to `max`, unlike Pro
-      // (`high, max` direct / `high, xhigh` via OpenRouter). that ladder now
-      // reads the same on BOTH routes — the in-place direct upgrade caught up
-      // to the fork — so `low`, not `high`, is position 0 either way, which is
-      // why the OSS effort floor in `main.ts` pins the `high` rung by name.
+      // `~deepseek/*-latest` pointer (rule 4), which follows the next in-place
+      // upgrade on its own rather than pinning a dated snapshot that goes stale
+      // every release. that pointer is NOT priced like 0731 — its listed rates
+      // run +40% on output and +57.5% on cache read, and it costs 12% more per
+      // run on authoritative spend ($0.0405 vs $0.0361). kept anyway: ~$45/yr
+      // buys auto-following the upgrade, and the listed gap overstates the real
+      // one because a rolling alias prices at its routing ceiling.
+      // 0731 gained a `low` rung and renamed the top to `max`, and that ladder
+      // now reads the same on BOTH routes — the in-place direct upgrade caught
+      // up to the fork. so `low`, not `high`, is position 0 either way, which is
+      // why the OSS effort floor in `main.ts` pins the `high` rung by name. Pro
+      // is the same shape via OpenRouter since 0813; only its direct route still
+      // starts at `high`.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
         resolve: "deepseek/deepseek-v4-flash",
@@ -732,11 +747,13 @@ export const providers = {
         effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/x-ai/grok-4.5",
       },
+      // dated pin, not the bare id — see `deepseek/deepseek-pro` for why
+      // OpenRouter's unversioned `deepseek-v4-pro` is the stale April preview.
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
-        resolve: "openrouter/deepseek/deepseek-v4-pro",
-        effort: ["high", "xhigh"],
-        openRouterResolve: "openrouter/deepseek/deepseek-v4-pro",
+        resolve: "openrouter/deepseek/deepseek-v4-pro-0813",
+        effort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/deepseek/deepseek-v4-pro-0813",
       },
       // rolling pointer, not the bare id — see `deepseek/deepseek-flash` for why
       // OpenRouter's unversioned `deepseek-v4-flash` is the stale April preview.
