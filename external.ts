@@ -41,11 +41,17 @@ export function formatMcpToolRef(agentId: AgentId, toolName: string): string {
 export function extractMcpToolRefs(agentId: AgentId, text: string): string[] {
   const prefix = formatMcpToolRef(agentId, "");
   const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return [...text.matchAll(new RegExp(`${escaped}([a-z0-9_]+)`, "g"))].map((match) => match[1]);
+  // the prefix must start a token. without this, opencode's `pullfrog_` prefix
+  // matches INSIDE a claude-style `mcp__pullfrog__shell` ref and captures
+  // `_shell`, which is never a registered name — every run on a repo whose
+  // prompt carried a claude-style ref died on the check below.
+  return [...text.matchAll(new RegExp(`(?<![A-Za-z0-9_])${escaped}([a-z0-9_]+)`, "g"))].map(
+    (match) => match[1]
+  );
 }
 
 /**
- * Fail the run if the assembled prompt advertises a tool the MCP server did not
+ * Report when the assembled prompt advertises a tool the MCP server did not
  * actually register.
  *
  * Prompt text and tool registration are decided in different files off
@@ -55,21 +61,23 @@ export function extractMcpToolRefs(agentId: AgentId, text: string): string[] {
  * never learns about one that is. `toolNames` comes straight back from
  * `startMcpHttpServer`, i.e. the list the server registered rather than a
  * second derivation of it, so there is nothing to keep in sync.
+ *
+ * WARNS rather than throws, and that is deliberate. The prompt embeds
+ * customer-authored text — repo instructions, an issue or PR body — so a
+ * customer who merely WRITES a prefixed token controls this predicate. Throwing
+ * handed them a way to fail every run on their repo, which is what happened to
+ * `arcainc/arca` on 0.1.56. A drift check that aborts a customer run is the
+ * same mistake 0.1.54 made; the drift still has to be visible, so it is logged.
  */
-export function assertPromptToolRefs(params: {
+export function findDanglingPromptToolRefs(params: {
   agentId: AgentId;
   prompt: string;
   toolNames: string[];
-}): void {
+}): string[] {
   const registered = new Set(params.toolNames);
-  const dangling = [...new Set(extractMcpToolRefs(params.agentId, params.prompt))]
+  return [...new Set(extractMcpToolRefs(params.agentId, params.prompt))]
     .filter((name) => !registered.has(name))
     .sort();
-  if (dangling.length === 0) return;
-  throw new Error(
-    `prompt advertises ${dangling.length} tool(s) the MCP server did not register: ${dangling.join(", ")}. ` +
-      `registered: ${[...registered].sort().join(", ")}`
-  );
 }
 
 // reasoning effort lives in effort.ts — see wiki/effort.md

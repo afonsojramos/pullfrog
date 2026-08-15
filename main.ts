@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { detect } from "package-manager-detector";
 import { agents } from "./agents/index.ts";
 import { subagentDeniedToolNames } from "./agents/subagentToolGates.ts";
-import { assertPromptToolRefs } from "./external.ts";
+import { findDanglingPromptToolRefs } from "./external.ts";
 import { reportProgress } from "./mcp/comment.ts";
 import { startInstallation } from "./mcp/dependencies.ts";
 import { startMcpHttpServer, type ToolContext } from "./mcp/server.ts";
@@ -712,11 +712,20 @@ export async function main(): Promise<MainResult> {
     });
     // the prompt and the tool registry are decided in different files off
     // overlapping conditions; this is what stops them disagreeing silently.
-    assertPromptToolRefs({
+    // WARNS, never throws: the prompt embeds customer-authored text (repo
+    // instructions, an issue body), so a customer who merely writes a prefixed
+    // token controls this predicate — throwing let them fail every run on their
+    // own repo (`arcainc/arca`, 0.1.56).
+    const danglingToolRefs = findDanglingPromptToolRefs({
       agentId,
       prompt: instructions.full,
       toolNames: mcpHttpServer.toolNames,
     });
+    if (danglingToolRefs.length > 0) {
+      log.warning(
+        `» prompt advertises ${danglingToolRefs.length} tool(s) the MCP server did not register: ${danglingToolRefs.join(", ")}`
+      );
+    }
     const logParts = [
       instructions.eventInstructions
         ? `EVENT-LEVEL INSTRUCTIONS:\n${instructions.eventInstructions}`
