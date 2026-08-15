@@ -105,7 +105,8 @@ describe("validateAgentApiKey — opencode", () => {
     ).toThrow("couldn't load your Pullfrog secrets");
   });
 
-  it("passes the auto-select path when the authorized set is non-empty", () => {
+  it("passes the auto-select path when an authorized model's key is present", () => {
+    process.env.OPENCODE_API_KEY = "sk-test";
     expect(() =>
       validateAgentApiKey({
         agent: opencode,
@@ -115,6 +116,50 @@ describe("validateAgentApiKey — opencode", () => {
         name,
       })
     ).not.toThrow();
+  });
+
+  // opencode lists Zen's free models with no key at all, so a non-empty catalog
+  // used to wave through runs that had nothing to authenticate with — they then
+  // died at the provider on a bare `Missing Authentication header`.
+  it("throws the auto-select path when the catalog is non-empty but unauthenticated", () => {
+    expect(() =>
+      validateAgentApiKey({
+        agent: opencode,
+        model: undefined,
+        authorized: new Set(["opencode/big-pickle"]),
+        owner,
+        name,
+      })
+    ).toThrow("no API key found");
+  });
+
+  // `openai` is the one provider whose credential can live in
+  // `managedCredentials`, so a `pullfrog auth codex` run has no OPENAI_API_KEY
+  // and must not read as unservable.
+  it("counts a managed credential as auth on the auto-select path", () => {
+    process.env.CODEX_AUTH_JSON = '{"tokens":{}}';
+    expect(() =>
+      validateAgentApiKey({
+        agent: opencode,
+        model: undefined,
+        authorized: new Set(["openai/gpt-5.6-sol"]),
+        owner,
+        name,
+      })
+    ).not.toThrow();
+  });
+
+  it("surfaces the Router-unfunded copy on the auto-select path", () => {
+    expect(() =>
+      validateAgentApiKey({
+        agent: opencode,
+        model: undefined,
+        authorized: new Set(["opencode/big-pickle"]),
+        owner,
+        name,
+        routerUnfunded: true,
+      })
+    ).toThrow("your Pullfrog Router balance is empty");
   });
 
   it("throws the auto-select path when the authorized set is empty", () => {

@@ -53,9 +53,11 @@ export const test: TestRunnerOptions = {
     AWS_ACCESS_KEY_ID: "",
     AWS_SECRET_ACCESS_KEY: "",
     BEDROCK_MODEL_ID: "",
-    // configure a model that requires a BYOK key — the validation only
-    // throws when there's a configured model whose provider key is
-    // absent, so we have to pin one.
+    // configure a model that requires a BYOK key, so the error names a model
+    // and its exact env var — that naming is what this fixture asserts. the
+    // no-model path also refuses now (an unauthenticated opencode catalog no
+    // longer counts as a credential), but with the generic "any provider key"
+    // copy, which these validators don't match.
     PULLFROG_MODEL: "moonshotai/kimi-k2",
   },
   tags: ["agnostic"],

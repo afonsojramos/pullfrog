@@ -1,6 +1,7 @@
 import {
   BEDROCK_MODEL_ID_ENV,
   getModelEnvVars,
+  getModelManagedCredentials,
   OPENAI_COMPATIBLE_API_KEY_ENV,
   OPENAI_COMPATIBLE_BASE_URL_ENV,
   OPENAI_COMPATIBLE_CONTEXT_ENV,
@@ -214,6 +215,26 @@ function hasEnvVar(name: string): boolean {
   return typeof value === "string" && value.length > 0;
 }
 
+/**
+ * Whether this run actually holds a credential that can serve `model`.
+ * Managed credentials count: `openai` carries `CODEX_AUTH_JSON`, so a run
+ * authenticated by `pullfrog auth codex` has no `OPENAI_API_KEY` and would
+ * otherwise read as unservable on every `openai/*` entry. A model with no
+ * declared credential at all (off-registry provider) stays eligible rather
+ * than being refused on our own ignorance.
+ *
+ * Private on purpose. `autoSelectModel`'s `servable` looks like a duplicate
+ * but asks a stricter question — "may I PIN this alias?" — and must stay
+ * conservative about managed credentials: Codex eligibility is a separate
+ * upstream allow list that `opencode models` doesn't honor, so a
+ * `CODEX_AUTH_JSON` run is better left to opencode's own pick than handed
+ * `openai/gpt-5.6-sol`. Don't widen this to share it with the picker.
+ */
+function modelHasRuntimeAuth(model: string): boolean {
+  const authVars = [...getModelEnvVars(model), ...getModelManagedCredentials(model)];
+  return authVars.length === 0 || authVars.some(hasEnvVar);
+}
+
 /** the token limits are numbers, so presence isn't enough — `128k` must fail here. */
 function hasPositiveNumberEnvVar(name: string): boolean {
   return Number(process.env[name]) > 0;
@@ -367,7 +388,15 @@ export function validateAgentApiKey(params: {
 
   // no model configured (auto-select path).
   if (params.agent.name === "opencode") {
-    if (params.authorized.size > 0) return;
+    // a non-empty catalog is NOT proof of a credential: opencode lists Zen's
+    // free models with no key at all, so `size > 0` waved through exactly the
+    // runs that had nothing to authenticate with, and `autoSelectModel` then
+    // handed the pick to opencode, which died at the provider with a bare
+    // `Missing Authentication header`. require what the configured-model branch
+    // above requires — a model whose own env var is actually set. an
+    // off-registry provider yields `[]` and stays eligible, so a key we don't
+    // catalog still passes.
+    if ([...params.authorized].some(modelHasRuntimeAuth)) return;
     // same reasoning as the configured-model branch above: an unloadable repo
     // config empties the model set, and it is the likelier cause here too.
     const reason = getModelsFailure();
