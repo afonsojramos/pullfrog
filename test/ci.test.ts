@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { agents } from "../agents/index.ts";
 import type { WorkflowPermissions } from "../external.ts";
-import { OPENAI_COMPATIBLE_PROVIDER, providers } from "../models.ts";
+import { AZURE_PROVIDER, OPENAI_COMPATIBLE_PROVIDER, providers } from "../models.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const actionDir = join(__dirname, "..");
@@ -58,11 +58,16 @@ const agnosticTests = getTestNamesFromDir("agnostic");
 const adhocTests = getTestNamesFromDir("adhoc");
 
 // all provider API key names + managed credentials (e.g. Codex auth blob)
-// + GITHUB_TOKEN + model overrides. the openai-compatible provider carries no
-// Pullfrog-managed key, so there's nothing to wire into the CI env blocks —
-// exclude it. bedrock/vertex are routing too but CI-wired with real test creds.
+// + GITHUB_TOKEN + model overrides. openai-compatible and azure point at a
+// backend only the customer has, so we hold no credential to wire into the CI
+// env blocks — exclude them. bedrock/vertex are routing too but CI-wired with
+// real test creds.
+const UNTESTABLE_ROUTING: ReadonlySet<string> = new Set([
+  OPENAI_COMPATIBLE_PROVIDER,
+  AZURE_PROVIDER,
+]);
 const isUncatalogedByokProvider = (p: (typeof providers)[keyof typeof providers]) =>
-  Object.values(p.models).every((m) => m.routing === OPENAI_COMPATIBLE_PROVIDER);
+  Object.values(p.models).every((m) => m.routing && UNTESTABLE_ROUTING.has(m.routing));
 const expectedAgentEnvVars = [
   "GITHUB_TOKEN",
   ...new Set(

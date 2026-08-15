@@ -7,6 +7,10 @@
 // silently-broken fallback.
 
 import {
+  AZURE_CONTEXT_ENV,
+  AZURE_MAX_OUTPUT_ENV,
+  AZURE_PROVIDER,
+  AZURE_USE_CHAT_COMPLETIONS_ENV,
   getModelEnvVars,
   modelAliases,
   OPENAI_COMPATIBLE_API_KEY_ENV,
@@ -45,6 +49,12 @@ interface OpenAICompatibleProviderEntry {
 interface ModelLimit {
   context: number;
   output: number;
+}
+
+/** azure needs no `npm` — opencode's native provider supplies it. */
+interface AzureProviderEntry {
+  options: { useCompletionUrls: boolean };
+  models: Record<string, { name: string; limit: ModelLimit }>;
 }
 
 /**
@@ -90,6 +100,47 @@ export function openAICompatibleProvider(
         apiKey: process.env[OPENAI_COMPATIBLE_API_KEY_ENV],
       },
       models: { [modelId]: { name: modelId, limit: openAICompatibleLimit() } },
+    },
+  };
+}
+
+/**
+ * Azure model block for OPENCODE_CONFIG_CONTENT. Unlike openai-compatible this
+ * does NOT declare a provider — opencode has a native `azure` one and the env
+ * loop already enables it. What it declares is the MODEL, because opencode
+ * resolves `azure/<deployment>` by looking the id up in the provider's catalog
+ * (`Provider.getModel` → `provider.models[modelID]`) and throws
+ * `ProviderModelNotFoundError` when it misses. A deployment name is chosen by
+ * whoever created the deployment, so it is absent from that catalog unless it
+ * happens to match a models.dev azure id — measured against opencode-ai@1.18.5:
+ * `azure/prod-reasoning` throws, and the same run with this block resolves and
+ * reaches the network. The limits come from env for the same reason
+ * openai-compatible's do; `validateAzureSetup` guarantees they parse.
+ */
+export function azureProvider(model: string | undefined): Record<string, AzureProviderEntry> {
+  const prefix = `${AZURE_PROVIDER}/`;
+  if (!model?.startsWith(prefix)) return {};
+  const deployment = model.slice(prefix.length);
+  // opencode calls `sdk.responses(modelID)` unless `useCompletionUrls` is set, so
+  // a deployment serving a pre-Responses model (gpt-4, gpt-35-turbo) needs this
+  // to speak the dialect Azure will actually answer.
+  return {
+    [AZURE_PROVIDER]: {
+      // always sent: opencode reads it as `Boolean(options?.useCompletionUrls)`,
+      // so `false` and absent are the same, and the deep merge keeps the native
+      // loader's `resourceName` either way.
+      options: {
+        useCompletionUrls: process.env[AZURE_USE_CHAT_COMPLETIONS_ENV]?.trim() === "true",
+      },
+      models: {
+        [deployment]: {
+          name: deployment,
+          limit: {
+            context: Number(process.env[AZURE_CONTEXT_ENV]),
+            output: Number(process.env[AZURE_MAX_OUTPUT_ENV]),
+          },
+        },
+      },
     },
   };
 }

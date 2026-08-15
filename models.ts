@@ -24,8 +24,16 @@ import { type EffortPosition, resolveRung } from "./effort.ts";
  * routing slugs, not model aliases: the harness reads the backend-specific
  * env var and routes to claude-code for Anthropic IDs or opencode for
  * everything else.
+ *
+ * `"azure"` is the same shape for a different reason. models.dev DOES carry an
+ * Azure catalog, but the id it lists is sent to Azure as the DEPLOYMENT NAME,
+ * and a deployment is named by whoever created it — so cataloging `azure/gpt-5`
+ * would only work for customers who kept the portal's default name. the
+ * deployment comes from `AZURE_DEPLOYMENT` instead. unlike bedrock/vertex it
+ * resolves to a provider-PREFIXED specifier (`azure/<deployment>`), matching
+ * openai-compatible, because `azure` is a real opencode provider id.
  */
-export type ModelRouting = "bedrock" | "vertex" | "openai-compatible";
+export type ModelRouting = "bedrock" | "vertex" | "openai-compatible" | "azure";
 
 export interface ModelAlias {
   /** stable alias stored in DB, e.g. "anthropic/claude-opus" */
@@ -597,6 +605,22 @@ export const providers = {
       },
     },
   }),
+  azure: provider({
+    displayName: "Azure OpenAI",
+    // the resource name is half the endpoint URL and the deployment is the model
+    // id, so both are as load-bearing as the key. only the key is sensitive.
+    envVars: ["AZURE_API_KEY", "AZURE_RESOURCE_NAME", "AZURE_DEPLOYMENT"],
+    models: {
+      // single routing entry — the real model is the customer's deployment name,
+      // read from AZURE_DEPLOYMENT at run time. see ModelRouting docs for why
+      // Azure can't be cataloged even though models.dev lists it.
+      byok: {
+        displayName: "Azure OpenAI",
+        resolve: "azure",
+        routing: "azure",
+      },
+    },
+  }),
   "openai-compatible": provider({
     // "Custom" is the picker group, "OpenAI-compatible" the entry under it, so the
     // menu reads `Custom › OpenAI-compatible` and a second custom backend (a
@@ -1148,6 +1172,39 @@ export const BEDROCK_MODEL_ID_ENV = "BEDROCK_MODEL_ID";
 
 /** env var that supplies the Vertex AI model ID for the `vertex/byok` slug. */
 export const VERTEX_MODEL_ID_ENV = "VERTEX_MODEL_ID";
+
+/** provider key + slug prefix for the Azure OpenAI BYOK backend. matches opencode's own provider id. */
+export const AZURE_PROVIDER = "azure";
+/** resource name in the endpoint `https://<name>.openai.azure.com` — plain config, not a credential. */
+export const AZURE_RESOURCE_NAME_ENV = "AZURE_RESOURCE_NAME";
+/** API key for the Azure OpenAI resource — the one sensitive value. */
+export const AZURE_API_KEY_ENV = "AZURE_API_KEY";
+/**
+ * the customer's Azure deployment name, supplied for the `azure/byok` slug.
+ * Azure takes the deployment name where every other provider takes a model id
+ * (`@ai-sdk/azure` types the argument `deploymentId`), and the name is whatever
+ * its creator typed — which is why Azure gets a routing slug instead of the
+ * catalog entries models.dev publishes for it.
+ */
+export const AZURE_DEPLOYMENT_ENV = "AZURE_DEPLOYMENT";
+/**
+ * context-window size of the model behind the deployment. required for the same
+ * reason as its `OPENAI_COMPATIBLE_*` twin: opencode holds no metadata for a
+ * deployment name, and an undeclared limit both caps completions at 32000 and
+ * disables auto-compaction. see `azureProvider()` in agents/opencodeShared.ts.
+ */
+export const AZURE_CONTEXT_ENV = "AZURE_CONTEXT";
+/** max completion tokens the model behind the deployment accepts. required. */
+export const AZURE_MAX_OUTPUT_ENV = "AZURE_MAX_OUTPUT";
+/**
+ * opt this deployment into Chat Completions. opencode's azure loader calls
+ * `sdk.responses(modelID)` unless its `useCompletionUrls` option is set
+ * (`selectAzureLanguageModel`), so a deployment serving a model that predates
+ * Azure's Responses API — gpt-4, gpt-35-turbo — fails on the wire dialect
+ * rather than on anything we control. optional, and the only value here that
+ * isn't required.
+ */
+export const AZURE_USE_CHAT_COMPLETIONS_ENV = "AZURE_USE_CHAT_COMPLETIONS";
 
 /** provider key + slug prefix for the generic OpenAI-compatible BYOK backend. */
 export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";

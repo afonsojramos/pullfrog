@@ -16,6 +16,7 @@
  */
 
 import {
+  AZURE_PROVIDER,
   isOssAllowedModel,
   OPENAI_COMPATIBLE_PROVIDER,
   ossFundedModelNames,
@@ -58,17 +59,19 @@ export function decideModelAccess(input: {
   if (!input.modelExplicit || !input.model) return { kind: "ok" };
 
   // raw routing slugs (bedrock/vertex — no provider/model slash) and the
-  // openai-compatible backend (provider-prefixed but absent from the opencode
-  // `authorized` snapshot) are validated by their own setup checks. discriminate
-  // openai-compatible on the RESOLVED specifier, matching `validateAgentApiKey`:
-  // both the catalog slug and a raw `openai-compatible/<id>` specifier resolve to
-  // the same prefixed form, so one check covers both and the two gates can't
-  // disagree about what they'll admit.
+  // provider-prefixed backends that are absent from the opencode `authorized`
+  // snapshot (openai-compatible always; azure whenever the deployment name isn't
+  // also a catalog model id) are validated by their own setup checks.
+  // discriminate on the RESOLVED specifier, matching `validateAgentApiKey`: both
+  // the catalog slug and a raw `<provider>/<id>` specifier resolve to the same
+  // prefixed form, so one check covers both and the two gates can't disagree
+  // about what they'll admit.
   const byokAuthorized =
     !!input.resolvedModel &&
     (input.authorized.has(input.resolvedModel) ||
       !input.resolvedModel.includes("/") ||
-      input.resolvedModel.startsWith(`${OPENAI_COMPATIBLE_PROVIDER}/`));
+      input.resolvedModel.startsWith(`${OPENAI_COMPATIBLE_PROVIDER}/`) ||
+      input.resolvedModel.startsWith(`${AZURE_PROVIDER}/`));
 
   if (input.proxyActive) {
     const target = resolveOpenRouterModel(input.model);

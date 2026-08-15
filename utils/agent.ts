@@ -1,6 +1,8 @@
 import type { Agent } from "../agents/index.ts";
 import { agents } from "../agents/index.ts";
 import {
+  AZURE_DEPLOYMENT_ENV,
+  AZURE_PROVIDER,
   BEDROCK_MODEL_ID_ENV,
   getModelProvider,
   isBedrockAnthropicId,
@@ -65,6 +67,18 @@ function resolveSlug(slug: string): string | undefined {
       );
     }
     return vertexId;
+  }
+  if (alias?.routing === "azure") {
+    const deployment = process.env[AZURE_DEPLOYMENT_ENV]?.trim();
+    if (!deployment) {
+      throw new Error(
+        `${AZURE_DEPLOYMENT_ENV} env var is required when the model is set to "${slug}". ` +
+          `set it to the name of your Azure OpenAI deployment (not the model it serves — ` +
+          `Azure routes on the deployment name). ` +
+          `see https://docs.pullfrog.com/azure for setup.`
+      );
+    }
+    return `${AZURE_PROVIDER}/${deployment}`;
   }
   if (alias?.routing === "openai-compatible") {
     const modelId = process.env[OPENAI_COMPATIBLE_MODEL_ENV]?.trim();

@@ -1,4 +1,10 @@
 import {
+  AZURE_API_KEY_ENV,
+  AZURE_CONTEXT_ENV,
+  AZURE_DEPLOYMENT_ENV,
+  AZURE_MAX_OUTPUT_ENV,
+  AZURE_PROVIDER,
+  AZURE_RESOURCE_NAME_ENV,
   BEDROCK_MODEL_ID_ENV,
   getModelEnvVars,
   getModelManagedCredentials,
@@ -210,6 +216,31 @@ auto-compaction is disabled, so long runs grow until your endpoint refuses them.
 for full setup instructions, see https://docs.pullfrog.com/openai-compatible`;
 }
 
+function buildAzureSetupError(params: { owner: string; name: string; missing: string[] }): string {
+  const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
+
+  return `Azure OpenAI selected but required configuration is missing: ${params.missing.join(", ")}.
+
+only the API key is sensitive — add it as a secret at ${githubSecretsUrl}. the rest is plain workflow \`env:\`:
+
+  ${AZURE_RESOURCE_NAME_ENV}: <name>
+  ${AZURE_API_KEY_ENV}: \${{ secrets.${AZURE_API_KEY_ENV} }}
+  ${AZURE_DEPLOYMENT_ENV}: <deployment-name>
+  ${AZURE_CONTEXT_ENV}: "400000"
+  ${AZURE_MAX_OUTPUT_ENV}: "128000"
+
+${AZURE_RESOURCE_NAME_ENV} is the \`<name>\` in your endpoint https://<name>.openai.azure.com.
+${AZURE_DEPLOYMENT_ENV} is the name of the deployment, which is not necessarily the name of
+the model it serves — Azure routes on the deployment name.
+
+set the last two to the real limits of whichever model your deployment serves. Pullfrog can't
+discover them — a deployment name carries no catalog metadata — and without them completions
+are capped at 32000 tokens (rejected outright by models with a smaller cap) and auto-compaction
+is disabled, so long runs grow until Azure refuses them.
+
+for full setup instructions, see https://docs.pullfrog.com/azure`;
+}
+
 function hasEnvVar(name: string): boolean {
   const value = process.env[name];
   return typeof value === "string" && value.length > 0;
@@ -257,6 +288,22 @@ function validateOpenAICompatibleSetup(params: { owner: string; name: string }):
     throw new Error(
       buildOpenAICompatibleSetupError({ owner: params.owner, name: params.name, missing })
     );
+  }
+}
+
+function validateAzureSetup(params: { owner: string; name: string }): void {
+  const missing: string[] = [];
+  if (!hasEnvVar(AZURE_API_KEY_ENV)) missing.push(AZURE_API_KEY_ENV);
+  if (!hasEnvVar(AZURE_RESOURCE_NAME_ENV)) missing.push(AZURE_RESOURCE_NAME_ENV);
+  if (!hasEnvVar(AZURE_DEPLOYMENT_ENV)) missing.push(AZURE_DEPLOYMENT_ENV);
+  // required for the same reason openai-compatible requires its pair: a deployment
+  // name carries no catalog metadata, so `azureProvider()` has to declare the
+  // limits itself or opencode falls back to 32000 max_tokens with no compaction.
+  if (!hasPositiveNumberEnvVar(AZURE_CONTEXT_ENV)) missing.push(AZURE_CONTEXT_ENV);
+  if (!hasPositiveNumberEnvVar(AZURE_MAX_OUTPUT_ENV)) missing.push(AZURE_MAX_OUTPUT_ENV);
+
+  if (missing.length > 0) {
+    throw new Error(buildAzureSetupError({ owner: params.owner, name: params.name, missing }));
   }
 }
 
@@ -333,6 +380,15 @@ export function validateAgentApiKey(params: {
     // validate the env-supplied base URL / key / model directly.
     if (params.model.startsWith(`${OPENAI_COMPATIBLE_PROVIDER}/`)) {
       validateOpenAICompatibleSetup({ owner: params.owner, name: params.name });
+      return;
+    }
+
+    // azure resolves to `azure/<deployment>`, and a deployment name that isn't
+    // also a models.dev azure model id is absent from the `authorized` snapshot
+    // however correct the credentials are — so the prefix check has to precede
+    // it, same as openai-compatible above.
+    if (params.model.startsWith(`${AZURE_PROVIDER}/`)) {
+      validateAzureSetup({ owner: params.owner, name: params.name });
       return;
     }
 

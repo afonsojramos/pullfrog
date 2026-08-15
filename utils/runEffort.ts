@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_EFFORT_POSITION, type EffortPosition, rungPosition } from "../effort.ts";
-import { type ModelAlias, modelAliases, resolveModelRung } from "../models.ts";
+import { AZURE_PROVIDER, type ModelAlias, modelAliases, resolveModelRung } from "../models.ts";
 import type { ResolvedPayload } from "./payload.ts";
 
 export interface RunEffort {
@@ -67,6 +67,12 @@ function resolveRunAlias(ctx: {
 
   const model = ctx.resolvedModel;
   if (!model) return undefined;
+  // an azure deployment name is chosen by whoever created the deployment, so it
+  // says nothing about whether opencode can place the model behind it —
+  // `my-claude-opus-5-prod` would pass the hosted match while being absent from
+  // opencode's azure catalog, and sending a variant for a model it can't place
+  // hangs the run to its job timeout. see wiki/effort.md.
+  if (model.startsWith(`${AZURE_PROVIDER}/`)) return undefined;
   // routing slugs (`bedrock/byok`, `vertex/byok`) resolve to a customer-supplied
   // backend ID rather than a catalog target, so those fall to the hosted match.
   return (

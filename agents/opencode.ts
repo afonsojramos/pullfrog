@@ -90,6 +90,7 @@ import {
 } from "./opencodePlugin.ts";
 import {
   autoSelectModel,
+  azureProvider,
   buildReviewerAgentConfig,
   installOpencodeCli,
   kimiOpenRouterProviderOverrides,
@@ -149,6 +150,7 @@ function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): s
     provider: {
       openrouter: { models: kimiOpenRouterProviderOverrides() },
       ...openAICompatibleProvider(model),
+      ...azureProvider(model),
     },
   };
 
