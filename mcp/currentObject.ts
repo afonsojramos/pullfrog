@@ -16,6 +16,10 @@ import { execute, tool } from "./shared.ts";
  * The authorship half matters because a non-collaborator commenting
  * `@pullfrog close this` on someone ELSE's issue has no such authority — the
  * naive "is it the current object?" check would grant it.
+ *
+ * The REFUSAL branch is the security-relevant one, so it is the one an e2e run
+ * has to exercise. Confirming the tool merely appears in the agent's tool list
+ * proves registration, not authority.
  */
 async function resolveCurrentObject(ctx: ToolContext) {
   const issueNumber = ctx.payload.event.issue_number;

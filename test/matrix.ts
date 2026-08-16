@@ -82,17 +82,23 @@ function extractStringArray(source: string, key: string): string[] | undefined {
   return extractStringLiterals(m[1]);
 }
 
-function parseTestFile(source: string): ParsedTest | null {
+function parseTestFile(source: string, selfPath: string): ParsedTest | null {
   // strip line comments — `//` inside string literals is rare in test files,
   // and the static parser doesn't need to be perfect (defensive default of
   // "missing coverage = always run" covers parse misses).
   const stripped = source.replace(/\/\/[^\n]*$/gm, "");
   const nameMatch = stripped.match(/^\s+name:\s*"([^"]+)"/m);
   if (!nameMatch) return null;
+  const declared = extractStringArray(stripped, "coverage");
   return {
     name: nameMatch[1],
     agents: extractStringArray(stripped, "agents"),
-    coverage: extractStringArray(stripped, "coverage"),
+    // a test whose OWN file changed must always run. `coverage` globs name the
+    // SOURCE a test protects, so editing only the fixture, a probe or the
+    // validator matched nothing and the matrix skipped the very test being
+    // changed — CI then reported green having never executed it. left undefined
+    // when nothing is declared, since that already means "always run".
+    coverage: declared?.length ? [...declared, selfPath] : declared,
   };
 }
 
@@ -103,7 +109,7 @@ function loadDir(dir: string): ParsedTest[] {
   const out: ParsedTest[] = [];
   for (const file of files) {
     const source = readFileSync(join(dirPath, file), "utf8");
-    const parsed = parseTestFile(source);
+    const parsed = parseTestFile(source, `action/test/${dir}/${file}`);
     if (parsed) out.push(parsed);
   }
   return out;
