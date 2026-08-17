@@ -1212,6 +1212,7 @@ export const opencode = agent({
           apiToken: ctx.apiToken,
           authPath: codexAuth.authPath,
           originalRefresh: codexAuth.originalRefresh,
+          originalIdToken: codexAuth.originalIdToken,
         })
       );
     }

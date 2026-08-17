@@ -25,6 +25,12 @@ function hasClaudeCodeAuth(): boolean {
   return hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN") || hasEnvVar("ANTHROPIC_API_KEY");
 }
 
+/** either credential the codex CLI can run on: the ChatGPT-subscription blob
+ * `pullfrog auth codex` stores, or a plain OpenAI API key. */
+function hasCodexAuth(): boolean {
+  return hasEnvVar("CODEX_AUTH_JSON") || hasEnvVar("OPENAI_API_KEY");
+}
+
 function hasBedrockAuth(): boolean {
   return (
     hasEnvVar("AWS_BEARER_TOKEN_BEDROCK") ||
@@ -135,8 +141,22 @@ export function resolveModel(ctx: { slug?: string | undefined }): string | undef
   return undefined;
 }
 
-export function resolveAgent(ctx: { model?: string | undefined }): Agent {
-  // 1. explicit env var override (escape hatch)
+export function resolveAgent(ctx: {
+  model?: string | undefined;
+  /** set on router / OSS runs, where the model is served by OpenRouter. those
+   * pin no `model`, so without this the auto-select branches below would read
+   * a stored Anthropic or OpenAI credential as the routing signal for a run
+   * that isn't using it. */
+  proxyModel?: string | undefined;
+  /** the account opted in to the EXPERIMENTAL codex harness, already ANDed
+   * server-side with the global kill switch. false — the default for every
+   * account — routes OpenAI models to opencode exactly as before the harness
+   * existed. see wiki/codex-agent.md. */
+  codexAgent?: boolean | undefined;
+}): Agent {
+  // 1. explicit env var override (escape hatch). deliberately NOT gated on the
+  //    opt-in: an operator who sets PULLFROG_AGENT in their own workflow is
+  //    asking for a specific harness, which is what the escape hatch is for.
   const envAgent = process.env.PULLFROG_AGENT?.trim();
   if (envAgent) {
     if (envAgent in agents) {
@@ -145,7 +165,10 @@ export function resolveAgent(ctx: { model?: string | undefined }): Agent {
     log.warning(`» unknown PULLFROG_AGENT="${envAgent}" — falling through to auto-select`);
   }
 
-  // 2. Bedrock routing: when BEDROCK_MODEL_ID is the resolved model, route
+  // 2. proxy runs are OpenRouter-served; only opencode speaks that provider.
+  if (ctx.proxyModel) return agents.opencode;
+
+  // 3. Bedrock routing: when BEDROCK_MODEL_ID is the resolved model, route
   //    Anthropic IDs through claude-code (which supports Bedrock natively
   //    once CLAUDE_CODE_USE_BEDROCK=1) and everything else through opencode's
   //    `amazon-bedrock` provider.
@@ -153,25 +176,34 @@ export function resolveAgent(ctx: { model?: string | undefined }): Agent {
     return isBedrockAnthropicId(ctx.model) ? agents.claude : agents.opencode;
   }
 
-  // 3. Vertex routing: same shape as Bedrock, but Anthropic Vertex IDs are
+  // 4. Vertex routing: same shape as Bedrock, but Anthropic Vertex IDs are
   //    anchored `claude-*` IDs and non-Anthropic models use opencode's
   //    `google-vertex` provider.
   if (ctx.model && hasVertexAuth() && process.env[VERTEX_MODEL_ID_ENV]?.trim() === ctx.model) {
     return isVertexAnthropicId(ctx.model) ? agents.claude : agents.opencode;
   }
 
-  // 4. if model is Anthropic and Claude Code credentials are available, use Claude Code
+  // 5. each vendor's own harness wins for its own models when the matching
+  //    credential is present — claude-code for Anthropic, codex for OpenAI.
   if (ctx.model) {
     try {
       const provider = getModelProvider(ctx.model);
-      if (provider === "anthropic" && hasClaudeCodeAuth()) {
-        return agents.claude;
-      }
+      if (provider === "anthropic" && hasClaudeCodeAuth()) return agents.claude;
+      if (provider === "openai" && ctx.codexAgent && hasCodexAuth()) return agents.codex;
     } catch {
       // invalid model format — fall through
     }
   }
 
-  // 5. default: OpenCode (universal, supports all providers)
+  // 6. auto-select with no configured model: a Codex/OpenAI credential picks
+  //    the codex harness, unless an Anthropic one is also present — that case
+  //    stays on opencode, whose `autoSelectModel` ranks the available models
+  //    across providers rather than guessing from whichever env var we tested
+  //    first.
+  if (!ctx.model && ctx.codexAgent && hasCodexAuth() && !hasClaudeCodeAuth()) {
+    return agents.codex;
+  }
+
+  // 7. default: OpenCode (universal, supports all providers)
   return agents.opencode;
 }

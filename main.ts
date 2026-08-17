@@ -452,7 +452,11 @@ export async function main(): Promise<MainResult> {
 
     vertexCredentials = materializeVertexCredentials({ model: resolvedModel });
 
-    const agent = resolveAgent({ model: resolvedModel });
+    const agent = resolveAgent({
+      model: resolvedModel,
+      proxyModel: payload.proxyModel,
+      codexAgent: runContext.repoSettings.codexAgent,
+    });
 
     // agent-agnostic best-effort for the model that ran: proxy spec for
     // router/oss runs, else the resolved model, else the slug.

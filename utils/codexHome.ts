@@ -53,7 +53,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { log } from "./cli.ts";
-import { decodeJwtExpMs, parseCodexAuthBody } from "./codexOAuth.ts";
+import {
+  type CodexAuthBody,
+  decodeJwtExpMs,
+  parseCodexAuthBody,
+  stringifyCodexAuthBody,
+} from "./codexOAuth.ts";
 
 const CODEX_AUTH_ENV = "CODEX_AUTH_JSON";
 
@@ -76,6 +81,21 @@ interface OpenCodeAuthFile {
   };
 }
 
+/** the server latches `refresh_rejected_at` when OpenAI rejects the refresh —
+ * the rotation is one-shot, so a rejection is PERMANENT until the user re-runs
+ * `pullfrog auth codex` (see utils/codexSecretRotation.ts and #1101). the
+ * latched blob still reaches the runner, and materializing it buys nothing: it
+ * dies at the first model call, having already displaced an `OPENAI_API_KEY`
+ * that would have served the run. */
+function isRejectedChain(body: CodexAuthBody): boolean {
+  if (!body.refresh_rejected_at) return false;
+  log.warning(
+    `» ${CODEX_AUTH_ENV} was rejected by OpenAI at ${body.refresh_rejected_at} and cannot be ` +
+      `refreshed — re-run \`npx pullfrog auth codex\`. skipping it for this run.`
+  );
+  return true;
+}
+
 export interface InstalledCodexAuth {
   /** absolute path of the auth.json we wrote — caller passes this to the
    * post-hook via core.saveState for refresh-detection later. */
@@ -87,6 +107,12 @@ export interface InstalledCodexAuth {
    * OpenCode refreshed during the session (only happens on long runs
    * that span >50min — see wiki/codex-auth.md "Concurrency"). */
   originalRefresh: string;
+  /** id_token from the env at materialization time. OpenCode's auth file has
+   * no slot for it, so the post-hook has to re-attach this one or the written
+   * back blob loses it — and the Codex CLI REFUSES an auth.json without
+   * `tokens.id_token` (measured: `missing field 'id_token'`), so dropping it
+   * silently disqualifies the account from the codex harness forever. */
+  originalIdToken: string | undefined;
 }
 
 /** materialize CODEX_AUTH_JSON from env into a disk path OpenCode reads from.
@@ -106,6 +132,7 @@ export function installCodexAuth(): InstalledCodexAuth | null {
     log.warning(`» ${CODEX_AUTH_ENV} present but malformed; ignoring`);
     return null;
   }
+  if (isRejectedChain(body)) return null;
 
   // decode the access_token's JWT exp so opencode trusts the token until
   // its real expiry (no need to refresh on first request). null exp ->
@@ -142,7 +169,58 @@ export function installCodexAuth(): InstalledCodexAuth | null {
     authPath,
     xdgDataHome,
     originalRefresh: body.tokens.refresh_token,
+    originalIdToken: body.tokens.id_token,
   };
+}
+
+export interface InstalledCodexHome {
+  /** value to set as CODEX_HOME for the codex subprocess. holds auth.json,
+   * config.toml and the session rollouts the resume path reads. */
+  codexHome: string;
+  /** absolute path of the auth.json we wrote. the codex CLI rewrites this file
+   * in place when it refreshes, so the post-hook diffs it for a rotation. */
+  authPath: string;
+  originalRefresh: string;
+}
+
+/**
+ * materialize CODEX_AUTH_JSON into a CODEX_HOME the codex CLI reads directly.
+ * unlike {@link installCodexAuth} there is no shape conversion — the stored
+ * blob IS the codex CLI's own `auth.json`, so it round-trips verbatim.
+ *
+ * returns null when the env var is absent, malformed, or carries no
+ * `tokens.id_token`. that last one is not defensive: the CLI's `TokenData`
+ * makes `id_token` a required field with a JWT deserializer, so an auth.json
+ * without it fails to load with `missing field 'id_token'` before any model
+ * call. callers treat null as "codex CLI can't use this credential".
+ */
+export function installCodexHome(): InstalledCodexHome | null {
+  const raw = process.env[CODEX_AUTH_ENV];
+  if (!raw) return null;
+
+  const body = parseCodexAuthBody(raw);
+  if (!body) {
+    log.warning(`» ${CODEX_AUTH_ENV} present but malformed; ignoring`);
+    return null;
+  }
+  if (isRejectedChain(body)) return null;
+  if (!body.tokens.id_token) {
+    log.warning(
+      `» ${CODEX_AUTH_ENV} carries no id_token — the codex CLI cannot load it. ` +
+        `re-run \`npx pullfrog auth codex\` to mint a complete credential.`
+    );
+    return null;
+  }
+
+  const codexHome = join(resolveDataHome(), "codex");
+  const authPath = join(codexHome, "auth.json");
+
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(authPath, stringifyCodexAuthBody(body), { mode: 0o600 });
+
+  log.info(`» installed Codex auth at ${authPath}`);
+
+  return { codexHome, authPath, originalRefresh: body.tokens.refresh_token };
 }
 
 /** pick the XDG_DATA_HOME for codex auth.

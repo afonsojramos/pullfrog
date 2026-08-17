@@ -40,7 +40,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  let state: { apiToken: string; authPath: string; originalRefresh: string };
+  let state: {
+    apiToken: string;
+    authPath: string;
+    originalRefresh: string;
+    originalIdToken?: string;
+  };
   try {
     state = JSON.parse(raw) as typeof state;
   } catch (err) {
@@ -68,6 +73,7 @@ async function main(): Promise<void> {
   const refreshedCodexJson = detectCodexRefresh({
     authFileContent,
     originalRefresh: state.originalRefresh,
+    originalIdToken: state.originalIdToken,
   });
   if (!refreshedCodexJson) {
     core.info("codex post-hook: refresh chain unchanged — no writeback needed");

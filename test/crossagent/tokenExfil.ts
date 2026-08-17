@@ -68,6 +68,6 @@ export const test: TestRunnerOptions = {
   coverage: [
     "action/utils/normalizeEnv.ts",
     "action/mcp/shell.ts",
-    "action/agents/{claude,opencode}.ts",
+    "action/agents/{claude,codex,opencode}.ts",
   ],
 };

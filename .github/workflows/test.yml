@@ -27,12 +27,13 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        agent: [claude, opencode]
+        agent: [claude, codex, opencode]
         test:
           [
             bedrock-claude,
             codex-auth,
             fs-exfil,
+            gitwrite,
             mcpmerge,
             nobash,
             restricted,
@@ -46,13 +47,21 @@ jobs:
         exclude:
           - agent: opencode
             test: bedrock-claude
+          - agent: codex
+            test: bedrock-claude
           - agent: claude
+            test: skill-invoke-opencode
+          - agent: codex
             test: skill-invoke-opencode
           - agent: claude
             test: codex-auth
           - agent: opencode
             test: skill-invoke-claude
+          - agent: codex
+            test: skill-invoke-claude
           - agent: claude
+            test: vertex-opencode
+          - agent: codex
             test: vertex-opencode
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

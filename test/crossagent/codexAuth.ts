@@ -104,6 +104,13 @@ export const test: TestRunnerOptions = {
     "action/utils/codexHome.ts",
     "action/utils/codexRefreshDetect.ts",
     "action/entryPost.ts",
+    // opencode ONLY, matching `agents` below. widening this to codex made the
+    // test TRIGGER on codex changes and then run zero codex jobs, since the
+    // runner intersects `agents` with the requested set. adding codex to
+    // `agents` instead would gamble on the Codex backend serving the
+    // `openai/gpt-5.5` pin above, which the comment there deliberately chose
+    // for opencode's allow-list; the codex branch of `detectCodexRefresh` has
+    // unit coverage instead. see wiki/codex-agent.md.
     "action/agents/{opencode}.ts",
   ],
   // forks + contributors without the Codex secret skip cleanly rather than

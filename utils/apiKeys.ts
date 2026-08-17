@@ -341,6 +341,18 @@ function validateVertexSetup(params: { owner: string; name: string }): void {
 }
 
 /**
+ * The single-vendor harnesses each accept one API key or one subscription
+ * credential, so "can this agent authenticate at all" is a two-env-var check.
+ * OpenCode is the exception and answers from its own model introspection.
+ */
+function hasSingleProviderAuth(agentName: string): boolean {
+  if (agentName === "codex") {
+    return hasEnvVar("OPENAI_API_KEY") || hasEnvVar("CODEX_AUTH_JSON");
+  }
+  return hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN");
+}
+
+/**
  * Validate that the resolved model can actually be served by the chosen
  * agent. For routing slugs (Bedrock / Vertex) the auth shape is multi-var
  * (auth + region/location + model-id) and `opencode models` doesn't catch
@@ -429,8 +441,8 @@ export function validateAgentApiKey(params: {
       );
     }
 
-    // claude: single-provider check on the Anthropic auth shapes.
-    if (hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")) return;
+    // claude / codex: single-provider check on that vendor's auth shapes.
+    if (hasSingleProviderAuth(params.agent.name)) return;
     throw new Error(
       buildKeyError({
         owner: params.owner,
@@ -466,7 +478,7 @@ export function validateAgentApiKey(params: {
       })
     );
   }
-  if (hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")) return;
+  if (hasSingleProviderAuth(params.agent.name)) return;
   throw new Error(
     buildKeyError({
       owner: params.owner,

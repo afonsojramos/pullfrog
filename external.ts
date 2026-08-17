@@ -10,17 +10,20 @@ import type { EffortPosition } from "./effort.ts";
 export const pullfrogMcpName = "pullfrog";
 
 /** @see {@link file://./agents/shared.ts} Agent interface that uses this type */
-export type AgentId = "claude" | "opencode";
+export type AgentId = "claude" | "codex" | "opencode";
 
 /**
  * format a tool name the way each agent's MCP client presents it to the model.
  * claude code: mcp__pullfrog__select_mode
+ * codex:       pullfrog__select_mode
  * opencode:    pullfrog_select_mode
  */
 export function formatMcpToolRef(agentId: AgentId, toolName: string): string {
   switch (agentId) {
     case "claude":
       return `mcp__${pullfrogMcpName}__${toolName}`;
+    case "codex":
+      return `${pullfrogMcpName}__${toolName}`;
     case "opencode":
       return `${pullfrogMcpName}_${toolName}`;
     default:

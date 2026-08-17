@@ -42,6 +42,10 @@ export interface RepoSettings {
   // the `isAutonomousMaintenanceEnabled()` kill switch), so the runtime treats it
   // as the final "may auto-merge" verdict. see autoMergeAfterApprove.
   autoMergeEnabled: boolean;
+  // opt-in for the EXPERIMENTAL codex harness, already ANDed server-side with
+  // the `isCodexAgentEnabled()` kill switch — so the runtime treats it as the
+  // final "may route to codex" verdict. see resolveAgent + wiki/codex-agent.md.
+  codexAgent: boolean;
   signedCommits: boolean;
   repoIntelligence: boolean;
   // false suppresses the "Leaping into action..." comment (server-side, before
@@ -121,6 +125,7 @@ const defaultSettings: RepoSettings = {
   shell: "restricted",
   prApproveEnabled: false,
   autoMergeEnabled: false,
+  codexAgent: false,
   signedCommits: false,
   repoIntelligence: false,
   progressComments: true,
