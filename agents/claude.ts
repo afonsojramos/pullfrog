@@ -1278,7 +1278,25 @@ export const claude = agent({
     // wrong about it. Upstream covers what this block never could (a
     // subscription that is the ONLY credential, with no API key to fall back
     // to); this covers the rest.
-    if (env.CLAUDE_CODE_OAUTH_TOKEN && !isBedrockRoute && env.ANTHROPIC_API_KEY) {
+    //
+    // the strip only means anything when the subscription is what the API key
+    // is actually beating. claude-code ranks credentials cloud provider (1) >
+    // `ANTHROPIC_AUTH_TOKEN` (2) > `ANTHROPIC_API_KEY` (3) >
+    // `CLAUDE_CODE_OAUTH_TOKEN` (5) — see
+    // https://code.claude.com/docs/en/authentication#authentication-precedence
+    // — so on a Bedrock or Vertex route, or with an auth token set, deleting the
+    // key hands the run to something ranked above the subscription while the log
+    // claims the subscription is paying. a gateway (`ANTHROPIC_BASE_URL`) is out
+    // for a different reason: the preflight asks api.anthropic.com about a token
+    // the gateway never issued, so a pass is no evidence it accepts it.
+    if (
+      env.CLAUDE_CODE_OAUTH_TOKEN &&
+      !isBedrockRoute &&
+      !isVertexRoute &&
+      !env.ANTHROPIC_BASE_URL &&
+      !env.ANTHROPIC_AUTH_TOKEN &&
+      env.ANTHROPIC_API_KEY
+    ) {
       const preflight = await preflightClaudeSubscription({
         token: env.CLAUDE_CODE_OAUTH_TOKEN,
         model,

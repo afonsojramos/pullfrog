@@ -21,8 +21,16 @@ function hasEnvVar(name: string): boolean {
   return typeof val === "string" && val.length > 0;
 }
 
+/** every credential claude-code can run on, including `ANTHROPIC_AUTH_TOKEN` —
+ * the gateway variable it sends as `Authorization: Bearer`. opencode cannot use
+ * that one, so leaving it out routed a gateway-only run to the harness that had
+ * no way to authenticate it. */
 function hasClaudeCodeAuth(): boolean {
-  return hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN") || hasEnvVar("ANTHROPIC_API_KEY");
+  return (
+    hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN") ||
+    hasEnvVar("ANTHROPIC_API_KEY") ||
+    hasEnvVar("ANTHROPIC_AUTH_TOKEN")
+  );
 }
 
 /** either credential the codex CLI can run on: the ChatGPT-subscription blob
@@ -195,13 +203,22 @@ export function resolveAgent(ctx: {
     }
   }
 
-  // 6. auto-select with no configured model: a Codex/OpenAI credential picks
-  //    the codex harness, unless an Anthropic one is also present — that case
-  //    stays on opencode, whose `autoSelectModel` ranks the available models
-  //    across providers rather than guessing from whichever env var we tested
-  //    first.
-  if (!ctx.model && ctx.codexAgent && hasCodexAuth() && !hasClaudeCodeAuth()) {
-    return agents.codex;
+  // 6. auto-select with no configured model. an account whose ONLY Anthropic
+  //    credential is `ANTHROPIC_AUTH_TOKEN` has to take claude-code: opencode
+  //    cannot use that variable, so `autoSelectModel` would rank a catalog it
+  //    has no way to authenticate and the run dies on a missing key. a plain
+  //    API key stays on opencode, whose ranking across providers beats guessing
+  //    from whichever env var we tested first — which is also why a
+  //    Codex/OpenAI credential yields to any Anthropic one.
+  if (!ctx.model) {
+    if (
+      hasEnvVar("ANTHROPIC_AUTH_TOKEN") &&
+      !hasEnvVar("ANTHROPIC_API_KEY") &&
+      !hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")
+    ) {
+      return agents.claude;
+    }
+    if (ctx.codexAgent && hasCodexAuth() && !hasClaudeCodeAuth()) return agents.codex;
   }
 
   // 7. default: OpenCode (universal, supports all providers)

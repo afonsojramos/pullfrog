@@ -35,6 +35,19 @@ function hasEnvVar(name: string): boolean {
 }
 
 /**
+ * Credentials whose provider host the user can re-point, and the env var that
+ * does it. Claude Code honors `ANTHROPIC_BASE_URL` (see `docs/keys.mdx`), so
+ * under a gateway both Anthropic credentials are sent somewhere api.anthropic.com
+ * knows nothing about — asking it either way answers a question we didn't ask.
+ * Read here rather than in `credentialCheck.ts`, which also runs on a Vercel
+ * lambda and in the CLI, where a host-set base URL means nothing.
+ */
+const HOST_OVERRIDES: Record<string, string> = {
+  ANTHROPIC_API_KEY: "ANTHROPIC_BASE_URL",
+  CLAUDE_CODE_OAUTH_TOKEN: "ANTHROPIC_BASE_URL",
+};
+
+/**
  * `getModelEnvVars` THROWS on a slugless model, and bedrock / vertex resolve to
  * a bare backend model id (`gemini-2.5-flash`, `us.anthropic.claude-opus-4-6-v1`)
  * rather than a `provider/model` specifier. Their credentials are multi-var and
@@ -55,6 +68,9 @@ function envVarsFor(model: string): string[] {
 async function checkOne(params: { envVar: string; model: string }): Promise<Failure | null> {
   const value = process.env[params.envVar];
   if (!value) return null;
+
+  const hostOverride = HOST_OVERRIDES[params.envVar];
+  if (hostOverride && hasEnvVar(hostOverride)) return null;
 
   if (params.envVar === "CLAUDE_CODE_OAUTH_TOKEN") {
     const preflight = await preflightClaudeSubscription({

@@ -342,14 +342,25 @@ function validateVertexSetup(params: { owner: string; name: string }): void {
 
 /**
  * The single-vendor harnesses each accept one API key or one subscription
- * credential, so "can this agent authenticate at all" is a two-env-var check.
+ * credential, so "can this agent authenticate at all" is a fixed-env-var check.
  * OpenCode is the exception and answers from its own model introspection.
+ *
+ * `ANTHROPIC_AUTH_TOKEN` is claude-code's gateway credential — the same value as
+ * `ANTHROPIC_API_KEY` but sent as `Authorization: Bearer` instead of `x-api-key`,
+ * and the one Anthropic tells gateway users to reach for first. It is recognised
+ * HERE only, never in `providers.anthropic.envVars`: that list feeds
+ * `getModelEnvVars`, so adding it there would wave an opencode run through
+ * validation on a variable opencode cannot use.
  */
 function hasSingleProviderAuth(agentName: string): boolean {
   if (agentName === "codex") {
     return hasEnvVar("OPENAI_API_KEY") || hasEnvVar("CODEX_AUTH_JSON");
   }
-  return hasEnvVar("ANTHROPIC_API_KEY") || hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN");
+  return (
+    hasEnvVar("ANTHROPIC_API_KEY") ||
+    hasEnvVar("ANTHROPIC_AUTH_TOKEN") ||
+    hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")
+  );
 }
 
 /**

@@ -874,6 +874,20 @@ export function getModelManagedCredentials(slug: string): string[] {
 }
 
 /**
+ * Credentials that can serve a provider's models without belonging in its
+ * `envVars`, because only one harness understands them. `ANTHROPIC_AUTH_TOKEN`
+ * is claude-code's gateway variable: opencode cannot use it, so it must stay
+ * out of `providers.anthropic.envVars` (which `getModelEnvVars` feeds to the
+ * opencode-validation path) — but an account holding one DOES have a working
+ * Anthropic credential, and reading it as "no BYOK" routes the run onto a
+ * billed proxy, which `resolveAgent` then hands to opencode, bypassing the
+ * gateway entirely.
+ */
+const HARNESS_ONLY_CREDENTIALS: Record<string, string[]> = {
+  anthropic: ["ANTHROPIC_AUTH_TOKEN"],
+};
+
+/**
  * Whether one of `secretNames` can run `model` — the Router opt-out predicate,
  * shared so every caller decides the same way. Auto-tier sentinels and
  * deprecated aliases resolve first; `getModelEnvVars("auto/intelligent")` is
@@ -881,7 +895,11 @@ export function getModelManagedCredentials(slug: string): string[] {
  */
 export function modelHasStoredAuth(params: { model: string; secretNames: string[] }): boolean {
   const slug = resolveDisplayAlias(params.model)?.slug ?? params.model;
-  const authVars = [...getModelEnvVars(slug), ...getModelManagedCredentials(slug)];
+  const authVars = [
+    ...getModelEnvVars(slug),
+    ...getModelManagedCredentials(slug),
+    ...(HARNESS_ONLY_CREDENTIALS[getModelProvider(slug)] ?? []),
+  ];
   return authVars.some((v) => params.secretNames.includes(v));
 }
 

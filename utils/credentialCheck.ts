@@ -19,6 +19,14 @@ type Probe = {
    * indistinguishable from a malformed request by status alone.
    */
   deadWhen?: (status: number, body: string) => boolean;
+  /**
+   * the credential can legitimately be aimed at a host other than the one this
+   * probe knows, so the probe only speaks for callers that can see where it is
+   * pointed. `ANTHROPIC_BASE_URL` re-points Claude Code at a gateway, and a
+   * gateway token is 401 at api.anthropic.com while working perfectly at the
+   * gateway — so a caller with no view of the base URL must not ask at all.
+   */
+  hostConfigurable?: true;
 };
 
 /**
@@ -38,6 +46,7 @@ const PROBES: Record<string, Probe> = {
       url: "https://api.anthropic.com/v1/models",
       headers: { "x-api-key": value, "anthropic-version": "2023-06-01" },
     }),
+    hostConfigurable: true,
   },
   OPENROUTER_API_KEY: {
     request: (value) => ({
@@ -70,9 +79,17 @@ async function verifyClaudeSubscription(value: string): Promise<CredentialVerdic
   return preflight.status === 401 ? "dead" : "alive";
 }
 
-/** whether asking the provider about this credential would tell us anything. */
+/**
+ * Whether asking the provider about this credential would tell us anything —
+ * the paste-time gate, where the caller stores a secret and cannot see the run
+ * env. A `hostConfigurable` credential is excluded here and stays probeable at
+ * run time, because only the runner knows whether a gateway is in play: the
+ * base URL usually lives in the workflow file, which the console never reads.
+ */
 export function isCredentialProbeable(envVar: string): boolean {
-  return envVar === "CLAUDE_CODE_OAUTH_TOKEN" || envVar in PROBES;
+  if (envVar === "CLAUDE_CODE_OAUTH_TOKEN") return true;
+  const probe = PROBES[envVar];
+  return probe !== undefined && !probe.hostConfigurable;
 }
 
 /**
