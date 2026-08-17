@@ -14,7 +14,7 @@ const rawArgs = process.argv.slice(2);
 function printMainUsage(stream: typeof console.log): void {
   stream(`usage: ${PROG} <command>\n`);
   stream("commands:");
-  stream("  init        set up pullfrog on the current repository");
+  stream("  init        install pullfrog on the current repository and open its dashboard");
   stream("  auth        manage provider credentials for the current repository");
   stream("  watch       stream a PR's activity as one JSON line per event");
   stream("");
