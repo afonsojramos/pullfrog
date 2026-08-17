@@ -18,6 +18,20 @@ import type { GitHubAppPermissions } from "./github.ts";
  * permissions have no object granularity — so those runs get no token and use
  * the object-scoped MCP tools instead.
  *
+ * `role` is the triggerer's EFFECTIVE permission on THIS repo, and where it
+ * came from is deliberately not asked. `getCollaboratorPermissionLevel` already
+ * folds direct grants, team grants and the org base permission into one answer,
+ * so an org member who is `write` org-wide and a user with a single direct
+ * grant resolve identically — which is correct, because on this repo they can
+ * do the same things. Nothing in the action queries org membership.
+ *
+ * The token is then scoped to the current repo UNCONDITIONALLY: `resolveTokens`
+ * passes no `repos`, and `acquireTokenViaOIDC` always appends
+ * `$GITHUB_REPOSITORY`, so the list is exactly `[this repo]` even when the
+ * triggerer holds org-wide admin over hundreds. That asymmetry is deliberate
+ * margin — the invariant is "never MORE than the user has", and one repo out of
+ * many satisfies it with room to spare.
+ *
  * The set is a strict SUBSET of what any qualifying role holds, so the mirror
  * is one-directional by construction — it can never over-grant:
  *

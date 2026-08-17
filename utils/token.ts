@@ -186,9 +186,11 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
   // credential for the `gh` MCP tool, mirroring the triggering user's own role.
   // deliberately a SEPARATE token from mcpToken: the MCP token stays
   // broad-and-unreachable, while this one is handed to a subprocess that can
-  // print it, so its scope is the entire security boundary. primary repo only —
-  // `repos: undefined` scopes it to the repo the run was dispatched for, so a
-  // leak cannot reach the cross-repo write set.
+  // print it, so its scope is the entire security boundary. passing NO `repos`
+  // does not mean unscoped: `acquireTokenViaOIDC` always appends
+  // `$GITHUB_REPOSITORY`, so the list is exactly `[this repo]` regardless of how
+  // much org-wide reach the triggerer has, and a leak cannot cross into the
+  // xrepo write set. see mirrorRolePermissions for why that stays correct.
   const ghPermissions = mirrorRolePermissions(params.authorPermission);
   let ghToken: string | undefined;
   if (ghPermissions) {
