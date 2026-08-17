@@ -44,80 +44,107 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
-          # Extract major version (e.g., "0" from "0.0.1")
-          MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
-          echo "major_tag=v$MAJOR_VERSION" >> $GITHUB_OUTPUT
+          # major version tag (e.g. "v0" from "0.1.59") — the moving tag consumers use
+          echo "major_tag=v$(echo $VERSION | cut -d. -f1)" >> $GITHUB_OUTPUT
 
-          echo "📦 Package version: $VERSION"
+          echo "📦 package version: $VERSION"
 
-      - name: Check if tag already exists
-        id: check_tag
+      # the guard asks npm, not git. gating on "does the tag exist" made a half-finished
+      # release unrecoverable: the tag is pushed by this same job, so any later failure
+      # left a re-run seeing its own tag and skipping the publish it still owed.
+      - name: Check whether npm already serves this version
+        id: check_npm
         run: |
-          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Tag ${{ steps.version.outputs.tag }} already exists - skipping release"
+          FOUND=$(npm view "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
+          if [ "$FOUND" = "${{ steps.version.outputs.version }}" ]; then
+            echo "published=true" >> $GITHUB_OUTPUT
+            echo "ℹ️ npm already serves ${{ steps.version.outputs.version }} - skipping publish"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "✅ Tag ${{ steps.version.outputs.tag }} does not exist - will create release"
+            echo "published=false" >> $GITHUB_OUTPUT
+            echo "✅ ${{ steps.version.outputs.version }} is not on npm yet - will publish"
           fi
 
-      - name: Create and push tags
-        if: steps.check_tag.outputs.exists == 'false'
-        run: |
-          # Create specific version tag
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
+      - name: Publish to npm
+        if: steps.check_npm.outputs.published == 'false'
+        run: npm publish --provenance --access public
 
-          # Create/update major version tag (moving tag)
+      # the release invariant: the major tag must never advance past what npm actually
+      # serves, because the action bakes `pullfrog@^<own version>` into its npx spec, so
+      # a major tag ahead of npm is ETARGET on every consumer run. registry propagation
+      # is not instant, so confirm rather than assume before any tag moves.
+      - name: Wait for npm to serve the version
+        run: |
+          for attempt in $(seq 1 30); do
+            FOUND=$(npm view "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
+            if [ "$FOUND" = "${{ steps.version.outputs.version }}" ]; then
+              echo "✅ npm is serving ${{ steps.version.outputs.version }}"
+              exit 0
+            fi
+            echo "waiting for npm to serve ${{ steps.version.outputs.version }} (attempt $attempt/30)"
+            sleep 10
+          done
+          echo "::error::npm never served ${{ steps.version.outputs.version }}; refusing to move ${{ steps.version.outputs.major_tag }}"
+          exit 1
+
+      - name: Create and push tags
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "🏷️ ${{ steps.version.outputs.tag }} already exists"
+          else
+            git tag ${{ steps.version.outputs.tag }}
+            git push origin ${{ steps.version.outputs.tag }}
+            echo "🏷️ created ${{ steps.version.outputs.tag }}"
+          fi
+
           git tag -f ${{ steps.version.outputs.major_tag }}
           git push origin ${{ steps.version.outputs.major_tag }} --force
+          echo "🏷️ moved ${{ steps.version.outputs.major_tag }} to ${{ steps.version.outputs.version }}"
 
-          echo "🏷️ Created tags: ${{ steps.version.outputs.tag }} and ${{ steps.version.outputs.major_tag }}"
-
+      # last, and deliberately so: this is the only cosmetic step, and it is the one that
+      # failed on 0.1.58. from here its failure costs a re-run, never a consumer outage.
       - name: Create GitHub Release
-        if: steps.check_tag.outputs.exists == 'false'
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          release_name: "${{ steps.version.outputs.tag }}"
-          body: |
-            ## 📦 pullfrog ${{ steps.version.outputs.version }}
-
-            ### Usage in GitHub Actions
-
-            ```yaml
-            - uses: pullfrog/pullfrog@${{ steps.version.outputs.major_tag }}
-            ```
-
-            ### Installation via npm
-
-            ```bash
-            npm install pullfrog@${{ steps.version.outputs.version }}
-            ```
-          draft: false
-          prerelease: false
-
-      - name: Publish to npm
-        if: steps.check_tag.outputs.exists == 'false'
-        run: npm publish --provenance --access public
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          MAJOR_TAG: ${{ steps.version.outputs.major_tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "📝 release $TAG already exists"
+            exit 0
+          fi
+          {
+            echo "## 📦 pullfrog $VERSION"
+            echo
+            echo "### Usage in GitHub Actions"
+            echo
+            echo '```yaml'
+            echo "- uses: pullfrog/pullfrog@$MAJOR_TAG"
+            echo '```'
+            echo
+            echo "### Installation via npm"
+            echo
+            echo '```bash'
+            echo "npm install pullfrog@$VERSION"
+            echo '```'
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
 
       - name: Summary
         if: always()
         run: |
           echo "## 📊 Publish Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ steps.check_tag.outputs.exists }}" == "true" ]]; then
-            echo "⚠️ Version ${{ steps.version.outputs.version }} already exists - no action taken" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.check_npm.outputs.published }}" == "true" ]]; then
+            echo "ℹ️ Version ${{ steps.version.outputs.version }} was already on npm - re-converged tags and release" >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ Successfully published version ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🏷️ Tags Created" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ steps.version.outputs.tag }}\` (specific version)" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ steps.version.outputs.major_tag }}\` (major version, auto-updating)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 📦 Published to" >> $GITHUB_STEP_SUMMARY
-            echo "- GitHub Release: [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }})" >> $GITHUB_STEP_SUMMARY
-            echo "- npm Registry: [pullfrog@${{ steps.version.outputs.version }}](https://www.npmjs.com/package/pullfrog/v/${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Published version ${{ steps.version.outputs.version }} to npm" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏷️ Tags" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ steps.version.outputs.tag }}\` (specific version)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ steps.version.outputs.major_tag }}\` (moving major tag, only ever advanced after npm serves the version)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Published to" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Release: [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "- npm Registry: [pullfrog@${{ steps.version.outputs.version }}](https://www.npmjs.com/package/pullfrog/v/${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
