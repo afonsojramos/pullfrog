@@ -63,6 +63,23 @@ export const AGENT_FIRST_EVENT_TIMEOUT_MS = 120_000;
 export const DEFAULT_ACTIVITY_CHECK_INTERVAL_MS = 5_000;
 
 /**
+ * E2E affordance: shorten a watchdog budget for one dispatch, so the stall path
+ * can be exercised on demand. A real provider stall is not provocable, which is
+ * how #1085 shipped three escalations deep with its salvage branch never once
+ * run end to end.
+ *
+ * **Shorten-only, deliberately.** The value is clamped to the compiled budget,
+ * so an override can make the watchdog stricter but can never relax or disable
+ * it. That keeps this unable to manufacture the zombie run the watchdog exists
+ * to prevent, even if a customer sets it in their own workflow env.
+ */
+export function watchdogBudgetMs(compiled: number, envVar: string): number {
+  const raw = Number(process.env[envVar]);
+  if (!Number.isFinite(raw) || raw <= 0) return compiled;
+  return Math.min(compiled, raw);
+}
+
+/**
  * chunks whose every non-empty line matches one of these patterns do not
  * count as agent activity. mcp-proxy SSE reconnects and provider-error
  * retries happen on their own schedule and were keeping the outer activity

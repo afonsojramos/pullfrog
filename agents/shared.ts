@@ -161,6 +161,13 @@ export interface AgentRunContext {
    * server) so lingering SSE reconnects don't keep the outer timer alive.
    */
   onActivityTimeout?: (() => void) | undefined;
+  /**
+   * called when an aborted turn actually comes back and the harness intends to
+   * keep going. stands down the safety-net timer `onActivityTimeout` armed, so
+   * it only ever guards the window where an abort might have been ignored
+   * rather than force-exiting a run mid-salvage. see #1085.
+   */
+  onTurnRecovered?: (() => void) | undefined;
   onToolUse?: ((event: AgentToolUseEvent) => void) | undefined;
   /**
    * Pullfrog API JWT scoped to this run. agents only need this when they

@@ -71,6 +71,7 @@ import {
   AGENT_FIRST_EVENT_TIMEOUT_MS,
   isDebugEnabled,
   markActivity,
+  watchdogBudgetMs,
 } from "../utils/activity.ts";
 import type { AgentDiagnostic } from "../utils/agentHangReport.ts";
 import { formatJsonValue, log } from "../utils/cli.ts";
@@ -107,6 +108,7 @@ import {
   agent,
   logTokenTable,
   MAX_STDERR_LINES,
+  mergeAgentUsage,
 } from "./shared.ts";
 
 const installCli = () => installOpencodeCli({ binPath: "bin/opencode.exe" });
@@ -394,6 +396,7 @@ interface RunnerContext {
   variant: string | undefined;
   todoTracker?: TodoTracker | undefined;
   onActivityTimeout?: (() => void) | undefined;
+  onTurnRecovered?: (() => void) | undefined;
   onToolUse?: ((event: { toolName: string; input: unknown }) => void) | undefined;
   /** current per-turn aggregator; nullable between turns. */
   currentTurn: TurnAccumulator | null;
@@ -417,6 +420,13 @@ interface RunnerContext {
    * breaks every validator that greps for tool-call shape.
    */
   loggedToolCallIDs: Set<string>;
+  /**
+   * Count of orchestrator calls to a Pullfrog MCP tool (`pullfrog_*`). Every
+   * artifact a run can leave behind — a review, a progress report, a push, a
+   * commit through the shell — goes through one, whereas `read`/`grep`/`glob`
+   * leave nothing. The salvage gate reads it to tell work from talk (#1085).
+   */
+  mcpToolCalls: number;
   /** rolling stderr tail from the server process (for diagnostics). */
   recentStderr: string[];
   diagnostic: AgentDiagnostic;
@@ -644,6 +654,7 @@ function processTerminalToolPart(
   const callLine = inputFormatted !== "{}" ? `» ${toolName}(${inputFormatted})` : `» ${toolName}()`;
   log.info(withLabel(label, callLine));
   if (isOrchestrator) ctx.loggedToolCallIDs.add(toolId);
+  if (isOrchestrator && toolName.startsWith("pullfrog_")) ctx.mcpToolCalls++;
 
   if (state.status === "completed") {
     log.debug(withLabel(label, `  output: ${state.output}`));
@@ -1043,6 +1054,13 @@ function formatConfigError(name: string | undefined, data: unknown): string | un
 // ── inner activity timer ───────────────────────────────────────────────────────
 
 /**
+ * Sent when the watchdog cut a turn off mid-flight. Deliberately terse and only
+ * ever billed on the salvage path, never on a healthy run.
+ */
+const WATCHDOG_SALVAGE_PROMPT =
+  "Your previous turn was cut off mid-response by a provider stall. Nothing you had not already submitted through a tool was saved. Continue from where you stopped and submit your work now — do not restart your analysis.";
+
+/**
  * Start an event-silence watchdog. The outer process-level activity timer
  * (main.ts `createProcessOutputActivityTimeout`) watches `process.stdout.write`
  * which our harness log lines drive — but it doesn't see SSE event silence
@@ -1060,19 +1078,43 @@ function formatConfigError(name: string | undefined, data: unknown): string | un
  * Before the first `part.updated` the tighter {@link AGENT_FIRST_EVENT_TIMEOUT_MS}
  * applies instead: the flat budget exists to protect an in-flight tool call, and
  * no tool has been called yet.
+ *
+ * The interval spans the whole run, so it also watches the gap BETWEEN turns.
+ * A fire there arms the safety net but never stands it down — the next turn's
+ * `armForTurn()` clears the latch, so `firedThisTurn()` reads false at that
+ * turn's end. Unreachable today: the only between-turn work is `getGitStatus`
+ * (10s cap), `isSummaryUnchanged` and `getUnsubmittedReview`, and the stop hook
+ * is commented out (`postRun.ts`, #714), so the budget cannot elapse there.
+ * Re-enabling the stop hook would make it reachable.
  */
 function startInnerActivityWatchdog(params: {
   ctx: RunnerContext;
   timeoutMs: number;
-  abortController: AbortController;
-}): { stop: () => void } {
+  abortTurn: () => void;
+}): { stop: () => void; armForTurn: () => void; firedThisTurn: () => boolean } {
   let fired = false;
+  let everFired = false;
   const id = setInterval(() => {
     if (fired) return;
     const idleMs = performance.now() - params.ctx.lastEventAt;
-    const budgetMs = params.ctx.sawModelOutput ? params.timeoutMs : AGENT_FIRST_EVENT_TIMEOUT_MS;
+    const compiledMs = params.ctx.sawModelOutput ? params.timeoutMs : AGENT_FIRST_EVENT_TIMEOUT_MS;
+    // the e2e override is SPENT ON THE FIRST FIRE. its whole point is to abort
+    // one turn on demand and then watch the salvage; clamping the salvage just
+    // as hard aborts that too, and both turns draw first-token latency from the
+    // same distribution — so a value low enough to trip turn 1 trips the salvage
+    // at the same rate, and one high enough for the salvage never fires at all.
+    // that is the one setting which cannot produce a LANDED salvage.
+    const budgetMs = everFired
+      ? compiledMs
+      : watchdogBudgetMs(
+          compiledMs,
+          params.ctx.sawModelOutput
+            ? "PULLFROG_E2E_ACTIVITY_TIMEOUT_MS"
+            : "PULLFROG_E2E_FIRST_EVENT_TIMEOUT_MS"
+        );
     if (idleMs <= budgetMs) return;
     fired = true;
+    everFired = true;
     const idleSec = Math.round(idleMs / 1000);
     params.ctx.diagnostic.idleSec = idleSec;
     params.ctx.diagnostic.sawModelOutput = params.ctx.sawModelOutput;
@@ -1081,7 +1123,11 @@ function startInnerActivityWatchdog(params: {
         ? `» no opencode events for ${idleSec}s — aborting in-flight prompt and notifying harness`
         : `» no opencode events for ${idleSec}s — the provider never returned a first token; aborting in-flight prompt and notifying harness`
     );
-    params.abortController.abort();
+    params.abortTurn();
+    // the safety net is armed here and NOT after the turn returns, because an
+    // abort opencode ignores would otherwise hang with nothing watching. the
+    // harness stands it down via `onTurnRecovered` the moment the turn does
+    // come back, so it only ever guards the abort→return window. see #1085.
     try {
       params.ctx.onActivityTimeout?.();
     } catch (err) {
@@ -1091,7 +1137,22 @@ function startInnerActivityWatchdog(params: {
     }
   }, 5_000);
   id.unref?.();
-  return { stop: () => clearInterval(id) };
+  return {
+    stop: () => clearInterval(id),
+    /**
+     * Start a turn's idle budget from now. The clock must be reset with the
+     * latch: `lastEventAt` only advances on model output, so a turn following a
+     * stall would inherit the full stalled interval and be aborted on the very
+     * next 5s tick — killing the salvage before the provider could answer. It
+     * is the right semantics for an ordinary resume too, whose budget should
+     * not be pre-spent by the post-run gate checks that ran between turns.
+     */
+    armForTurn: () => {
+      fired = false;
+      params.ctx.lastEventAt = performance.now();
+    },
+    firedThisTurn: () => fired,
+  };
 }
 
 // ── agent entrypoint ───────────────────────────────────────────────────────────
@@ -1299,6 +1360,7 @@ export const opencode = agent({
         variant: effort.rung,
         todoTracker: ctx.todoTracker,
         onActivityTimeout: ctx.onActivityTimeout,
+        onTurnRecovered: ctx.onTurnRecovered,
         onToolUse: ctx.onToolUse,
         currentTurn: null,
         eventCount: 0,
@@ -1307,6 +1369,7 @@ export const opencode = agent({
         promptMessageID: undefined,
         taskDispatchByCallID: new Map(),
         loggedToolCallIDs: new Set(),
+        mcpToolCalls: 0,
         recentStderr: server.recentStderr,
         diagnostic: {
           label: "Pullfrog",
@@ -1334,11 +1397,25 @@ export const opencode = agent({
         }
       });
 
-      const abortController = new AbortController();
-      const eventLoopPromise = consumeEvents(runnerCtx, abortController.signal).catch((err) => {
+      // run-scoped: the SSE event loop and the outer `finally` bind to this, so
+      // it must OUTLIVE a stalled turn. before #1085 the watchdog aborted this
+      // one controller, which killed the event loop and left every subsequent
+      // `session.prompt` rejecting as already-aborted — so the resume loop below
+      // was structurally dead and 15-58min of work was discarded with no review.
+      const runController = new AbortController();
+      // per-turn: replaced for each prompt, and the only thing the watchdog
+      // aborts. `AbortSignal.any` keeps run-scoped cancellation reaching the
+      // in-flight turn.
+      let turnController = new AbortController();
+      const nextTurnSignal = () => {
+        turnController = new AbortController();
+        return AbortSignal.any([runController.signal, turnController.signal]);
+      };
+
+      const eventLoopPromise = consumeEvents(runnerCtx, runController.signal).catch((err) => {
         // SSE stream breakage during cleanup is expected; only surface during
         // active operation.
-        if (!abortController.signal.aborted) {
+        if (!runController.signal.aborted) {
           log.warning(
             `» opencode event subscription ended: ${err instanceof Error ? err.message : String(err)}`
           );
@@ -1355,20 +1432,83 @@ export const opencode = agent({
         // a long synchronous tool call (no part.updated while it runs) can't
         // false-positive it.
         timeoutMs: AGENT_ACTIVITY_TIMEOUT_MS,
-        abortController,
+        abortTurn: () => turnController.abort(),
       });
 
       const sdkModel = parseModel(model);
 
+      // one salvage per run. the stall is provider-side, so a second attempt in
+      // the same run is unlikely to differ, and each one costs up to a full idle
+      // budget — the 1h cap still bounds the worst case either way.
+      let salvagesLeft = 1;
+
+      /**
+       * Run one prompt turn, and re-prompt once if the activity watchdog cut it
+       * off mid-flight. The turn's own controller is dead by then, so the retry
+       * gets a fresh one; the session, MCP dispatcher and provider sockets are
+       * all still live because only the turn was aborted.
+       */
+      const runTurn = async (text: string): Promise<AgentResult> => {
+        const attempt = (prompt: string) => {
+          watchdog.armForTurn();
+          return runTurnGuarded(runnerCtx, () =>
+            runPromptTurn(runnerCtx, { text: prompt, model: sdkModel, signal: nextTurnSignal() })
+          );
+        };
+        /**
+         * Stand the safety net down iff this turn both tripped the watchdog and
+         * came back with work the run will act on. Applied to EVERY turn, the
+         * salvage included: a second fire arms a fresh net, and leaving that one
+         * up force-exits a run that has just recovered.
+         *
+         * A failure is left alone rather than actively re-armed. On the give-up
+         * returns that means the net stays up, which is intended — it is the
+         * only tight bound left on the shutdown path (`await eventLoopPromise`
+         * has hung before, #876). On the no-tools return the net is down unless
+         * the salvage tripped its own fire and re-armed it, and either state is
+         * right: the salvage returned, so the abort was provably honored, and an
+         * armed net is only ever the shutdown bound a failing return wants.
+         */
+        const standDownIfRecovered = (turn: AgentResult): AgentResult => {
+          if (watchdog.firedThisTurn() && turn.success) ctx.onTurnRecovered?.();
+          return turn;
+        };
+
+        const result = await attempt(text);
+        if (!watchdog.firedThisTurn()) return result;
+        // the watchdog fired but the turn landed anyway — it can beat the abort
+        // through `aggregateTurnUsage`'s round trip.
+        if (result.success) return standDownIfRecovered(result);
+        if (salvagesLeft <= 0) return result;
+        salvagesLeft--;
+        // about to run another turn, so this net has done its job.
+        ctx.onTurnRecovered?.();
+        log.info("» activity watchdog cut the turn off — re-prompting once on the same session");
+        const mcpCallsBefore = runnerCtx.mcpToolCalls;
+        const salvaged = await attempt(WATCHDOG_SALVAGE_PROMPT);
+        // the aborted turn's tokens were really spent — returning only the
+        // salvage's usage would bill the customer for less than the run cost and
+        // under-report `WorkflowRun.inputTokens`. the post-run loop merges across
+        // its own resumes but sits above this, so the pair is merged here.
+        const usage = mergeAgentUsage(result.usage, salvaged.usage);
+        // a salvage that reached no Pullfrog tool left nothing behind. Review
+        // gates itself on `create_pull_request_review`, but Build/Fix/Plan have
+        // no terminal gate — so letting prose alone stand as success would post
+        // "sorry, I was cut off" as the run's answer and report a green run
+        // where the pre-salvage code reported the timeout. counting ANY tool is
+        // too weak for that: `read`/`grep` are orchestrator calls too, so a
+        // salvage that re-read one file and then apologised would have passed.
+        if (runnerCtx.mcpToolCalls === mcpCallsBefore) {
+          log.info(
+            "» salvage turn reached no Pullfrog tool — keeping the activity-timeout failure"
+          );
+          return { ...result, usage };
+        }
+        return standDownIfRecovered({ ...salvaged, usage });
+      };
+
       try {
-        // initial run
-        const initial = await runTurnGuarded(runnerCtx, () =>
-          runPromptTurn(runnerCtx, {
-            text: ctx.instructions.full,
-            model: sdkModel,
-            signal: abortController.signal,
-          })
-        );
+        const initial = await runTurn(ctx.instructions.full);
 
         // post-run gate retry loop — every resume is another session.prompt()
         // against the same sessionID, so MCP, plugins, provider sockets stay
@@ -1378,14 +1518,7 @@ export const opencode = agent({
           initialResult: initial,
           initialUsage: initial.usage,
           reflectionPrompt: buildReflectionPrompt(ctx.toolState),
-          resume: async (c) =>
-            runTurnGuarded(runnerCtx, () =>
-              runPromptTurn(runnerCtx, {
-                text: c.prompt,
-                model: sdkModel,
-                signal: abortController.signal,
-              })
-            ),
+          resume: async (c) => runTurn(c.prompt),
         });
 
         // gate the todo-tracker flush on the post-run loop's final verdict
@@ -1402,7 +1535,7 @@ export const opencode = agent({
         return result;
       } finally {
         watchdog.stop();
-        abortController.abort();
+        runController.abort();
         await eventLoopPromise.catch(() => {});
       }
     } finally {

@@ -787,27 +787,33 @@ export async function main(): Promise<MainResult> {
       todoTracker?.cancel();
     });
 
-    // when the agent subprocess is killed for inner activity timeout, stop
-    // the MCP HTTP server so mcp-proxy's SSE reconnect attempts don't keep
-    // the outer activity timer alive. start a short safety-net timer — if
-    // the agent promise hasn't resolved within 5min after the inner kill,
-    // force-reject the outer timer so the run can exit.
+    // when the agent is killed for inner activity timeout, start a short
+    // safety-net timer — if the agent promise hasn't resolved within 5min after
+    // the inner kill, stop the MCP HTTP server (so mcp-proxy's SSE reconnect
+    // attempts don't keep the outer activity timer alive) and force-reject the
+    // outer timer so the run can exit.
+    //
+    // both were previously done the instant the watchdog fired, which is what
+    // made the salvage in `opencode.ts` impossible: the re-prompt landed on a
+    // dead MCP server, so the agent could not call `create_pull_request_review`
+    // and the "recovery" produced a confidently toolless turn. deferring costs
+    // nothing — `forceReject` ends the run directly, so it never depended on
+    // the teardown, and `onTurnRecovered` cancels the whole thing the moment a
+    // turn actually comes back. see #1085.
     let innerTimeoutFired = false;
     const onInnerActivityTimeout = () => {
       if (innerTimeoutFired) return;
       innerTimeoutFired = true;
-      log.info(
-        "» inner activity timeout fired — stopping MCP server and starting 5min safety-net timer"
-      );
-      // fire and forget — the server's dispose is idempotent so the
-      // `await using` cleanup at block exit is still safe.
-      mcpHttpServer[Symbol.asyncDispose]().catch((err) => {
-        log.debug(
-          `mcp server stop after inner kill failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-      });
+      log.info("» inner activity timeout fired — starting 5min safety-net timer");
       safetyNetTimer = setTimeout(
         () => {
+          // fire and forget — the server's dispose is idempotent so the
+          // `await using` cleanup at block exit is still safe.
+          mcpHttpServer[Symbol.asyncDispose]().catch((err) => {
+            log.debug(
+              `mcp server stop after inner kill failed: ${err instanceof Error ? err.message : String(err)}`
+            );
+          });
           activityTimeout?.forceReject(
             "agent still pending 5min after inner activity kill — forcing exit"
           );
@@ -815,6 +821,23 @@ export async function main(): Promise<MainResult> {
         5 * 60 * 1000
       );
       safetyNetTimer.unref?.();
+    };
+
+    // the aborted turn came back, so the harness is salvaging rather than dying.
+    // the net only exists to catch an abort opencode ignored; leaving it armed
+    // would force-exit a run that is legitimately working again. re-arming is
+    // safe because the watchdog fires per turn. see #1085.
+    const onTurnRecovered = () => {
+      if (!innerTimeoutFired) return;
+      innerTimeoutFired = false;
+      if (safetyNetTimer) clearTimeout(safetyNetTimer);
+      safetyNetTimer = undefined;
+      // the one observable for this handshake, and the counterpart to the
+      // `log.info` above. only reachable on a run that already stalled, so it
+      // costs nothing on a healthy one — and without it, production `.logs/`
+      // show the net armed and then nothing, leaving "stood down"
+      // indistinguishable from "still counting, the run just ended". see #1085.
+      log.info("» inner activity safety net stood down — turn recovered");
     };
 
     const agentPromise = agent.run({
@@ -837,6 +860,7 @@ export async function main(): Promise<MainResult> {
       toolState,
       apiToken: runContext.apiToken,
       onActivityTimeout: onInnerActivityTimeout,
+      onTurnRecovered,
       onToolUse: (event) => {
         const wasTracked = recordDiffReadFromToolUse({
           state: primaryRepoState(toolState).diffCoverage,
