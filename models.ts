@@ -424,6 +424,15 @@ export const providers = {
         effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/anthropic/claude-opus-5",
         subagentModel: "claude-sonnet",
+        // TEMPORARY — clear this when Zen serves opus again. Zen still LISTS
+        // claude-opus-5 in /zen/v1/models, so the catalog test passes, but the
+        // endpoint answers 503 `Upstream request failed: Endpoint is
+        // unavailable.` (measured 5/5; claude-sonnet-5, claude-opus-4-8,
+        // claude-haiku-4-5 and claude-fable-5 all 200 on the same key). opencode
+        // retries the 503 above the AI SDK emitting no part.updated, so a run
+        // just produces nothing until it is killed — metaideas/init logged six
+        // zero-output failures from 2026-08-23. see wiki/opencode-silent-stall.md
+        fallback: "opencode/claude-sonnet",
       },
       "claude-sonnet": {
         displayName: "Claude Sonnet",
