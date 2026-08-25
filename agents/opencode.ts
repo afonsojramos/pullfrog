@@ -404,8 +404,6 @@ interface RunnerContext {
   eventCount: number;
   /** last activity timestamp (event-stream silence detector). */
   lastEventAt: number;
-  /** whether the model has produced a part of its own; selects the watchdog's budget. */
-  sawModelOutput: boolean;
   /** message our own submitted prompt echoes back on — see `isModelOutput`. */
   promptMessageID: string | undefined;
   /** active task dispatch metadata keyed by callID (for subagent timing). */
@@ -503,7 +501,7 @@ async function dispatchEvent(ctx: RunnerContext, event: EventSubscribeResponse):
     // part transitions all arrive as part.updated. this is the only event
     // class that refreshes the inner-watchdog clock.
     ctx.lastEventAt = performance.now();
-    if (isModelOutput(ctx, event.properties.part)) ctx.sawModelOutput = true;
+    if (isModelOutput(ctx, event.properties.part)) ctx.diagnostic.sawModelOutput = true;
     await onPartUpdated(ctx, event.properties.part);
     return;
   }
@@ -772,7 +770,11 @@ async function runPromptTurn(
   // re-arm the pre-first-token budget for every turn: a resumed turn waits on
   // the provider exactly the way the first one does.
   ctx.promptMessageID = undefined;
-  ctx.sawModelOutput = false;
+  // both fields describe the turn in flight, never a past one: the outer
+  // process-output timer can terminalize the run long after a fire the harness
+  // recovered from, and would otherwise render that stale fire's story.
+  ctx.diagnostic.sawModelOutput = false;
+  ctx.diagnostic.idleSec = undefined;
 
   let assistant: AssistantMessage | undefined;
   let returnedParts: Part[] | undefined;
@@ -881,7 +883,7 @@ async function runPromptTurn(
   // "completed without reporting progress", which blames the one party that
   // never got a turn. the `activity timeout` prefix routes it through the hang
   // renderer, where the diagnostics already live. see #1161.
-  if (!ctx.sawModelOutput && finalText.trim().length === 0 && !usage) {
+  if (!ctx.diagnostic.sawModelOutput && finalText.trim().length === 0 && !usage) {
     return {
       success: false,
       output: finalText,
@@ -1097,7 +1099,9 @@ function startInnerActivityWatchdog(params: {
   const id = setInterval(() => {
     if (fired) return;
     const idleMs = performance.now() - params.ctx.lastEventAt;
-    const compiledMs = params.ctx.sawModelOutput ? params.timeoutMs : AGENT_FIRST_EVENT_TIMEOUT_MS;
+    const compiledMs = params.ctx.diagnostic.sawModelOutput
+      ? params.timeoutMs
+      : AGENT_FIRST_EVENT_TIMEOUT_MS;
     // the e2e override is SPENT ON THE FIRST FIRE. its whole point is to abort
     // one turn on demand and then watch the salvage; clamping the salvage just
     // as hard aborts that too, and both turns draw first-token latency from the
@@ -1108,7 +1112,7 @@ function startInnerActivityWatchdog(params: {
       ? compiledMs
       : watchdogBudgetMs(
           compiledMs,
-          params.ctx.sawModelOutput
+          params.ctx.diagnostic.sawModelOutput
             ? "PULLFROG_E2E_ACTIVITY_TIMEOUT_MS"
             : "PULLFROG_E2E_FIRST_EVENT_TIMEOUT_MS"
         );
@@ -1117,9 +1121,8 @@ function startInnerActivityWatchdog(params: {
     everFired = true;
     const idleSec = Math.round(idleMs / 1000);
     params.ctx.diagnostic.idleSec = idleSec;
-    params.ctx.diagnostic.sawModelOutput = params.ctx.sawModelOutput;
     log.info(
-      params.ctx.sawModelOutput
+      params.ctx.diagnostic.sawModelOutput
         ? `» no opencode events for ${idleSec}s — aborting in-flight prompt and notifying harness`
         : `» no opencode events for ${idleSec}s — the provider never returned a first token; aborting in-flight prompt and notifying harness`
     );
@@ -1365,7 +1368,6 @@ export const opencode = agent({
         currentTurn: null,
         eventCount: 0,
         lastEventAt: performance.now(),
-        sawModelOutput: false,
         promptMessageID: undefined,
         taskDispatchByCallID: new Map(),
         loggedToolCallIDs: new Set(),
@@ -1470,7 +1472,12 @@ export const opencode = agent({
          * armed net is only ever the shutdown bound a failing return wants.
          */
         const standDownIfRecovered = (turn: AgentResult): AgentResult => {
-          if (watchdog.firedThisTurn() && turn.success) ctx.onTurnRecovered?.();
+          if (!watchdog.firedThisTurn() || !turn.success) return turn;
+          // this fire ended nothing, and no later turn need follow to clear it —
+          // the outer process-output timer can still terminalize the run, and
+          // would otherwise report this span instead of its own.
+          runnerCtx.diagnostic.idleSec = undefined;
+          ctx.onTurnRecovered?.();
           return turn;
         };
 

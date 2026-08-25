@@ -45,12 +45,12 @@
  *      `"activity timeout"` or `"agent still pending"` AND none of the
  *      above matched. The harness keeps structured diagnostic state on
  *      `toolState.agentDiagnostic`; `formatAgentHangBody` renders that into
- *      the job summary. The PR comment instead collapses to a one-line
- *      `**Run failed.** [View the logs →]` — the watchdog jargon, event
- *      counts, and benign stderr tail are operator-grade detail that only
- *      alarm the average user. The one exception is a hang masking billing
- *      exhaustion (#778), where `formatAgentHangBody` emits an actionable
- *      top-up CTA that the comment keeps verbatim.
+ *      the job summary. The PR comment keeps that same body whenever the hang
+ *      is EXPLAINED — a classified provider error (#778, #1183) or a provider
+ *      that never returned a first token — and otherwise collapses to a
+ *      one-line `**Run failed.** [View the logs →]`, because watchdog jargon,
+ *      event counts and a benign stderr tail are operator-grade detail that
+ *      only alarm the average user.
  *
  *   6. Default — the job summary gets a plain-English lead sentence plus the
  *      raw error in a fenced code block under the `### ❌ Pullfrog failed`
@@ -59,7 +59,7 @@
  *
  * Net: the actionable classifications (billing, API-key, model-not-found,
  * no-provider-available, context-overflow, transient-upstream) render identical
- * bodies on both surfaces; the non-actionable ones (hang,
+ * bodies on both surfaces; the non-actionable ones (unexplained hang,
  * generic) keep the forensics in the Actions job summary and show a calm
  * one-liner in the PR comment, whose footer already carries Pullfrog
  * branding + rerun links.
@@ -537,7 +537,14 @@ export function renderRunError(input: {
     // family are as actionable as an empty wallet, and pinning it to one label
     // gave 17 customers a blank comment while we held a message naming their
     // quota's reset time (#1183). an unexplained hang still collapses.
-    const explained = input.agentDiagnostic?.lastProviderError !== undefined;
+    //
+    // silence is explained too: whether opencode writes a `stream error` inside
+    // the watchdog window is luck, so one Zen throttling episode rendered `rate
+    // limited` on one run and a blank comment on the next in the same repo.
+    // `sawModelOutput` is the condition itself rather than a trace of it.
+    const explained =
+      input.agentDiagnostic?.lastProviderError !== undefined ||
+      input.agentDiagnostic?.sawModelOutput === false;
     return {
       summary: `### ❌ Pullfrog failed\n\n${hangBody}`,
       comment: explained ? hangBody : formatMinimalFailureComment(input.repo),
