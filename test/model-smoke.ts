@@ -34,12 +34,20 @@ const PROMPT = "Reply with exactly OK and nothing else.";
 // is alias → resolve mapping, agent classification and env wiring, not whether
 // a model obeys "and nothing else".
 const MATCH = /\bOK/i;
-// xai is the slowest provider in the matrix — winning xai/grok-4.3 jobs land
-// at 42-67s wall time (vs 23-41s for every other provider), brushing a 60s
-// ceiling and intermittently crossing it. 120s gives ~2x headroom on the
-// slowest provider observed in CI, with no downside on the fast-path
-// providers since the timer only fires on actual hangs.
-const TIMEOUT_MS = 120_000;
+// Sized off the slowest model actually measured, not the slowest provider.
+// xai/grok-4.3 lands at 42-67s wall time (vs 23-41s for most), which is what
+// the old 120s was built for — but opencode/claude-opus measured 133s SOLO,
+// on a warm local machine with no CI burst, so it crossed the old ceiling on
+// its own and failed intermittently for no reason this test cares about. The
+// smoke asks "does this alias resolve and authenticate", never "is it fast",
+// so a timeout here is a false negative.
+//
+// MUST stay strictly below the job's `timeout-minutes` in test.yml. The two
+// used to be equal at 2 minutes and raced: when GitHub won you got
+// "The action ... has timed out after 2 minutes" and NO diagnostic; when this
+// timer won you got "timed out after 120s" plus the captured output. Both were
+// observed across one commit pair. This timer fires first now, always.
+const TIMEOUT_MS = 240_000;
 
 function parseSlug(): string {
   const argIdx = process.argv.indexOf("--slug");

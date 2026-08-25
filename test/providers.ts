@@ -85,4 +85,14 @@ export const providers: ProviderEntry[] = [
     agent: "opencode",
     coverage: SHARED_OPENCODE_COVERAGE,
   },
+  // this entry was missing, and an absent provider does not mean "skip" — a
+  // `coverage` nobody declared reads as "any change touches me", so both
+  // `opencode-go` aliases smoked on EVERY push, docs-only ones included. that
+  // is the one live-model cost no filter could reach.
+  {
+    name: "opencode-go",
+    flagship: "opencode-go/glm-5.1",
+    agent: "opencode",
+    coverage: SHARED_OPENCODE_COVERAGE,
+  },
 ];

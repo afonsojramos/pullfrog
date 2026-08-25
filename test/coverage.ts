@@ -11,8 +11,14 @@
  * forces the full matrix (every test, every flagship, every alias). it
  * captures cross-cutting infrastructure where fan-out is unpredictable —
  * agent loader, MCP server boot, test runner itself. if a per-test glob
- * goes stale, this list and the on-`main`-full-matrix policy are the safety
+ * goes stale, this list and the NIGHTLY full-matrix run are the safety
  * nets — there's no completeness lint.
+ *
+ * that safety net used to be every `main` push, which meant a one-file docs
+ * commit paid for ~73 live completions. it is a `schedule:` trigger now, so a
+ * stale glob is caught within a day instead of within a merge — deliberately
+ * traded, because the merge had already run its filtered matrix on the PR.
+ * adding a glob here is cheap; widening what triggers FULL=1 is not.
  *
  * `coverage` is optional on tests/providers; missing = always run (treat as
  * "any code change touches me"). default to defensive — opt into precision
@@ -52,7 +58,11 @@ export const ALWAYS_RUN_ALL: string[] = [
   // MCP orchestrator (every test runs through it)
   "action/mcp/server.ts",
   "action/mcp/shared.ts",
-  // dependency graph
+  // dependency graph. `action/package.json` is doing double duty: a RELEASE is
+  // a version bump in this file and nothing else, so this entry is what makes a
+  // release commit run the full matrix. removing it would silently drop that.
+  // the release GATE is separate and lives in push-to-action.yml — the matrix
+  // running alongside a publish never blocked one.
   "action/package.json",
   "action/pnpm-lock.yaml",
   "action/.npmrc",
@@ -98,7 +108,7 @@ export function anyMatch(paths: string[], patterns: string[]): boolean {
  * decide whether an entry runs given changed files + its coverage globs.
  *
  * three short-circuits:
- *   1. `full` flag (e.g. main pushes, workflow_dispatch) → always run
+ *   1. `full` flag (the nightly schedule, workflow_dispatch) → always run
  *   2. any changed file matches `ALWAYS_RUN_ALL` → run everything
  *   3. coverage missing or empty on the entry → run (defensive default)
  *

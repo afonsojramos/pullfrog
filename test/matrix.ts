@@ -9,7 +9,7 @@
  *
  * input: a JSON array of repo-relative changed paths on stdin (the
  * `paths-filter` action's `*_files` output). PR pushes pass the diff;
- * `main` pushes and `workflow_dispatch` set FULL=1 to skip filtering and
+ * the nightly `schedule` run and `workflow_dispatch` set FULL=1 to skip filtering and
  * emit every entry.
  *
  * each test/provider declares its own `coverage` globs colocated with the
