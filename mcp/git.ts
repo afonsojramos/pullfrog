@@ -177,8 +177,8 @@ function validatePushDestination(
     throw new Error(
       `Push blocked: destination does not match expected repository.\n` +
         `Expected: ${pushUrl}\n` +
-        `Actual: ${dest.url}\n` +
-        `Git configuration may have been tampered with.`
+        `Actual: remote '${dest.remoteName}' -> ${dest.url}\n` +
+        `Git configuration may have been tampered with, or a url.*.insteadOf rewrite is in effect.`
     );
   }
 

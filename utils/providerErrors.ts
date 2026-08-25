@@ -263,6 +263,18 @@ export function isOpenRouterKeyLimitExceeded(text: string): boolean {
 }
 
 /**
+ * the provider was reached with NO credential at all — the AI SDK's shared `loadApiKey`
+ * refusal, so it is provider-agnostic. NOT `isApiKeyAuthError`, which is a key we hold
+ * being rejected: "rotate your key" names a credential that does not exist here.
+ */
+export function isProviderMissingCredential(text: string): boolean {
+  return (
+    /API key is missing\. Pass it using the/i.test(text) ||
+    /Missing Authentication header/i.test(text)
+  );
+}
+
+/**
  * The upstream is having a moment: Anthropic's `API Error: 529 Overloaded`,
  * OpenRouter's `provider_unavailable` / `timeout`, OpenCode Zen's `Streaming
  * response failed: [5xx]`. Three transports, one condition — nothing the user

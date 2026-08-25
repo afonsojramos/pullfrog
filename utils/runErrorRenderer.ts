@@ -82,6 +82,7 @@ import {
   findAnthropicSpendCap,
   isOpenRouterKeyLimitExceeded,
   isProviderBillingExhausted,
+  isProviderMissingCredential,
   isProviderNoRoutableEndpoints,
   isRouterKeylimitExhaustedError,
   isTransientUpstreamError,
@@ -331,6 +332,22 @@ function formatProviderNoRoutableEndpoints(input: {
   ].join("\n");
 }
 
+function formatProviderMissingCredential(input: {
+  owner: string;
+  name: string;
+  errorMessage: string;
+}): string {
+  return [
+    "**No credential reached the model provider.**",
+    "",
+    "The run started without a key for the provider it ended up using, so the request was refused before any model work happened. Nothing was billed, and no key of yours was rejected — add a provider key, or pick a model you already have one for.",
+    "",
+    `[Configure model →](${getApiUrl()}/console/${input.owner}/${input.name})`,
+    "",
+    `\`\`\`\n${input.errorMessage}\n\`\`\``,
+  ].join("\n");
+}
+
 function formatProviderModelNotFoundSummary(input: {
   owner: string;
   name: string;
@@ -438,6 +455,19 @@ export function renderRunError(input: {
   // renderer below would surface the raw wire text with no CTA at all.
   if (isProviderNoRoutableEndpoints(input.errorMessage)) {
     const body = formatProviderNoRoutableEndpoints({
+      owner: input.repo.owner,
+      name: input.repo.name,
+      errorMessage: input.errorMessage,
+    });
+    return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
+  }
+
+  // an ABSENT credential, not a rejected one — the remedies share nothing. neither pattern
+  // matches `isApiKeyAuthError` today; both previously fell through to the generic renderer
+  // with no CTA at all. checked ahead of the api-key branch so a later widening there cannot
+  // start answering "rotate your key" to a run that never held one.
+  if (isProviderMissingCredential(input.errorMessage)) {
+    const body = formatProviderMissingCredential({
       owner: input.repo.owner,
       name: input.repo.name,
       errorMessage: input.errorMessage,

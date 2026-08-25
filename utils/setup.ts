@@ -333,6 +333,13 @@ export async function configureRepoGit(params: ConfigureRepoGitParams): Promise<
   const originUrl = `https://github.com/${params.owner}/${params.name}.git`;
   $("git", ["remote", "set-url", "origin", originUrl], { cwd: repoDir });
 
+  // `set-url` writes remote.origin.url only, but push_branch reads `get-url --push`, which
+  // prefers a pre-existing remote.origin.pushurl and honours url.*.pushInsteadOf from the
+  // runner's global config. --replace-all is exit-0 for absent, single- and multi-valued.
+  $("git", ["config", "--local", "--replace-all", "remote.origin.pushurl", originUrl], {
+    cwd: repoDir,
+  });
+
   // initialize pushUrl to base repo - may be updated by checkout_pr for fork PRs
   repoState.pushUrl = originUrl;
 

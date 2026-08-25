@@ -237,38 +237,42 @@ const AUTO_SELECT_WARNING =
 
 export function autoSelectModel(): string | undefined {
   const authorized = getAuthorizedModels();
-  if (authorized.size > 0) {
-    // skip hidden aliases (internal subagent-tier targets like opencode/gpt-5.4)
-    // and fallback aliases (deprecated or temporarily unavailable — they must
-    // resolve through to their replacement, never run as-is). mirrors the
-    // selectable-list filter (`!a.fallback && !a.hidden`) in
-    // components/ModelSelector.tsx and action/commands/init.ts.
-    // `opencode models` lists a provider's catalog whether or not the run holds
-    // that provider's credential, so `authorized` alone is not "servable": a
-    // preferred OpenCode Zen alias won auto-select on repos with 43 working
-    // OpenRouter models and then died at session start with `No provider
-    // available` (#1077). require the credential too — a model with no declared
-    // env var stays eligible, so this only excludes candidates we can already
-    // see we cannot serve.
-    const servable = (a: (typeof modelAliases)[number]) => {
-      if (!authorized.has(a.resolve)) return false;
-      const envVars = getModelEnvVars(a.resolve);
-      return envVars.length === 0 || envVars.some((name) => process.env[name]);
-    };
-    const match =
-      modelAliases.find((a) => !a.hidden && !a.fallback && a.preferred && servable(a)) ??
-      modelAliases.find((a) => !a.hidden && !a.fallback && servable(a));
-    if (match) {
-      log.info(
-        `» model: ${match.resolve} (auto-selected${match.preferred ? " — preferred" : ""} curated match)`
-      );
-      log.warning(`» model auto-selected. ${AUTO_SELECT_WARNING}`);
-      return match.resolve;
-    }
+  // skip hidden aliases (internal subagent-tier targets like opencode/gpt-5.4)
+  // and fallback aliases (deprecated or temporarily unavailable — they must
+  // resolve through to their replacement, never run as-is). mirrors the
+  // selectable-list filter (`!a.fallback && !a.hidden`) in
+  // components/ModelSelector.tsx and action/commands/init.ts.
+  // `opencode models` lists a provider's catalog whether or not the run holds
+  // that provider's credential, so `authorized` alone is not "servable": a
+  // preferred OpenCode Zen alias won auto-select on repos with 43 working
+  // OpenRouter models and then died at session start with `No provider
+  // available` (#1077). require the credential too — a model with no declared
+  // env var stays eligible, so this only excludes candidates we can already
+  // see we cannot serve.
+  // `routing` joins the filter because a routing alias resolves to a bare
+  // `bedrock`/`vertex`/`azure` sentinel only resolveModel can expand.
+  const selectable = modelAliases.filter((a) => !a.hidden && !a.fallback && !a.routing);
+  const servable = selectable.filter((a) => {
+    const envVars = getModelEnvVars(a.resolve);
+    return envVars.length === 0 || envVars.some((name) => process.env[name]);
+  });
+  const pick = (list: typeof servable) => list.find((a) => a.preferred) ?? list[0];
+  // a catalog hit is the better evidence, but `opencode models` can exit 0 having printed
+  // only an alphabetical PREFIX of its catalog (wiki/opencode-catalog-trust.md), so an
+  // absent alias is not proof we cannot serve it — same rescue validateAgentApiKey applies.
+  // no empty-catalog arm is needed: validateAgentApiKey throws on an empty `authorized`
+  // before the agent starts, and a proxyModel run short-circuits before reaching here.
+  const match = pick(servable.filter((a) => authorized.has(a.resolve))) ?? pick(servable);
+  if (match) {
     log.info(
-      `» opencode has ${authorized.size} models but none match curated aliases — letting OpenCode auto-select`
+      `» model: ${match.resolve} (auto-selected${match.preferred ? " — preferred" : ""} curated match)`
     );
+    log.warning(`» model auto-selected. ${AUTO_SELECT_WARNING}`);
+    return match.resolve;
   }
+  log.info(
+    `» opencode has ${authorized.size} models but none match curated aliases and none hold a credential — letting OpenCode auto-select: ${[...authorized].join(", ")}`
+  );
 
   log.warning(`» no model resolved. letting OpenCode auto-select. ${AUTO_SELECT_WARNING}`);
   return undefined;

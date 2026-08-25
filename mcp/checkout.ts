@@ -596,6 +596,13 @@ export async function checkoutPrBranch(
       log.debug(`» updated remote '${remoteName}' for fork ${pr.headRepoFullName}`);
     }
 
+    // url.*.pushInsteadOf matches by URL prefix rather than remote name, so a runner-wide
+    // rewrite reaches a remote we just created. pin this one the same way configureRepoGit
+    // pins origin.
+    $("git", ["config", "--local", "--replace-all", `remote.${remoteName}.pushurl`, forkUrl], {
+      log: false,
+    });
+
     // set branch push config so `git push` knows where to push
     $("git", ["config", `branch.${localBranch}.pushRemote`, remoteName], { log: false });
     // set merge ref so git knows the remote branch name (may differ from local)

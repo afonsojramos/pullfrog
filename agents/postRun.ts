@@ -66,13 +66,17 @@ export function getUnsubmittedReview(
 }
 
 /**
- * whether this run owes visible review output. normally "a progress comment was
- * seeded", but under `progressComments: disabled` nothing is seeded even though the
- * run is user-facing — so fall back to the two facts seeding itself depends on.
+ * whether this run owes visible review output. normally "a progress comment was seeded",
+ * but seeding is skipped under `progressComments: disabled` and can also fail outright
+ * (archived repo, locked conversation, 403) — so fall back to the two facts seeding itself
+ * depends on, which is what the dispatcher gates comment creation on.
+ *
+ * deliberate consequence: on a repo whose comment surface is unwritable the review cannot
+ * post either, so the run burns its retries and ends red rather than green-with-nothing.
+ * that is the point — it delivered nothing.
  */
 function expectsReviewOutput(ctx: AgentRunContext): boolean {
   if (ctx.toolState.hadProgressComment) return true;
-  if (ctx.payload.progressComments) return false;
   return ctx.payload.event.silent !== true && ctx.payload.event.issue_number !== undefined;
 }
 
@@ -550,6 +554,10 @@ export async function runPostRunRetryLoop<R extends AgentResult>(params: {
       result = preResume;
       break;
     }
+    // the summary gate exists to refresh a snapshot file, so its resume turn narrates that
+    // ("the summary has been updated successfully...") and must not replace the answer the
+    // run already produced. same guard the reflection turn takes above.
+    if (onlySummaryStale) result = { ...result, output: preResume.output || result.output };
     gateResumeCount++;
   }
 

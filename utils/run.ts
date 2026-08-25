@@ -41,13 +41,11 @@ export async function handleAgentResult(ctx: HandleAgentResultParams): Promise<M
   const toolState = ctx.toolContext.toolState;
   const mode = toolState.selectedMode;
   const isReviewMode = mode === "Review" || mode === "IncrementalReview";
-  // under `progressComments: disabled` nothing was seeded, so `hadProgressComment`
-  // is false even though the run has a comment target — salvage still applies, and
-  // reportProgress will create the comment for the answer it delivers.
+  // nothing is seeded under `progressComments: disabled`, and seeding can also fail
+  // outright, so `hadProgressComment` is false on runs that still have a comment target —
+  // salvage still applies, and reportProgress will create the comment for the answer.
   const payload = ctx.toolContext.payload;
-  const hasCommentTarget =
-    toolState.hadProgressComment ||
-    (!payload.progressComments && payload.event.issue_number !== undefined);
+  const hasCommentTarget = toolState.hadProgressComment || payload.event.issue_number !== undefined;
   if (!isReviewMode && !toolState.wasUpdated && hasCommentTarget && !ctx.silent) {
     // the agent exited successfully but never landed a GitHub write — either it
     // answered the mention in raw assistant text (which is never posted, only
