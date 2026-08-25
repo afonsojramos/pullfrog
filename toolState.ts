@@ -29,7 +29,7 @@ export type StoredPushDest = {
  * Lives here (not in `mcp/review.ts`) so `ToolState` — which caches
  * `Map<path, CommentableLines>` per checkout — does not pull the MCP server
  * graph into every consumer of run state (the action's main loop, agent
- * harnesses, cf-worker indexing).
+ * harnesses).
  */
 export type CommentableLines = { RIGHT: Set<number>; LEFT: Set<number> };
 

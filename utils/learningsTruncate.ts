@@ -5,8 +5,8 @@
  * `action/internal/index.ts` without dragging the entire MCP type graph
  * along — `learnings.ts` imports `ToolContext` for its runtime helpers,
  * and pulling that into the SDK-facing `internal` barrel expands the
- * type graph reachable from root `tsc` and `cf-worker-indexing` to every
- * tool module under `action/mcp/`. keeping these helpers MCP-free is the
+ * type graph reachable from root `tsc` to every tool module under
+ * `action/mcp/`. keeping these helpers MCP-free is the
  * cheap structural fix.
  *
  * see `action/utils/learnings.ts` for the full learnings-file lifecycle.
