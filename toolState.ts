@@ -1,4 +1,4 @@
-import type { AgentUsage } from "./agents/shared.ts";
+import type { AgentCredential, AgentUsage } from "./agents/shared.ts";
 import type { PrepResult } from "./prep/types.ts";
 import type { AgentDiagnostic } from "./utils/agentHangReport.ts";
 import { log } from "./utils/cli.ts";
@@ -231,6 +231,15 @@ export interface ToolState {
   output?: string | undefined;
   usageEntries: AgentUsage[];
   model?: string | undefined;
+  // the harness that actually ran (`resolveAgent`'s pick), persisted on the
+  // end-of-run PATCH. the run row separately records which arm the canary
+  // ASSIGNED, so the pair is what exposes an assignment the run didn't honor.
+  agent?: string | undefined;
+  // which credential the harness actually ran on, decided by the harness because
+  // it is the only place that knows: claude-code strips keys to force a
+  // precedence, and codex picks auth.json or an API key on mutually exclusive
+  // branches. left unset rather than guessed where a harness cannot tell.
+  credential?: AgentCredential | undefined;
   // set by main.ts when the configured model's credentials were all REJECTED by
   // their own providers and the run moved to one this account can still serve.
   // carried into PR-comment footers so users see "Using <model> (credentials

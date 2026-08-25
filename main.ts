@@ -455,8 +455,16 @@ export async function main(): Promise<MainResult> {
     const agent = resolveAgent({
       model: resolvedModel,
       proxyModel: payload.proxyModel,
-      codexAgent: runContext.repoSettings.codexAgent,
+      // the account opt-in and the canary arm are both admissions to codex, so
+      // they OR: an account that opted in explicitly always gets it, and the
+      // canary widens the pool without ever demoting a run that already had it.
+      codexAgent: runContext.repoSettings.codexAgent || payload.codexArm === true,
     });
+
+    // record the harness that actually ran. `agent` is what the run DID;
+    // `WorkflowRun.codexArm` is what it was ASSIGNED — comparing arms on the
+    // assignment is what keeps runs that die before this PATCH in the analysis.
+    toolState.agent = agent.name;
 
     // agent-agnostic best-effort for the model that ran: proxy spec for
     // router/oss runs, else the resolved model, else the slug.
@@ -1006,6 +1014,8 @@ export async function main(): Promise<MainResult> {
       // persist the resolved/effective model (what actually ran) so per-model
       // cost analytics don't have to parse the audit-only payload.
       if (toolState.model) patch.model = toolState.model;
+      if (toolState.agent) patch.agent = toolState.agent;
+      if (toolState.credential) patch.credential = toolState.credential;
       if (Object.keys(patch).length > 0) {
         await patchWorkflowRunFields(toolContext, patch);
       }

@@ -501,6 +501,9 @@ type RunParams = {
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
+  /** bare OpenAI model id, used only to price the run — the model itself reaches
+   * the CLI through `args`/config, not from here. */
+  model?: string | undefined;
   todoTracker?: TodoTracker | undefined;
   onActivityTimeout?: (() => void) | undefined;
   onToolUse?: ((event: { toolName: string; input: unknown }) => void) | undefined;
@@ -518,6 +521,60 @@ function toTodoWriteInput(item: Extract<ThreadItem, { type: "todo_list" }>): unk
       status: todo.completed ? "completed" : "pending",
     })),
   };
+}
+
+/**
+ * Per-million-token USD list prices for the OpenAI models codex can run,
+ * mirrored from models.dev — the same catalog the `reasoning_options` effort
+ * ladders come from — rather than fetched, so a run still costs no network call.
+ *
+ * This table exists because codex is the one harness that cannot report its own
+ * cost: claude-code gets `total_cost_usd` from Anthropic and opencode prices each
+ * part itself, but the Codex SDK's `Usage` carries TOKENS ONLY and no cost field.
+ * Without it every codex run persists a null `costUsd` and contributes $0 to
+ * every spend surface (`runAnalytics` simply sums the column).
+ *
+ * A model absent here yields `undefined`, never 0 — an unknown price must not
+ * read as free, which would silently understate real spend.
+ *
+ * These are LIST prices, and two caveats ride with them. A run on a ChatGPT
+ * subscription (`CODEX_AUTH_JSON`) spends no per-token money at all, so its
+ * figure is what the run WOULD have cost on the API — consistent with
+ * `WorkflowRun.costUsd` being modelled rather than invoiced. And these are the
+ * base tier: OpenAI bills roughly double above a 200k context, so a
+ * long-context turn is under-counted here.
+ */
+const CODEX_MODEL_PRICING: Record<
+  string,
+  { input: number; cacheRead: number; cacheWrite: number; output: number }
+> = {
+  "gpt-5.6-sol": { input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30 },
+  "gpt-5.6-luna": { input: 0.2, cacheRead: 0.02, cacheWrite: 0.25, output: 1.2 },
+  "gpt-5.6-terra": { input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 12 },
+};
+
+/** modelled USD for a codex run; `undefined` when we hold no price for the model. */
+function codexCostUsd(params: {
+  model: string | undefined;
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}): number | undefined {
+  const price = params.model ? CODEX_MODEL_PRICING[params.model] : undefined;
+  if (!price) return undefined;
+  // `input_tokens` is INCLUSIVE of BOTH cache figures (see the accumulator
+  // below), so the three slices PARTITION it and each carries its own rate.
+  // cache writes bill at 1.25x uncached input, so folding them into `fresh`
+  // understates every cache-writing run.
+  const fresh = Math.max(0, params.input - params.cacheRead - params.cacheWrite);
+  const usd =
+    (fresh * price.input +
+      params.cacheRead * price.cacheRead +
+      params.cacheWrite * price.cacheWrite +
+      params.output * price.output) /
+    1_000_000;
+  return usd > 0 ? usd : undefined;
 }
 
 async function runCodex(params: RunParams): Promise<CodexRunResult> {
@@ -544,7 +601,7 @@ async function runCodex(params: RunParams): Promise<CodexRunResult> {
   // adding either cache number to it double-counts. `cacheWriteTokens` is
   // deliberately left unset for the same reason — `AgentUsage` and
   // `logTokenTable` both define it as an ADDITIVE column.
-  const tokens = { input: 0, cacheRead: 0, output: 0 };
+  const tokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
 
   function buildUsage(): AgentUsage | undefined {
     if (tokens.input === 0 && tokens.output === 0) return undefined;
@@ -553,6 +610,7 @@ async function runCodex(params: RunParams): Promise<CodexRunResult> {
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       cacheReadTokens: tokens.cacheRead || undefined,
+      costUsd: codexCostUsd({ model: params.model, ...tokens }),
     };
   }
 
@@ -621,6 +679,9 @@ async function runCodex(params: RunParams): Promise<CodexRunResult> {
       case "turn.completed":
         tokens.input += event.usage.input_tokens ?? 0;
         tokens.cacheRead += event.usage.cached_input_tokens ?? 0;
+        // pricing only. deliberately NOT surfaced as `cacheWriteTokens`, which
+        // `AgentUsage` and `logTokenTable` both define as an ADDITIVE column.
+        tokens.cacheWrite += event.usage.cache_write_input_tokens ?? 0;
         tokens.output += event.usage.output_tokens ?? 0;
         return;
       case "turn.failed":
@@ -825,6 +886,17 @@ export const codex = agent({
       env.CODEX_API_KEY = process.env.OPENAI_API_KEY;
     }
 
+    // the two arms above are mutually exclusive, so which one ran IS the answer
+    // to "did this run spend per-token money": a ChatGPT subscription spends
+    // none, and `CODEX_MODEL_PRICING` therefore prices it at what it WOULD have
+    // cost on the API. recorded rather than re-derived later, because nothing
+    // downstream can see this env.
+    if (codexHomeAuth) {
+      ctx.toolState.credential = "subscription";
+    } else if (env.CODEX_API_KEY) {
+      ctx.toolState.credential = "api_key";
+    }
+
     // defence in depth behind the untrusted checkout: these outrank every config
     // layer, so the boundary holds even if trust semantics change. see
     // securityOverrideFlags.
@@ -837,7 +909,13 @@ export const codex = agent({
       effortRung: effort.rung && CODEX_EFFORTS.includes(effort.rung) ? effort.rung : undefined,
     });
 
-    const runnerArgs = { cliPath, cwd: process.cwd(), env, todoTracker: ctx.todoTracker };
+    const runnerArgs = {
+      cliPath,
+      cwd: process.cwd(),
+      env,
+      todoTracker: ctx.todoTracker,
+      model: resolveCodexModel(ctx),
+    };
     const initial = await runCodex({
       ...runnerArgs,
       args: [...securityFlags, "exec", "--json", ctx.instructions.full],

@@ -1314,6 +1314,33 @@ export const claude = agent({
       }
     }
 
+    // read the FINAL env, after the strip above has settled which credential
+    // claude-code will actually pick. mirrors its documented ranking — cloud
+    // provider (1) > ANTHROPIC_AUTH_TOKEN (2) > ANTHROPIC_API_KEY (3) >
+    // CLAUDE_CODE_OAUTH_TOKEN (5) — so this says what PAID, not merely what was
+    // present. left unset when none is, rather than guessing.
+    //
+    // the cloud rung reads the ENV VARS and not `isBedrockRoute`/`isVertexRoute`:
+    // those two mean "Pullfrog routed this run", while a workflow may set
+    // CLAUDE_CODE_USE_* itself (an always-Bedrock org policy) and the block above
+    // deliberately passes that through untouched. claude-code ranks a cloud
+    // provider first either way, so keying on our own routing would file those
+    // runs under whatever ranks lower — the exact misattribution this records to
+    // prevent. FOUNDRY has no Pullfrog route at all and is reachable only this way.
+    if (env.CLAUDE_CODE_USE_BEDROCK) {
+      ctx.toolState.credential = "bedrock";
+    } else if (env.CLAUDE_CODE_USE_VERTEX) {
+      ctx.toolState.credential = "vertex";
+    } else if (env.CLAUDE_CODE_USE_FOUNDRY) {
+      ctx.toolState.credential = "foundry";
+    } else if (env.ANTHROPIC_AUTH_TOKEN) {
+      ctx.toolState.credential = "gateway";
+    } else if (env.ANTHROPIC_API_KEY) {
+      ctx.toolState.credential = "api_key";
+    } else if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+      ctx.toolState.credential = "subscription";
+    }
+
     // the effective level is already in the startup block; only the override is
     // new information. we keep passing `--effort` rather than setting the env
     // var, so a customer's own value wins — same rule as every other

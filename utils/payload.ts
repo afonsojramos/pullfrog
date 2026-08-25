@@ -61,6 +61,9 @@ export const JsonPayload = type({
   // against a newer action across a rolling deploy.
   "checkRun?": type({ id: "string" }).or("undefined"),
   "generateSummary?": "boolean | undefined",
+  // optional so a payload from a pre-canary server build still parses against a
+  // newer action across a rolling deploy.
+  "codexArm?": "boolean | undefined",
 });
 
 // permission levels that indicate collaborator status (have push access)
@@ -272,6 +275,7 @@ export function resolvePayload(
     progressComment: jsonPayload?.progressComment,
     checkRun: jsonPayload?.checkRun,
     generateSummary: jsonPayload?.generateSummary,
+    codexArm: jsonPayload?.codexArm,
 
     // permissions: inputs > repoSettings > fallbacks
     push: inputs.push ?? repoSettings.push ?? "restricted",

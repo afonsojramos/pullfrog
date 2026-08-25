@@ -22,6 +22,8 @@ const STRING_KEYS = [
   "planCommentNodeId",
   "summarySnapshot",
   "model",
+  "agent",
+  "credential",
 ] as const;
 
 /**

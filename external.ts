@@ -436,6 +436,13 @@ export interface WriteablePayload {
   checkRun?: { id: string } | undefined;
   /** when true, seed the PR summary tmpfile + persist edits at run end */
   generateSummary?: boolean | undefined;
+  /**
+   * the codex canary assigned this run to the EXPERIMENTAL codex harness. rolled
+   * once server-side at reservation and stamped on the run row, so the row and the
+   * run always agree on which arm this was. ORed with the account opt-in in
+   * `resolveAgent` — it widens who reaches codex, never narrows it.
+   */
+  codexArm?: boolean | undefined;
 }
 
 // immutable payload type for agent execution

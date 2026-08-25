@@ -90,6 +90,23 @@ export function hasPostRunIssues(issues: PostRunIssues): boolean {
  * cache hit ratio at a glance. Dashboards that query `WorkflowRun.inputTokens`
  * directly are seeing the full total, not the log column.
  */
+/**
+ * Which credential actually paid for a run.
+ *
+ * `subscription` is the one that changes what a cost figure MEANS: a Claude
+ * Pro/Max or ChatGPT subscription moves no per-token money, so a dollar figure
+ * on such a run is what it WOULD have cost on the API, not spend. Without this
+ * recorded, `WorkflowRun.costUsd` silently mixes the two and there is no way
+ * after the fact to separate them.
+ */
+export type AgentCredential =
+  | "subscription"
+  | "api_key"
+  | "gateway"
+  | "bedrock"
+  | "vertex"
+  | "foundry";
+
 export interface AgentUsage {
   agent: string;
   /** full billable input: non-cached + cache read + cache write */
