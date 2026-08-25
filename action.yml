@@ -34,7 +34,7 @@ inputs:
     description: "DEPRECATED — both checks are now repository settings, editable in the Pullfrog console (Automations → Review PRs). Set them there and drop this input. It keeps working on v0 either way: it can only turn a check on, and silently ignoring it would strip a required check from anyone still relying on it."
     required: false
   progress_comments:
-    description: "Post the temporary `Leaping into action...` comment and its live task-list updates: enabled (default) or disabled. Overrides the repository setting. Final reviews, result comments, and failure reports are unaffected."
+    description: "Suppress the progress comment's live task-list updates: enabled (default) or disabled. It does NOT stop the initial `Leaping into action...` comment — the server posts that before the run starts and never reads workflow YAML, so only the repository setting suppresses it (Pullfrog console → Comments → Progress comments), which is what to use if you want no progress comment at all. Final reviews, result comments, and failure reports are unaffected."
     required: false
   output_schema:
     description: "JSON Schema (draft-07) for structured output validation. When provided, the action output becomes required and must conform to this schema."
