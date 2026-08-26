@@ -523,12 +523,21 @@ export function validateAgentApiKey(params: {
  *   - org-disabled Claude subscription (#1072): `Your organization has
  *     disabled Claude subscription access for Claude Code`, an entitlement
  *     denial with its own remedy — see isClaudeSubscriptionDisabledError.
+ *   - OpenAI rejected key: `Incorrect API key provided: sk-proj-***`, OpenAI's
+ *     own wording for a revoked, rotated or wrong-project key. Absent from this
+ *     list every such run rendered the generic one-line "Run failed." with no
+ *     cause at all — measured on two accounts sitting at 100% failure, one of
+ *     them for a week. Matched on the full phrase rather than "Incorrect API
+ *     key" alone for the reason the markers above are phrased distinctively:
+ *     this predicate short-circuits the whole rendering pipeline on a substring
+ *     of arbitrary agent output.
  */
 export function isApiKeyAuthError(text: string): boolean {
   if (!text) return false;
   return (
     text.includes(MISSING_KEY_MARKER) ||
     /Invalid API key/i.test(text) ||
+    /Incorrect API key provided/i.test(text) ||
     /\bUser not found\b/i.test(text) ||
     /\bInvalid authentication\b/i.test(text) ||
     /authentication_error/i.test(text) ||
