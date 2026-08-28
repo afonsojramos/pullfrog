@@ -539,7 +539,13 @@ export const providers = {
       },
       "kimi-k2": {
         displayName: "Kimi K2",
-        resolve: "opencode/kimi-k2.7-code",
+        // k2.7-code is UNDEPLOYED on Zen — still listed in /zen/v1/models, but
+        // the endpoint answers 400 `[NOT_FOUND] Model not found, inaccessible,
+        // and/or not deployed` (measured 2026-08-28; k2.6 200 on the same key).
+        // opencode-go is no escape: its own kimi-k2 resolves to the SAME model
+        // id. k2.6 is the newest build Zen will actually serve, and the mirror
+        // guard permits the step down because k2.7-code is in ZEN_UNDEPLOYED.
+        resolve: "opencode/kimi-k2.6",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
       },
       // slug pins the m2 line for DB stability; resolve tracks the current m2.7.

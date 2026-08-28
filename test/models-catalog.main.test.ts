@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROXY_MODEL, modelAliases, resolveDisplayAlias } from "../models.ts";
+import { ZEN_UNDEPLOYED } from "./coverage.ts";
 
 // ── catalog drift tests ─────────────────────────────────────────────────────
 //
@@ -225,7 +226,11 @@ const zenApi = fetch("https://opencode.ai/zen/v1/models").then(
 
 describe("opencode Zen served list", async () => {
   const zenData = await zenApi;
-  const zenIds = new Set(zenData.data.map((m) => m.id));
+  // listing is not serving — subtract the models measured as undeployed, so a
+  // dead model fails here instead of passing on catalog membership alone.
+  const zenIds = new Set(
+    zenData.data.map((m) => m.id).filter((id) => !ZEN_UNDEPLOYED.includes(id))
+  );
   const seen = new Set<string>();
 
   for (const alias of modelAliases) {
@@ -254,7 +259,12 @@ describe("opencode Zen served list", async () => {
 // no sibling alias may name a Zen-served model newer than the mirror's own.
 describe("opencode mirrors don't trail their siblings", async () => {
   const data = await api;
-  const zenIds = new Set((await zenApi).data.map((m) => m.id));
+  // same subtraction as the served-list check: a sibling sitting on a model Zen
+  // will not serve is not "ahead", and treating it as ahead pins this mirror to
+  // the dead build and rejects the step down to a served one.
+  const zenIds = new Set(
+    (await zenApi).data.map((m) => m.id).filter((id) => !ZEN_UNDEPLOYED.includes(id))
+  );
   const modelId = (spec: string) => spec.slice(spec.lastIndexOf("/") + 1);
   const aliasKey = (slug: string) => slug.slice(slug.indexOf("/") + 1);
   const released = (spec: string) => {
