@@ -429,14 +429,19 @@ export const providers = {
         effort: ["low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/anthropic/claude-opus-5",
         subagentModel: "claude-sonnet",
-        // TEMPORARY — clear this when Zen serves opus again. Zen still LISTS
-        // claude-opus-5 in /zen/v1/models, so the catalog test passes, but the
-        // endpoint answers 503 `Upstream request failed: Endpoint is
-        // unavailable.` (measured 5/5; claude-sonnet-5, claude-opus-4-8,
-        // claude-haiku-4-5 and claude-fable-5 all 200 on the same key). opencode
-        // retries the 503 above the AI SDK emitting no part.updated, so a run
-        // just produces nothing until it is killed — metaideas/init logged six
-        // zero-output failures from 2026-08-23. see wiki/opencode-silent-stall.md
+        // TEMPORARY — clear this ONLY when opus completes a run through opencode,
+        // never when the endpoint merely answers. Zen LISTS claude-opus-5 in
+        // /zen/v1/models, so the catalog test passes; on 2026-08-25 the endpoint
+        // itself answered 503 `Upstream request failed: Endpoint is unavailable.`
+        // (measured 5/5; claude-sonnet-5, claude-opus-4-8, claude-haiku-4-5 and
+        // claude-fable-5 all 200 on the same key). opencode retries above the AI
+        // SDK emitting no part.updated, so a run just produces nothing until it is
+        // killed — metaideas/init logged six zero-output failures from 2026-08-23.
+        // The 503 has since cleared and the model is STILL unusable: re-measured
+        // 2026-08-26, direct POST /zen/v1/messages is 10/10 200 at 1.3-4.1s while
+        // `opencode run --model opencode/claude-opus-5` on the same trivial prompt
+        // emitted nothing for 240s in CI. A raw-endpoint 200 is not runtime
+        // availability. see wiki/opencode-silent-stall.md
         fallback: "opencode/claude-sonnet",
       },
       "claude-sonnet": {
