@@ -73,7 +73,8 @@ export interface ModelAlias {
   effort: readonly string[] | undefined;
   /** effort rungs on the OpenRouter route, when they differ from `effort` (the
    * DeepSeek/GLM top rung is `max` natively but `xhigh` via OpenRouter).
-   * undefined falls back to `effort`. */
+   * undefined falls back to `effort`; `[]` says the OpenRouter route publishes
+   * no rungs at all, which undefined cannot express. */
   openRouterEffort: readonly string[] | undefined;
   /** hide from selectable lists (UI dropdowns, CLI pickers). does NOT affect
    * resolution — for that use `fallback`. used to keep a redundant alias out of
@@ -572,22 +573,139 @@ export const providers = {
       },
     },
   }),
+  // OpenCode Go is a separate $10/mo subscription from Zen, served on its own
+  // base URL (`https://opencode.ai/zen/go/v1`) but authenticated with the SAME
+  // `OPENCODE_API_KEY`. it carries the open-weight coding models plus a couple
+  // of frontier ones, and 14 of the ids below are served ONLY here — Zen's
+  // `/v1/models` does not list glm-5.3*, qwen3.7/3.8-*, mimo-*, longcat-2.0,
+  // hy3 or muse-spark. so for a Go subscriber this provider is not a duplicate
+  // route to Zen, it is the only route to most of what they pay for.
+  // like `opencode` and `openrouter` this is a ROUTER, not a vendor: slugs and
+  // display names mirror the upstream brand tier, and the picker groups them
+  // under the upstream vendor.
   "opencode-go": provider({
     displayName: "OpenCode Go",
     envVars: ["OPENCODE_API_KEY"],
     models: {
+      // Z.ai — the plan's flagship coding family, and the only route the
+      // catalog offers to GLM at all.
+      glm: {
+        displayName: "GLM",
+        resolve: "opencode-go/glm-5.3",
+        effort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/z-ai/glm-5.3",
+        preferred: true,
+        subagentModel: "glm-flash",
+      },
+      "glm-flash": {
+        displayName: "GLM Flash",
+        resolve: "opencode-go/glm-5.3-flash",
+        effort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/z-ai/glm-5.3-flash",
+      },
+      // legacy alias — the slug pinned a version instead of a brand tier and
+      // was already resolving to 5.2 under a "GLM 5.2" label. folds forward to
+      // the tier slug; 16 repos and 9 accounts still hold it.
       "glm-5.1": {
         displayName: "GLM 5.2",
         resolve: "opencode-go/glm-5.2",
         effort: ["high", "max"],
         openRouterEffort: ["high", "xhigh"],
         openRouterResolve: "openrouter/z-ai/glm-5.2",
-        preferred: true,
+        fallback: "opencode-go/glm",
+      },
+      // Moonshot — parity with moonshotai/* and openrouter/*.
+      "kimi-k3": {
+        displayName: "Kimi K3",
+        resolve: "opencode-go/kimi-k3",
+        // Go publishes a single rung for K3 where the OpenRouter route
+        // publishes three, so every position lands on `max` here.
+        effort: ["max"],
+        openRouterEffort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/moonshotai/kimi-k3",
+        subagentModel: "kimi-k2",
       },
       "kimi-k2": {
         displayName: "Kimi K2",
         resolve: "opencode-go/kimi-k2.7-code",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
+      },
+      // DeepSeek and Muse Spark are deliberately ABSENT even though Go serves
+      // them and prices DeepSeek Pro below Zen. each sits behind a per-workspace
+      // opt-in that is off by default — measured, the run dies with
+      // `RegionError` ("only available hosted in China") and `DataPolicyError`
+      // ("collects data used to improve its quality"). that toggle lives on the
+      // CUSTOMER's OpenCode workspace, so no change here can satisfy it, and a
+      // picker row that fails for almost everyone is worse than none. DeepSeek
+      // stays reachable ungated via `deepseek/*`, `opencode/*` and
+      // `openrouter/*`; both remain runnable by full specifier once opted in.
+      // Alibaba — new vendor family for the catalog; Zen serves neither tier.
+      "qwen-max": {
+        displayName: "Qwen Max",
+        resolve: "opencode-go/qwen3.8-max",
+        // both routes publish rungs, and they are different sets rather than
+        // different spellings of one — OpenRouter carries a `minimal` and a
+        // `high` the Go route does not.
+        effort: ["low", "medium", "xhigh"],
+        openRouterEffort: ["minimal", "low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/qwen/qwen3.8-max",
+      },
+      "qwen-plus": {
+        displayName: "Qwen Plus",
+        resolve: "opencode-go/qwen3.7-plus",
+        openRouterResolve: "openrouter/qwen/qwen3.7-plus",
+      },
+      // MiniMax — parity with opencode/* and openrouter/*; the m2 slug pins the
+      // line for DB stability while the resolve tracks the current m2.7.
+      "minimax-m3": {
+        displayName: "MiniMax M3",
+        resolve: "opencode-go/minimax-m3",
+        openRouterResolve: "openrouter/minimax/minimax-m3",
+      },
+      "minimax-m2.5": {
+        displayName: "MiniMax M2",
+        resolve: "opencode-go/minimax-m2.7",
+        openRouterResolve: "openrouter/minimax/minimax-m2.7",
+      },
+      // Xiaomi — Go-only; Zen serves the free `mimo-v2-pro-free` promo instead.
+      "mimo-pro": {
+        displayName: "MiMo Pro",
+        resolve: "opencode-go/mimo-v2.5-pro",
+        openRouterResolve: "openrouter/xiaomi/mimo-v2.5-pro",
+      },
+      // Meituan — Go-only.
+      longcat: {
+        displayName: "LongCat",
+        resolve: "opencode-go/longcat-2.0",
+        openRouterResolve: "openrouter/meituan/longcat-2.0",
+      },
+      // Tencent — Go-only, and the cheapest model on the plan by an order of
+      // magnitude (0.0175/0.0725). Hy3 succeeds the Hunyuan 2.0 line, so the
+      // generation is part of the product name the way Kimi K2/K3 is.
+      hy3: {
+        displayName: "Hy3",
+        resolve: "opencode-go/hy3",
+        effort: ["none", "low", "high"],
+        openRouterResolve: "openrouter/tencent/hy3",
+      },
+      // xAI and OpenAI — the two non-open models on the plan. same list price as
+      // Zen, but a Go subscription covers them where Zen meters them.
+      // Go is the only route that has retired grok-4.5 (models.dev marks
+      // `opencode-go/grok-4.5` deprecated while every other provider still
+      // serves it), so this alias LEADS `xai/grok` by a generation. a mirror
+      // that leads is safe; it is the trailing case that rots — see
+      // wiki/models-catalog.md on `opencode/kimi-k2`.
+      grok: {
+        displayName: "Grok",
+        resolve: "opencode-go/grok-4.6",
+        effort: ["low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/x-ai/grok-4.6",
+      },
+      "gpt-luna": {
+        displayName: "GPT Luna",
+        resolve: "opencode-go/gpt-5.6-luna",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
       },
     },
   }),

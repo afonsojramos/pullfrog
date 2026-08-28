@@ -91,7 +91,7 @@ export const providers: ProviderEntry[] = [
   // is the one live-model cost no filter could reach.
   {
     name: "opencode-go",
-    flagship: "opencode-go/glm-5.1",
+    flagship: "opencode-go/glm",
     agent: "opencode",
     coverage: SHARED_OPENCODE_COVERAGE,
   },
