@@ -71,6 +71,7 @@ import {
   CREDENTIAL_REJECTED_MARKER,
   formatApiKeyErrorSummary,
   isApiKeyAuthError,
+  isByokSetupError,
   ROUTER_UNFUNDED_MARKER,
   SECRETS_UNAVAILABLE_MARKER,
 } from "./apiKeys.ts";
@@ -348,6 +349,21 @@ function formatProviderMissingCredential(input: {
   ].join("\n");
 }
 
+/**
+ * A BYOK provider setup is incomplete. The thrown message is already
+ * customer-ready — what is missing, the remedy, a docs link — so it is passed
+ * through verbatim under a headline and a console link rather than rewritten.
+ */
+function formatByokSetupSummary(input: { owner: string; name: string; raw: string }): string {
+  return [
+    "**This repo's model isn't fully set up yet.**",
+    "",
+    input.raw,
+    "",
+    `[Configure model →](${getApiUrl()}/console/${input.owner}/${input.name})`,
+  ].join("\n");
+}
+
 function formatProviderModelNotFoundSummary(input: {
   owner: string;
   name: string;
@@ -471,6 +487,21 @@ export function renderRunError(input: {
       owner: input.repo.owner,
       name: input.repo.name,
       errorMessage: input.errorMessage,
+    });
+    return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
+  }
+
+  // both BYOK setup layers — `resolveSlug`'s routing-slug refusal and the
+  // per-provider `validate*Setup` checks — already name what is missing, the
+  // remedy and the docs page. none carries provider or status text, so nothing
+  // above matches them and the generic branch below collapsed the comment to
+  // `Run failed.`, writing the answer to the job summary and nowhere the
+  // customer looks.
+  if (isByokSetupError(input.errorMessage)) {
+    const body = formatByokSetupSummary({
+      owner: input.repo.owner,
+      name: input.repo.name,
+      raw: input.errorMessage,
     });
     return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
   }

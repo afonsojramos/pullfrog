@@ -215,8 +215,7 @@ export interface ToolState {
   // exact bytes of the seeded learnings file at run start. compared
   // against the file content at end-of-run to detect "agent never touched
   // it" — in that case persistLearnings skips the DB PATCH (saving the
-  // identical content would be a no-op write that wastes a LearningsRevision
-  // row and the API round-trip).
+  // identical content would be a no-op write).
   learningsSeed?: string;
   // mirror of `summaryPersistAttempted` for the learnings tmpfile — guards
   // the error-path / exit-signal callers from a redundant second PATCH

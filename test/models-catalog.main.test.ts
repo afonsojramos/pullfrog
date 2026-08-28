@@ -117,19 +117,30 @@ describe("effort ladders mirror models.dev", async () => {
     return options?.find((o) => o.type === "effort")?.values;
   };
 
+  // "no rungs" has two spellings and the whole runtime already collapses them:
+  // `resolveRung` returns undefined on an empty ladder, and both console pickers
+  // call `offeredRungs(published ?? [])`. only this assertion distinguished them,
+  // which left a model whose route publishes a reasoning TOGGLE inexpressible —
+  // an absent `openRouterEffort` falls through to `effort`, so the alias could
+  // not say "the direct route has a ladder, this one has none" without failing.
+  const rungs = (values: readonly string[] | undefined) => (values?.length ? values : undefined);
+
   for (const alias of modelAliases) {
     if (alias.routing || alias.fallback) continue;
 
     it(`${alias.slug} effort matches models.dev`, () => {
-      expect(publishedEffort(alias.resolve)).toEqual(alias.effort);
+      expect(rungs(publishedEffort(alias.resolve))).toEqual(rungs(alias.effort));
     });
 
     // hoisted so the narrowing survives into the callback
     const routerResolve = alias.openRouterResolve;
     if (routerResolve) {
       it(`${alias.slug} openRouterEffort matches models.dev`, () => {
-        // an absent openRouterEffort means "same ladder as direct"
-        expect(publishedEffort(routerResolve)).toEqual(alias.openRouterEffort ?? alias.effort);
+        // an absent openRouterEffort means "same ladder as direct"; `[]` means
+        // "this route publishes none", which is not the same claim.
+        expect(rungs(publishedEffort(routerResolve))).toEqual(
+          rungs(alias.openRouterEffort ?? alias.effort)
+        );
       });
     }
   }

@@ -260,6 +260,11 @@ export const providers = {
         resolve: "openai/o3",
         effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/openai/o3",
+        // OpenRouter publishes a reasoning TOGGLE for o3 where direct OpenAI
+        // publishes a ladder, so the route genuinely has no rungs. `[]` rather
+        // than omitting the field: an absent openRouterEffort falls through to
+        // `effort` and would send a rung this route rejects.
+        openRouterEffort: [],
       },
     },
   }),
@@ -754,7 +759,6 @@ export const providers = {
       "o4-mini": {
         displayName: "O4 Mini",
         resolve: "openrouter/openai/o4-mini",
-        effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/openai/o4-mini",
       },
       "gemini-pro": {

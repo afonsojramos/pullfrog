@@ -28,6 +28,41 @@ import {
 
 /** marker prefix on the throw message for the catch-side reclassification path */
 const MISSING_KEY_MARKER = "no API key found";
+/** shared sentence in the four `resolveSlug` routing-slug throws. */
+export const BYOK_SLUG_MARKER = "env var is required when the model is set to";
+/** shared sentence in the four `validate*Setup` throws. */
+export const BYOK_CONFIG_MARKER = "selected but required configuration is missing:";
+
+/**
+ * What an owned setup error looks like from character zero: an ALL-CAPS env var
+ * name before the slug marker, or a capitalised provider name (up to four words,
+ * for `Google Vertex AI model`) before the config marker. Neither marker contains
+ * a regex metacharacter, so both interpolate literally.
+ */
+const BYOK_SETUP_PATTERN = new RegExp(
+  `^(?:[A-Z][A-Z0-9_]+ ${BYOK_SLUG_MARKER}|[A-Z][\\w-]*(?: [\\w-]+){0,3} ${BYOK_CONFIG_MARKER})`
+);
+
+/**
+ * A BYOK provider setup is incomplete, at either of the two points that catch it:
+ * `resolveSlug` refusing a routing slug whose backing env var is unset, and the
+ * per-provider `validate*Setup` check that runs once the slug resolves. All eight
+ * messages already name what is missing, the remedy and a docs page, so the
+ * renderer passes them through rather than rewriting them. Before this they
+ * matched no branch at all, and `renderRunError` writes `errorMessage` to the job
+ * summary but not to the comment — so the answer existed on every one of these
+ * runs and the customer's PR comment read `Run failed.`
+ *
+ * Matched from character zero rather than searched anywhere in the text, because
+ * a match publishes the WHOLE message verbatim to a customer's PR and
+ * `errorMessage` is not always ours: `postRun` builds one out of a repo's own
+ * stop-hook output, which is arbitrary text the customer's script printed. A
+ * message that merely CONTAINS one of these errors is something quoting us, and
+ * passing it through would republish everything around it.
+ */
+export function isByokSetupError(text: string): boolean {
+  return BYOK_SETUP_PATTERN.test(text);
+}
 
 /**
  * marker for the distinct "run-context couldn't hand over your stored secrets"
@@ -163,7 +198,7 @@ function buildBedrockSetupError(params: {
 }): string {
   const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
 
-  return `Bedrock model selected but required configuration is missing: ${params.missing.join(", ")}.
+  return `Bedrock model ${BYOK_CONFIG_MARKER} ${params.missing.join(", ")}.
 
 add the missing secret(s) to your GitHub repository at ${githubSecretsUrl}, then reference them in your workflow's \`env:\` block:
 
@@ -179,7 +214,7 @@ for full setup instructions, see https://docs.pullfrog.com/bedrock`;
 function buildVertexSetupError(params: { owner: string; name: string; missing: string[] }): string {
   const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
 
-  return `Google Vertex AI model selected but required configuration is missing: ${params.missing.join(", ")}.
+  return `Google Vertex AI model ${BYOK_CONFIG_MARKER} ${params.missing.join(", ")}.
 
 add the missing secret(s) to your GitHub repository at ${githubSecretsUrl}, then reference them in your workflow's \`env:\` block:
 
@@ -198,7 +233,7 @@ function buildOpenAICompatibleSetupError(params: {
 }): string {
   const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
 
-  return `OpenAI-compatible model selected but required configuration is missing: ${params.missing.join(", ")}.
+  return `OpenAI-compatible model ${BYOK_CONFIG_MARKER} ${params.missing.join(", ")}.
 
 only the API key is sensitive — add it as a secret at ${githubSecretsUrl}. everything else is plain workflow \`env:\`:
 
@@ -219,7 +254,7 @@ for full setup instructions, see https://docs.pullfrog.com/openai-compatible`;
 function buildAzureSetupError(params: { owner: string; name: string; missing: string[] }): string {
   const githubSecretsUrl = `https://github.com/${params.owner}/${params.name}/settings/secrets/actions`;
 
-  return `Azure OpenAI selected but required configuration is missing: ${params.missing.join(", ")}.
+  return `Azure OpenAI ${BYOK_CONFIG_MARKER} ${params.missing.join(", ")}.
 
 only the API key is sensitive — add it as a secret at ${githubSecretsUrl}. the rest is plain workflow \`env:\`:
 

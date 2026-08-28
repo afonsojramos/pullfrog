@@ -92,11 +92,7 @@ export async function readLearningsFile(path: string): Promise<string | null> {
  * Best-effort: any failure is logged and does not affect the run's success
  * status. Skips the PATCH when the file is byte-trim-identical to its seed —
  * the agent didn't touch it, so writing the same content back would just
- * burn a `LearningsRevision` row and an API round-trip.
- *
- * `ctx.toolState.model` is forwarded so `LearningsRevision.model` keeps
- * populating; it powers the per-revision attribution badge in the UI
- * history view.
+ * burn an API round-trip.
  *
  * `learningsPersistAttempted` guards against double-execution between the
  * normal end-of-run path and the SIGINT/SIGTERM handler.
@@ -134,10 +130,7 @@ export async function persistLearnings(ctx: ToolContext): Promise<void> {
         authorization: `Bearer ${ctx.apiToken}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        learnings: current,
-        model: ctx.toolState.model,
-      }),
+      body: JSON.stringify({ learnings: current }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
@@ -191,7 +184,7 @@ export async function persistXrepoLearnings(ctx: ToolContext): Promise<void> {
         authorization: `Bearer ${ctx.apiToken}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ learnings: current, model: ctx.toolState.model }),
+      body: JSON.stringify({ learnings: current }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {

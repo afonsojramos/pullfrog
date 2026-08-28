@@ -13,6 +13,7 @@ import {
   resolveDisplayAlias,
   VERTEX_MODEL_ID_ENV,
 } from "../models.ts";
+import { BYOK_SLUG_MARKER } from "./apiKeys.ts";
 import { log } from "./cli.ts";
 import { VERTEX_SERVICE_ACCOUNT_JSON_ENV } from "./vertex.ts";
 
@@ -64,7 +65,7 @@ function resolveSlug(slug: string): string | undefined {
     const bedrockId = process.env[BEDROCK_MODEL_ID_ENV]?.trim();
     if (!bedrockId) {
       throw new Error(
-        `${BEDROCK_MODEL_ID_ENV} env var is required when the model is set to "${slug}". ` +
+        `${BEDROCK_MODEL_ID_ENV} ${BYOK_SLUG_MARKER} "${slug}". ` +
           `set it to an AWS Bedrock model ID from the Bedrock console. ` +
           `see https://docs.pullfrog.com/bedrock for setup.`
       );
@@ -75,7 +76,7 @@ function resolveSlug(slug: string): string | undefined {
     const vertexId = process.env[VERTEX_MODEL_ID_ENV]?.trim();
     if (!vertexId) {
       throw new Error(
-        `${VERTEX_MODEL_ID_ENV} env var is required when the model is set to "${slug}". ` +
+        `${VERTEX_MODEL_ID_ENV} ${BYOK_SLUG_MARKER} "${slug}". ` +
           `set it to a Google Vertex AI model ID from Model Garden. ` +
           `see https://docs.pullfrog.com/vertex for setup.`
       );
@@ -86,7 +87,7 @@ function resolveSlug(slug: string): string | undefined {
     const deployment = process.env[AZURE_DEPLOYMENT_ENV]?.trim();
     if (!deployment) {
       throw new Error(
-        `${AZURE_DEPLOYMENT_ENV} env var is required when the model is set to "${slug}". ` +
+        `${AZURE_DEPLOYMENT_ENV} ${BYOK_SLUG_MARKER} "${slug}". ` +
           `set it to the name of your Azure OpenAI deployment (not the model it serves — ` +
           `Azure routes on the deployment name). ` +
           `see https://docs.pullfrog.com/azure for setup.`
@@ -98,7 +99,7 @@ function resolveSlug(slug: string): string | undefined {
     const modelId = process.env[OPENAI_COMPATIBLE_MODEL_ENV]?.trim();
     if (!modelId) {
       throw new Error(
-        `${OPENAI_COMPATIBLE_MODEL_ENV} env var is required when the model is set to "${slug}". ` +
+        `${OPENAI_COMPATIBLE_MODEL_ENV} ${BYOK_SLUG_MARKER} "${slug}". ` +
           `set it to the model ID served by your OpenAI-compatible endpoint ` +
           `(e.g. a Cloudflare AI Gateway or DashScope model). ` +
           `see https://docs.pullfrog.com/openai-compatible for setup.`
