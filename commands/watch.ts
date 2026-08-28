@@ -2,32 +2,31 @@
 // emit one structured JSON line per new review / comment / inline review thread
 // / PR state change / check-suite completion, WITHOUT polling GitHub. the server
 // fans these out from the webhook pipeline it already receives, so latency is
-// sub-second and there is zero GitHub API spend.
+// sub-second and there is no per-event GitHub API spend.
 //
 // transport is cursor-based long-poll: each request holds open on the server
 // until new events land (or a short window elapses), then the client
-// immediately re-requests with the returned cursor. designed to feed Claude
-// Code's Monitor tool via its line-per-event stdout source.
+// immediately re-requests with the returned cursor.
+//
+// two shapes, because agent harnesses differ. the default is a daemon whose
+// stdout Claude Code's Monitor can consume. `--once` blocks for a single server
+// window and exits, which is the only shape Codex and opencode can consume —
+// neither has an affordance that reads a stream, but every harness can call a
+// command that returns. see `pullfrog mcp` for the same primitive as a tool.
 
 import arg from "arg";
 import pc from "picocolors";
 import * as yes from "../yes/index.ts";
-import { bail, getGhToken, PULLFROG_API_URL, parseGitRemote } from "./_shared.ts";
-
-type StreamEvent = {
-  cursor: string;
-  repo: string;
-  pr: number;
-  kind: string;
-  createdAt: string;
-  data: Record<string, unknown>;
-};
-
-type PollResult = { cursor: string; events: StreamEvent[] };
-
-// per-request ceiling — must exceed the server long-poll window (25s) so the
-// held connection returns normally rather than aborting client-side.
-const REQUEST_TIMEOUT_MS = 35_000;
+import {
+  isTerminal,
+  pollPrEvents,
+  resolveCursor,
+  SERVER_POLL_WINDOW_MS,
+  type StreamEvent,
+  waitForPrEvents,
+  writeCursor,
+} from "./_prEvents.ts";
+import { bail, getGhToken, parseGitRemote } from "./_shared.ts";
 
 function parseWatchArgs(args: string[]) {
   return arg(
@@ -35,6 +34,7 @@ function parseWatchArgs(args: string[]) {
       "--pr": Number,
       "--pretty": Boolean,
       "--since": String,
+      "--once": Boolean,
       "--help": Boolean,
       "-h": "--help",
       "-p": "--pretty",
@@ -51,7 +51,8 @@ function printUsage(prog: string, stream: typeof console.log): void {
   stream("");
   stream("options:");
   stream("  --pr <number>    pull request number to watch (required)");
-  stream("  --since <cursor> resume from a cursor emitted by a prior event");
+  stream("  --once           wait for one batch of events, print it, and exit");
+  stream("  --since <cursor> resume from a cursor instead of the saved position");
   stream("  -p, --pretty     human-readable output instead of JSON lines");
   stream("  -h, --help       show help");
 }
@@ -61,42 +62,6 @@ function resolveRepo(positional: string | undefined): { owner: string; repo: str
   const match = positional.match(/^([^/\s]+)\/([^/\s]+)$/);
   if (!match) bail(`invalid repo "${positional}" — expected <owner>/<repo>`);
   return { owner: match[1], repo: match[2] };
-}
-
-async function pollOnce(ctx: {
-  owner: string;
-  repo: string;
-  pr: number;
-  token: string;
-  cursor: string | undefined;
-}): Promise<PollResult> {
-  const params = new URLSearchParams({
-    owner: ctx.owner,
-    repo: ctx.repo,
-    pr: String(ctx.pr),
-  });
-  if (ctx.cursor !== undefined) params.set("since", ctx.cursor);
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${PULLFROG_API_URL}/api/cli/pr-events?${params}`, {
-      headers: { authorization: `Bearer ${ctx.token}` },
-      signal: controller.signal,
-    });
-    if (response.status === 401 || response.status === 403) {
-      bail("invalid or expired github token — run `gh auth login`.");
-    }
-    if (response.status === 404) {
-      bail(`repository ${ctx.owner}/${ctx.repo} not found or Pullfrog not installed on it.`);
-    }
-    if (!response.ok) {
-      throw new Error(`pr-events returned ${response.status}`);
-    }
-    return (await response.json()) as PollResult;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function formatPretty(event: StreamEvent): string {
@@ -110,6 +75,12 @@ function formatPretty(event: StreamEvent): string {
         : "";
   const detail = [action, actor && pc.dim(`by ${actor}`)].filter(Boolean).join(" ");
   return `${pc.dim(time)} ${pc.cyan(event.kind)} ${pc.bold(`#${event.pr}`)} ${detail}`.trimEnd();
+}
+
+function emit(events: StreamEvent[], pretty: boolean): void {
+  for (const event of events) {
+    process.stdout.write(pretty ? `${formatPretty(event)}\n` : `${JSON.stringify(event)}\n`);
+  }
 }
 
 export async function runCli(input: { args: string[]; prog: string; showHelp: boolean }) {
@@ -135,25 +106,47 @@ export async function runCli(input: { args: string[]; prog: string; showHelp: bo
 
   const token = getGhToken();
   const pretty = parsed["--pretty"] === true;
-  let cursor = parsed["--since"];
+  const watched = { ...target, pr };
 
-  const poll = yes.op(pollOnce, {
+  let cursor: string;
+  try {
+    cursor = await resolveCursor({ ...watched, token, since: parsed["--since"] });
+
+    // `--once`: one bounded wait, then exit — the shape a harness can call as
+    // a tool. the daemon below is the shape only a stream reader can consume.
+    if (parsed["--once"] === true) {
+      const result = await waitForPrEvents({
+        ...watched,
+        token,
+        cursor,
+        maxWaitMs: SERVER_POLL_WINDOW_MS,
+      });
+      emit(result.events, pretty);
+      return;
+    }
+  } catch (error) {
+    if (isTerminal(error)) bail(error.message);
+    throw error;
+  }
+
+  const poll = yes.op(pollPrEvents, {
     name: "pr-events poll",
     retries: [1000, 2000, 5000, 10_000, 15_000],
+    bail: isTerminal,
   });
 
   // daemon loop — the loop is the whole command. `yes.op` smooths transient
-  // network blips within a cycle; terminal auth/not-found errors exit via bail
-  // inside pollOnce. a longer outage that exhausts the op's retries must NOT
-  // kill the watcher, so we back off and keep going rather than crash.
+  // network blips within a cycle. a longer outage that exhausts the op's
+  // retries must NOT kill the watcher, so we back off and keep going rather
+  // than crash; only a terminal auth/access answer exits.
   for (;;) {
     try {
-      const result = await poll({ owner: target.owner, repo: target.repo, pr, token, cursor });
+      const result = await poll({ ...watched, token, cursor });
       cursor = result.cursor;
-      for (const event of result.events) {
-        process.stdout.write(pretty ? `${formatPretty(event)}\n` : `${JSON.stringify(event)}\n`);
-      }
+      writeCursor(watched, cursor);
+      emit(result.events, pretty);
     } catch (error) {
+      if (isTerminal(error)) bail(error.message);
       const message = error instanceof Error ? error.message : String(error);
       console.error(pc.dim(`watch: ${message} — retrying in 30s`));
       await new Promise((resolve) => setTimeout(resolve, 30_000));

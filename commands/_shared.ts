@@ -40,37 +40,53 @@ export function handleCancel<T>(value: T | symbol): asserts value is T {
   }
 }
 
-export function getGhToken(): string {
-  let token: string;
+/** the gh token, or null when the cli is missing, unauthenticated, or silent.
+ * the non-exiting half of `getGhToken` — `pullfrog mcp` speaks JSON-RPC over
+ * stdout, so it cannot use a helper that exits through clack (which prints
+ * there and would corrupt the stream). */
+export function tryGetGhToken(): string | null {
   try {
-    token = execFileSync("gh", ["auth", "token"], { encoding: "utf-8" }).trim();
+    return execFileSync("gh", ["auth", "token"], { encoding: "utf-8" }).trim() || null;
   } catch {
-    bail(
-      `gh cli not found or not authenticated.\n` +
-        `  ${pc.dim("install:")} https://cli.github.com\n` +
-        `  ${pc.dim("then:")}    gh auth login`
-    );
+    return null;
   }
+}
+
+export const GH_TOKEN_HELP =
+  "gh cli not found or not authenticated. install https://cli.github.com, then run `gh auth login`.";
+
+export function getGhToken(): string {
+  const token = tryGetGhToken();
   if (!token) {
     bail(
-      `gh cli returned an empty token. try re-authenticating:\n` +
-        `  ${pc.dim("run:")} gh auth login`
+      `gh cli not found, not authenticated, or returned an empty token.\n` +
+        `  ${pc.dim("install:")} https://cli.github.com\n` +
+        `  ${pc.dim("then:")}    gh auth login`
     );
   }
   return token;
 }
 
-export function parseGitRemote(): { owner: string; repo: string } {
+/** owner/repo from the `origin` remote, or null when there isn't one we can
+ * parse. non-exiting twin of `parseGitRemote`, for the same stdout reason. */
+export function tryParseGitRemote(): { owner: string; repo: string } | null {
   let url: string;
   try {
     url = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf-8" }).trim();
   } catch {
-    bail("not a git repository or no 'origin' remote found.");
+    return null;
   }
-
   const match = url.match(/github\.com(?::\d+)?[:/]+([^/]+)\/(.+?)(?:\.git)?(?:\/)?$/);
-  if (!match) bail(`could not parse github owner/repo from remote: ${url}`);
+  if (!match) return null;
   return { owner: match[1], repo: match[2] };
+}
+
+export function parseGitRemote(): { owner: string; repo: string } {
+  const parsed = tryParseGitRemote();
+  if (!parsed) {
+    bail("not a git repository, no 'origin' remote, or the remote is not a github url.");
+  }
+  return parsed;
 }
 
 // ── Pullfrog API ──

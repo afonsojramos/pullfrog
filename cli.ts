@@ -4,6 +4,7 @@ import pc from "picocolors";
 import { runCli as runAuthCli } from "./commands/auth.ts";
 import { runCli as runGhaCli } from "./commands/gha.ts";
 import { runCli as runInitCli } from "./commands/init.ts";
+import { runCli as runMcpCli } from "./commands/mcp.ts";
 import { runCli as runWatchCli } from "./commands/watch.ts";
 
 const VERSION = process.env.CLI_VERSION ?? "0.0.0";
@@ -17,6 +18,7 @@ function printMainUsage(stream: typeof console.log): void {
   stream("  init        install pullfrog on the current repository and open its dashboard");
   stream("  auth        manage provider credentials for the current repository");
   stream("  watch       stream a PR's activity as one JSON line per event");
+  stream("  mcp         run a stdio MCP server exposing PR activity as an agent tool");
   stream("");
   stream("global options:");
   stream("  -h, --help      show help");
@@ -91,6 +93,15 @@ async function run(): Promise<void> {
 
   if (command === "auth") {
     await runAuthCli({
+      args: commandArgs,
+      prog: PROG,
+      showHelp: globalParsed["--help"] === true,
+    });
+    return;
+  }
+
+  if (command === "mcp") {
+    await runMcpCli({
       args: commandArgs,
       prog: PROG,
       showHelp: globalParsed["--help"] === true,
