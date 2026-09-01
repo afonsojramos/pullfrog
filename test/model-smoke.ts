@@ -117,6 +117,55 @@ async function plan(slug: string): Promise<Plan> {
   };
 }
 
+/**
+ * OpenCode Zen and Go share `OPENCODE_API_KEY` but bill separately, and Go is a
+ * subscription with a 5-hour rolling usage cap. a spent cap refuses every model
+ * on the tier with a 429, which opencode retries above the AI SDK while emitting
+ * no output — so the run presents as a bare 240s stall, identical to a broken
+ * alias. that is what makes all 15 `opencode-go/*` cells go red at once and read
+ * as a regression in whatever touched models.ts. see wiki/opencode-silent-stall.md.
+ */
+const OPENCODE_TIER_BASE: Record<string, string> = {
+  opencode: "https://opencode.ai/zen/v1",
+  "opencode-go": "https://opencode.ai/zen/go/v1",
+};
+
+/** a refusal answers in milliseconds, so this only has to outlast a slow TLS
+ * handshake. it must never approach the gap between TIMEOUT_MS and the job's own
+ * `timeout-minutes`, or diagnosing the failure costs us the failure. */
+const REFUSAL_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * ask the tier directly why a failed run failed. costs nothing on the happy path
+ * — only a failure asks — and a refusal names the condition and, for a usage cap,
+ * when it resets.
+ *
+ * every path returns rather than throws, including the body read: the captured
+ * CLI output is the more valuable artifact, and it is printed AFTER this call, so
+ * a throw here would suppress the very thing we are trying to explain.
+ */
+async function tierRefusal(cliModel: string): Promise<string | undefined> {
+  const base = OPENCODE_TIER_BASE[cliModel.slice(0, cliModel.indexOf("/"))];
+  const key = process.env.OPENCODE_API_KEY;
+  if (!base || !key) return undefined;
+  try {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: cliModel.slice(cliModel.indexOf("/") + 1),
+        max_tokens: 8,
+        messages: [{ role: "user", content: "ok" }],
+      }),
+      signal: AbortSignal.timeout(REFUSAL_PROBE_TIMEOUT_MS),
+    });
+    if (res.ok) return undefined;
+    return `${res.status} ${(await res.text()).slice(0, 300).replace(/\s+/g, " ")}`;
+  } catch {
+    return undefined;
+  }
+}
+
 type SpawnResult = { ok: boolean; output: string; reason: string };
 
 function runCli(p: Plan, env: NodeJS.ProcessEnv): Promise<SpawnResult> {
@@ -198,6 +247,8 @@ async function main(): Promise<void> {
   }
 
   console.error(`✗ ${slug} (${p.agent}): ${result.reason}`);
+  const refusal = await tierRefusal(resolveCliModel(slug) ?? slug);
+  if (refusal) console.error(`» the tier refused a direct request too: ${refusal}`);
   if (result.output) console.error(result.output);
   process.exit(1);
 }

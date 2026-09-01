@@ -30,8 +30,14 @@ export type ProviderEntry = {
   coverage: string[];
 };
 
+/** what EVERY provider entry depends on: the resolution table, and the runner
+ * that executes each alias cell. `model-smoke.ts` matched no glob at all before
+ * this, so editing it produced an empty matrix and CI went green having run none
+ * of it. */
+const SHARED_COVERAGE = ["action/models.ts", "action/test/model-smoke.ts"];
+
 const SHARED_OPENCODE_COVERAGE = [
-  "action/models.ts",
+  ...SHARED_COVERAGE,
   "action/agents/opencode.ts",
   "action/agents/opencodePlugin.ts",
 ];
@@ -41,7 +47,7 @@ export const providers: ProviderEntry[] = [
     name: "anthropic",
     flagship: "anthropic/claude-sonnet",
     agent: "claude",
-    coverage: ["action/models.ts", "action/agents/claude.ts"],
+    coverage: [...SHARED_COVERAGE, "action/agents/claude.ts"],
   },
   {
     name: "openai",
