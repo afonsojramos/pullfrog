@@ -80,6 +80,13 @@ export const providers: ProviderEntry[] = [
     coverage: SHARED_OPENCODE_COVERAGE,
   },
   {
+    // one gateway key fronts every vendor; sonnet is the standard tier there too.
+    name: "vercel",
+    flagship: "vercel/claude-sonnet",
+    agent: "opencode",
+    coverage: SHARED_OPENCODE_COVERAGE,
+  },
+  {
     name: "opencode",
     flagship: "opencode/big-pickle",
     agent: "opencode",

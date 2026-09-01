@@ -966,6 +966,80 @@ export const providers = {
       },
     },
   }),
+  vercel: provider({
+    // Vercel AI Gateway — one key serves every model it fronts. model IDs use
+    // the models.dev `vercel` catalog's own naming (dotted versions, e.g.
+    // `anthropic/claude-opus-5`, `zai/glm-5.3`), and effort ladders mirror that
+    // catalog's entries, not the upstream vendor's. deliberately no
+    // `openRouterResolve`: a gateway pick is BYOK-only — silently rerouting it
+    // over the Router proxy would bill the wallet for traffic the user pointed
+    // at their own gateway.
+    displayName: "Vercel AI Gateway",
+    envVars: ["AI_GATEWAY_API_KEY"],
+    models: {
+      "claude-opus": {
+        displayName: "Claude Opus",
+        resolve: "vercel/anthropic/claude-opus-5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
+        preferred: true,
+        subagentModel: "claude-sonnet",
+      },
+      "claude-sonnet": {
+        displayName: "Claude Sonnet",
+        resolve: "vercel/anthropic/claude-sonnet-5",
+        effort: ["low", "medium", "high", "xhigh"],
+      },
+      "claude-haiku": {
+        displayName: "Claude Haiku",
+        resolve: "vercel/anthropic/claude-haiku-4.5",
+      },
+      "gpt-sol": {
+        displayName: "GPT Sol",
+        resolve: "vercel/openai/gpt-5.6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
+        subagentModel: "gpt-terra",
+      },
+      "gpt-terra": {
+        displayName: "GPT Terra",
+        resolve: "vercel/openai/gpt-5.6-terra",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
+      },
+      "gpt-luna": {
+        displayName: "GPT Luna",
+        resolve: "vercel/openai/gpt-5.6-luna",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
+      },
+      "gemini-pro": {
+        displayName: "Gemini Pro",
+        resolve: "vercel/google/gemini-3.1-pro-preview",
+        effort: ["low", "medium", "high"],
+      },
+      "gemini-flash": {
+        displayName: "Gemini Flash",
+        resolve: "vercel/google/gemini-3.6-flash",
+        effort: ["minimal", "low", "medium", "high"],
+      },
+      "deepseek-pro": {
+        displayName: "DeepSeek Pro",
+        resolve: "vercel/deepseek/deepseek-v4-pro-0813",
+        effort: ["high", "xhigh"],
+      },
+      "deepseek-flash": {
+        displayName: "DeepSeek Flash",
+        resolve: "vercel/deepseek/deepseek-v4-flash",
+        effort: ["high", "xhigh"],
+      },
+      glm: {
+        displayName: "GLM",
+        resolve: "vercel/zai/glm-5.3",
+        effort: ["low", "high", "max"],
+      },
+      "kimi-k3": {
+        displayName: "Kimi K3",
+        resolve: "vercel/moonshotai/kimi-k3",
+      },
+    },
+  }),
 } satisfies Record<string, ProviderConfig>;
 
 export type ModelProvider = keyof typeof providers;

@@ -9,9 +9,27 @@ import { getModelEnvVars, modelAliases, resolveCliModel, resolveDisplayAlias } f
 // `pullfrog/models-bump` PRs (the bot's bump branch, gated in test.yml).
 
 // models that have no OpenRouter equivalent and require BYOK.
-// add a model here ONLY when it genuinely doesn't exist on both models.dev and OpenRouter.
+// add a model here ONLY when it genuinely doesn't exist on both models.dev and
+// OpenRouter — or, as with the vercel/* gateway aliases, when rerouting over
+// OpenRouter would defeat the pick: a Vercel AI Gateway alias exists to send
+// traffic through the user's own gateway (their observability, their billing),
+// so a Router-proxy equivalent is deliberately withheld and the picker locks
+// the entry until an AI_GATEWAY_API_KEY is stored.
 // the models-bump cron flags entries that become fillable (see rule 9 in models-bump.yml).
-const BYOK_ONLY_MODELS = new Set<string>([]);
+const BYOK_ONLY_MODELS = new Set<string>([
+  "vercel/claude-opus",
+  "vercel/claude-sonnet",
+  "vercel/claude-haiku",
+  "vercel/gpt-sol",
+  "vercel/gpt-terra",
+  "vercel/gpt-luna",
+  "vercel/gemini-pro",
+  "vercel/gemini-flash",
+  "vercel/deepseek-pro",
+  "vercel/deepseek-flash",
+  "vercel/glm",
+  "vercel/kimi-k3",
+]);
 
 describe("openRouterResolve completeness", () => {
   for (const alias of modelAliases) {
