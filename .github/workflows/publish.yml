@@ -16,9 +16,19 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      # `ref: main` rather than the pushed sha, because the tag step below cannot
+      # push an arbitrary commit. GitHub refuses a GITHUB_TOKEN ref push whose
+      # `.github/workflows/` differs from the tip of every branch, and that token
+      # can never hold `workflows` scope. A second `action/**` commit mirroring in
+      # between the version bump and this job leaves the bump commit matching no
+      # branch tip, so the tag push is rejected and the release half-lands: npm
+      # published, `v0` unmoved (0.1.66, where the mirror raced ~5min behind).
+      # Tagging the branch tip satisfies the rule by construction, and it also
+      # keeps the npm tarball and the tag tree built from ONE checkout.
       - name: Checkout code
         uses: actions/checkout@v6
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -52,10 +62,16 @@ jobs:
       # the guard asks npm, not git. gating on "does the tag exist" made a half-finished
       # release unrecoverable: the tag is pushed by this same job, so any later failure
       # left a re-run seeing its own tag and skipping the publish it still owed.
+      #
+      # `--prefer-online` on every registry read here and below: npm revalidates a
+      # cached packument rather than refetching it, so a freshly published version
+      # can stay invisible to `npm view` for minutes. That is indistinguishable from
+      # slow propagation and it is the likelier half of what stalled 0.1.66 — the
+      # 5min wait below expired, then the very next run saw the version at once.
       - name: Check whether npm already serves this version
         id: check_npm
         run: |
-          FOUND=$(npm view "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
+          FOUND=$(npm view --prefer-online "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
           if [ "$FOUND" = "${{ steps.version.outputs.version }}" ]; then
             echo "published=true" >> $GITHUB_OUTPUT
             echo "ℹ️ npm already serves ${{ steps.version.outputs.version }} - skipping publish"
@@ -74,13 +90,13 @@ jobs:
       # is not instant, so confirm rather than assume before any tag moves.
       - name: Wait for npm to serve the version
         run: |
-          for attempt in $(seq 1 30); do
-            FOUND=$(npm view "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
+          for attempt in $(seq 1 60); do
+            FOUND=$(npm view --prefer-online "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
             if [ "$FOUND" = "${{ steps.version.outputs.version }}" ]; then
               echo "✅ npm is serving ${{ steps.version.outputs.version }}"
               exit 0
             fi
-            echo "waiting for npm to serve ${{ steps.version.outputs.version }} (attempt $attempt/30)"
+            echo "waiting for npm to serve ${{ steps.version.outputs.version }} (attempt $attempt/60)"
             sleep 10
           done
           echo "::error::npm never served ${{ steps.version.outputs.version }}; refusing to move ${{ steps.version.outputs.major_tag }}"
