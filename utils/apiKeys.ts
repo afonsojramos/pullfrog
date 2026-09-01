@@ -130,7 +130,7 @@ function buildRouterUnfundedError(params: {
 }): string {
   const billingUrl = `${getApiUrl()}/console/${params.owner}#billing`;
   const settingsUrl = `${getApiUrl()}/console/${params.owner}/${params.name}`;
-  const modelClause = params.model ? ` \`${params.model}\` never ran.` : " The agent never ran.";
+  const modelClause = params.model ? ` \`${params.model}\` never ran.` : " the agent never ran.";
 
   return [
     `**${ROUTER_UNFUNDED_MARKER}**, and this repo has no provider key to fall back on, so${modelClause}`,
