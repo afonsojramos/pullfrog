@@ -422,6 +422,13 @@ export interface WriteablePayload {
    * (every cross-repo runtime branch gates on this being present).
    */
   xrepo?: XrepoConfig | undefined;
+  /**
+   * opaque handle to the cross-repo grant the server persisted for this run.
+   * presented when minting cross-repo-scoped tokens; the server reads the repo
+   * sets from its own row, so this can widen nothing on its own. absent ⇒ the
+   * mint is scoped to the primary repo alone.
+   */
+  xrepoGrant?: string | undefined;
   /** timeout for agent run (e.g., "10m", "1h30m") - defaults to "1h" */
   timeout?: string | undefined;
   /** working directory for the agent */

@@ -106,6 +106,12 @@ export type GitHubAppPermissions = {
 
 type AcquireTokenOptions = {
   repos?: string[] | undefined;
+  /**
+   * handle to the server-persisted cross-repo grant, required whenever `repos`
+   * names anything beyond the primary. the server bounds the request against
+   * the sets IT stored, so this cannot widen the token by itself.
+   */
+  xrepoGrant?: string | undefined;
   permissions?: GitHubAppPermissions;
   /**
    * stashed OIDC credentials for minting after restricted mode deletes
@@ -229,6 +235,7 @@ async function acquireTokenViaOIDC(opts?: AcquireTokenOptions): Promise<string> 
       headers: {
         Authorization: `Bearer ${oidcToken}`,
         "Content-Type": "application/json",
+        ...(opts?.xrepoGrant ? { "x-pullfrog-xrepo-grant": opts.xrepoGrant } : {}),
       },
       body: opts?.permissions ? JSON.stringify({ permissions: opts.permissions }) : undefined,
       signal: controller.signal,

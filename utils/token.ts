@@ -84,6 +84,12 @@ type ResolveTokensParams = {
   // READ set. absent → single-repo, primary-scoped tokens (unchanged).
   xrepo?: XrepoConfig | undefined;
   /**
+   * handle to the cross-repo grant the server persisted for this run. required
+   * alongside `xrepo`: the mint endpoint refuses a `repos` list without one,
+   * because the runner's list is attacker-controlled on a manual dispatch.
+   */
+  xrepoGrant?: string | undefined;
+  /**
    * OIDC credentials stashed by main.ts before the restricted-mode env wipe —
    * the mid-run MCP token refresh mints from this snapshot (#891). null when
    * OIDC isn't available (local dev, external token).
@@ -150,7 +156,11 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     params.push === "disabled"
       ? { contents: "read" as const }
       : { contents: "write" as const, workflows: "write" as const };
-  const gitToken = await acquireNewToken({ repos: writeRepos, permissions: gitPermissions });
+  const gitToken = await acquireNewToken({
+    repos: writeRepos,
+    xrepoGrant: params.xrepoGrant,
+    permissions: gitPermissions,
+  });
   if (isGitHubActions) {
     core.setSecret(gitToken);
   }
@@ -173,7 +183,11 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     checks: "write",
     actions: "read",
   } as const;
-  const mcpToken = await acquireNewToken({ repos: writeRepos, permissions: mcpPermissions });
+  const mcpToken = await acquireNewToken({
+    repos: writeRepos,
+    xrepoGrant: params.xrepoGrant,
+    permissions: mcpPermissions,
+  });
   if (isGitHubActions) {
     core.setSecret(mcpToken);
   }
@@ -206,6 +220,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
   if (params.xrepo) {
     readToken = await acquireNewToken({
       repos: params.xrepo.read,
+      xrepoGrant: params.xrepoGrant,
       permissions: { contents: "read" },
     });
     if (isGitHubActions) core.setSecret(readToken);
@@ -233,6 +248,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     // the primary only (secondaries would start 403ing mid-run).
     refreshPromise ??= acquireNewToken({
       repos: writeRepos,
+      xrepoGrant: params.xrepoGrant,
       permissions: mcpPermissions,
       oidc: params.oidc ?? undefined,
     })
@@ -264,6 +280,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     if (stale === currentGitToken) {
       gitRefreshPromise ??= acquireNewToken({
         repos: writeRepos,
+        xrepoGrant: params.xrepoGrant,
         permissions: gitPermissions,
         oidc: params.oidc ?? undefined,
       })
@@ -283,6 +300,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
       const read = currentReadToken;
       readRefreshPromise ??= acquireNewToken({
         repos: params.xrepo?.read,
+        xrepoGrant: params.xrepoGrant,
         permissions: { contents: "read" },
         oidc: params.oidc ?? undefined,
       })

@@ -52,6 +52,9 @@ export const JsonPayload = type({
     // still parses against a newer action across a rolling deploy.
     "unavailable?": "string[]",
   }).or("undefined"),
+  // opaque handle to the server-persisted cross-repo grant. optional so a
+  // payload from an older server build still parses against a newer action.
+  "xrepoGrant?": "string | undefined",
   "timeout?": "string | undefined",
   "progressComment?": type({
     id: "string",
@@ -361,6 +364,7 @@ export function resolvePayload(
     previousRunsNote: jsonPayload?.previousRunsNote,
     event,
     xrepo: jsonPayload?.xrepo,
+    xrepoGrant: jsonPayload?.xrepoGrant,
     timeout: inputs.timeout ?? jsonPayload?.timeout,
     cwd: resolveCwd(inputs.cwd),
     progressComment: jsonPayload?.progressComment,

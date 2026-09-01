@@ -294,6 +294,7 @@ export async function main(): Promise<MainResult> {
     push: payload.push,
     authorPermission: payload.event.authorPermission,
     xrepo: payload.xrepo,
+    xrepoGrant: payload.xrepoGrant,
     oidc: oidcCredentials,
   });
 
