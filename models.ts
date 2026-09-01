@@ -296,6 +296,11 @@ export const providers = {
   xai: provider({
     displayName: "xAI",
     envVars: ["XAI_API_KEY"],
+    // CLI-only, like CODEX_AUTH_JSON: a Grok subscription chain minted by
+    // `pullfrog auth grok`. Excluded from every paste/prompt surface because
+    // the refresh token rotates on every use, so a hand-pasted blob is stale
+    // the moment it is saved. See wiki/grok-auth.md.
+    managedCredentials: ["GROK_AUTH_JSON"],
     models: {
       grok: {
         displayName: "Grok",

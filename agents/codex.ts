@@ -41,6 +41,7 @@ import { getModelProvider, stripProviderPrefix } from "../models.ts";
 import { AGENT_ACTIVITY_TIMEOUT_MS, getIdleMs, markActivity } from "../utils/activity.ts";
 import { log } from "../utils/cli.ts";
 import { installCodexHome } from "../utils/codexHome.ts";
+import type { OAuthWriteback } from "../utils/codexRefreshDetect.ts";
 import { installFromNpmTarball } from "../utils/install.ts";
 import { findProviderErrorMatch } from "../utils/providerErrors.ts";
 import { resolveRunEffort } from "../utils/runEffort.ts";
@@ -854,11 +855,17 @@ export const codex = agent({
       // hook diffs it and PUTs the new blob back to Pullfrog. see
       // wiki/codex-auth.md — a rotation we fail to persist expires in ~1h.
       core.saveState(
-        "codex_writeback",
+        "oauth_writeback",
         JSON.stringify({
           apiToken: ctx.apiToken,
-          authPath: codexHomeAuth.authPath,
-          originalRefresh: codexHomeAuth.originalRefresh,
+          entries: [
+            {
+              secretName: "CODEX_AUTH_JSON",
+              provider: "openai",
+              authPath: codexHomeAuth.authPath,
+              originalRefresh: codexHomeAuth.originalRefresh,
+            },
+          ] satisfies OAuthWriteback[],
         })
       );
     }

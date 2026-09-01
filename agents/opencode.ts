@@ -75,7 +75,8 @@ import {
 } from "../utils/activity.ts";
 import type { AgentDiagnostic } from "../utils/agentHangReport.ts";
 import { formatJsonValue, log } from "../utils/cli.ts";
-import { installCodexAuth } from "../utils/codexHome.ts";
+import { installCodexAuth, installXaiAuth } from "../utils/codexHome.ts";
+import type { OAuthWriteback } from "../utils/codexRefreshDetect.ts";
 import { findProviderErrorMatch } from "../utils/providerErrors.ts";
 import { resolveRunEffort } from "../utils/runEffort.ts";
 import { addSkill, installBundledSkills } from "../utils/skills.ts";
@@ -1223,6 +1224,10 @@ export const opencode = agent({
     // action/utils/codexHome.ts and wiki/codex-auth.md.
     const codexAuth = installCodexAuth();
 
+    // same for GROK_AUTH_JSON -> opencode's native XaiAuthPlugin. an account
+    // can hold both chains; the writer merges rather than overwrites.
+    const xaiAuth = installXaiAuth();
+
     // OPENCODE_PERMISSION has absolute highest precedence (merged after managed/MDM configs).
     // external_directory gates ALL native filesystem tools (Read, Write, Edit, Glob, Grep, etc.)
     // for paths outside the project root. last-match-wins: deny everything, then allow /tmp.
@@ -1267,17 +1272,36 @@ export const opencode = agent({
     // always. see wiki/sandbox-v2.md.
     delete env.OPENCODE_EXPERIMENTAL;
     delete env.OPENCODE_EXPERIMENTAL_CODE_MODE;
+    // both chains rotate mid-run inside opencode, so each needs a post-hook
+    // writeback entry. the API key is dropped only for the provider whose
+    // subscription is driving the run — an OPENAI_API_KEY outranks the Codex
+    // OAuth chain, and XAI_API_KEY likewise outranks the Grok one.
+    const writebacks: OAuthWriteback[] = [];
     if (codexAuth) {
       env.XDG_DATA_HOME = codexAuth.xdgDataHome;
       delete env.OPENAI_API_KEY;
+      writebacks.push({
+        secretName: "CODEX_AUTH_JSON",
+        provider: "openai",
+        authPath: codexAuth.authPath,
+        originalRefresh: codexAuth.originalRefresh,
+        originalIdToken: codexAuth.originalIdToken,
+      });
+    }
+    if (xaiAuth) {
+      env.XDG_DATA_HOME = xaiAuth.xdgDataHome;
+      delete env.XAI_API_KEY;
+      writebacks.push({
+        secretName: "GROK_AUTH_JSON",
+        provider: "xai",
+        authPath: xaiAuth.authPath,
+        originalRefresh: xaiAuth.originalRefresh,
+      });
+    }
+    if (writebacks.length > 0) {
       core.saveState(
-        "codex_writeback",
-        JSON.stringify({
-          apiToken: ctx.apiToken,
-          authPath: codexAuth.authPath,
-          originalRefresh: codexAuth.originalRefresh,
-          originalIdToken: codexAuth.originalIdToken,
-        })
+        "oauth_writeback",
+        JSON.stringify({ apiToken: ctx.apiToken, entries: writebacks })
       );
     }
 

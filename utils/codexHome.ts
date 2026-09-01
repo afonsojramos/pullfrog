@@ -49,18 +49,16 @@
 // See [wiki/codex-auth.md] for the full data-flow picture.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { log } from "./cli.ts";
-import {
-  type CodexAuthBody,
-  decodeJwtExpMs,
-  parseCodexAuthBody,
-  stringifyCodexAuthBody,
-} from "./codexOAuth.ts";
+import { type CodexAuthBody, parseCodexAuthBody, stringifyCodexAuthBody } from "./codexOAuth.ts";
+import { decodeJwtExpMs } from "./oauthShared.ts";
+import { parseXaiAuthBody, type XaiAuthBody } from "./xaiOAuth.ts";
 
 const CODEX_AUTH_ENV = "CODEX_AUTH_JSON";
+const XAI_AUTH_ENV = "GROK_AUTH_JSON";
 
 /** sandbox-hidden home for pullfrog-managed on-disk secrets in CI. bash via
  * MCP shell tmpfs-overlays this path; opencode's internal auth module
@@ -71,15 +69,18 @@ const CODEX_AUTH_ENV = "CODEX_AUTH_JSON";
  * the path doesn't matter. local dev keeps the existing $HOME path. */
 export const PULLFROG_DATA_DIR = "/var/lib/pullfrog";
 
-interface OpenCodeAuthFile {
-  openai: {
-    type: "oauth";
-    refresh: string;
-    access: string;
-    expires: number;
-    accountId?: string;
-  };
+interface OpenCodeOAuthEntry {
+  type: "oauth";
+  refresh: string;
+  access: string;
+  expires: number;
+  accountId?: string;
 }
+
+/** opencode keys auth.json by provider id — `openai` for the Codex chain,
+ * `xai` for the Grok chain. An account can hold both, so entries are merged
+ * into whatever is already on disk rather than overwriting the file. */
+type OpenCodeAuthFile = Record<string, OpenCodeOAuthEntry>;
 
 /** the server latches `refresh_rejected_at` when OpenAI rejects the refresh —
  * the rotation is one-shot, so a rejection is PERMANENT until the user re-runs
@@ -144,18 +145,18 @@ export function installCodexAuth(): InstalledCodexAuth | null {
   const opencodeDir = join(xdgDataHome, "opencode");
   const authPath = join(opencodeDir, "auth.json");
 
-  const opencodeAuth: OpenCodeAuthFile = {
-    openai: {
+  writeOpenCodeAuthEntry({
+    opencodeDir,
+    authPath,
+    provider: "openai",
+    entry: {
       type: "oauth",
       refresh: body.tokens.refresh_token,
       access: body.tokens.access_token,
       expires: expiresMs,
       ...(body.tokens.account_id ? { accountId: body.tokens.account_id } : {}),
     },
-  };
-
-  mkdirSync(opencodeDir, { recursive: true });
-  writeFileSync(authPath, `${JSON.stringify(opencodeAuth, null, 2)}\n`, { mode: 0o600 });
+  });
 
   // point every opencode subprocess in this run (agent spawn + `opencode
   // models` introspection) at this auth.json. only opencode reads
@@ -171,6 +172,104 @@ export function installCodexAuth(): InstalledCodexAuth | null {
     originalRefresh: body.tokens.refresh_token,
     originalIdToken: body.tokens.id_token,
   };
+}
+
+/** merge one provider entry into opencode's auth.json, preserving any other
+ * provider already there. An account can hold both a Codex and a Grok
+ * credential, and both install into the same file — a wholesale write would
+ * silently drop whichever ran first. Unreadable or malformed existing content
+ * is replaced rather than merged: it is opencode's own cache, not a credential
+ * we can recover, and a stale half-file would break the run either way. */
+function writeOpenCodeAuthEntry(params: {
+  opencodeDir: string;
+  authPath: string;
+  provider: string;
+  entry: OpenCodeOAuthEntry;
+}): void {
+  let existing: OpenCodeAuthFile = {};
+  if (existsSync(params.authPath)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(params.authPath, "utf8"));
+      if (parsed && typeof parsed === "object") existing = parsed as OpenCodeAuthFile;
+    } catch {
+      log.warning(`» ${params.authPath} was unreadable; rewriting it`);
+    }
+  }
+  const merged: OpenCodeAuthFile = { ...existing, [params.provider]: params.entry };
+  mkdirSync(params.opencodeDir, { recursive: true });
+  writeFileSync(params.authPath, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 });
+}
+
+export interface InstalledXaiAuth {
+  /** absolute path of the auth.json we wrote — the post-hook diffs it. */
+  authPath: string;
+  /** value to set as XDG_DATA_HOME for the OpenCode subprocess. */
+  xdgDataHome: string;
+  /** refresh_token at materialization time. opencode's XaiAuthPlugin rotates
+   * in-process on a long run, so the post-hook compares against this to decide
+   * whether anything needs writing back. */
+  originalRefresh: string;
+}
+
+/** materialize GROK_AUTH_JSON from env into opencode's auth.json.
+ *
+ * opencode ships xAI Grok OAuth natively (`XaiAuthPlugin`, added upstream
+ * 2026-05-21, present in our pinned 1.18.5) against the same public
+ * Grok-CLI OAuth client we mint with, so the stored chain drops straight in.
+ * The plugin sends the token to `api.x.ai/v1` — it deliberately sets no
+ * baseURL — so there is no CLI proxy and no client-version header in play.
+ *
+ * returns null when the env var is absent or malformed; caller treats null as
+ * "no grok subscription auth, fall through to XAI_API_KEY". */
+export function installXaiAuth(): InstalledXaiAuth | null {
+  const raw = process.env[XAI_AUTH_ENV];
+  if (!raw) return null;
+
+  const body = parseXaiAuthBody(raw);
+  if (!body) {
+    log.warning(`» ${XAI_AUTH_ENV} present but malformed; ignoring`);
+    return null;
+  }
+  if (isXaiRejectedChain(body)) return null;
+
+  const xdgDataHome = resolveDataHome();
+  const opencodeDir = join(xdgDataHome, "opencode");
+  const authPath = join(opencodeDir, "auth.json");
+
+  writeOpenCodeAuthEntry({
+    opencodeDir,
+    authPath,
+    provider: "xai",
+    // opencode refreshes when `expires` is inside its skew window, and falls
+    // back to the JWT's own exp when the stored value is absent. Decoding it
+    // here means the first request uses the token we already hold instead of
+    // burning a rotation on startup.
+    entry: {
+      type: "oauth",
+      refresh: body.tokens.refresh_token,
+      access: body.tokens.access_token,
+      expires: decodeJwtExpMs(body.tokens.access_token) ?? 0,
+    },
+  });
+
+  process.env.XDG_DATA_HOME = xdgDataHome;
+  log.info(`» installed Grok auth at ${authPath}`);
+
+  return { authPath, xdgDataHome, originalRefresh: body.tokens.refresh_token };
+}
+
+/** the server latches `refresh_rejected_at` when xAI rejects the refresh.
+ * rotation is one-shot, so the rejection is permanent until the user re-runs
+ * `pullfrog auth grok`. materializing a latched blob buys nothing — it dies at
+ * the first model call, having already displaced an `XAI_API_KEY` that would
+ * have served the run. */
+function isXaiRejectedChain(body: XaiAuthBody): boolean {
+  if (!body.refresh_rejected_at) return false;
+  log.warning(
+    `» ${XAI_AUTH_ENV} was rejected by xAI at ${body.refresh_rejected_at} and cannot be ` +
+      `refreshed — re-run \`npx pullfrog auth grok\`. skipping it for this run.`
+  );
+  return true;
 }
 
 export interface InstalledCodexHome {

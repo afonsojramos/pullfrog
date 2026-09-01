@@ -683,6 +683,11 @@ const SUBSCRIPTION_CREDENTIALS: Record<string, { label: string; command: string;
     command: "pullfrog auth codex",
     docs: "https://docs.pullfrog.com/codex-auth",
   },
+  GROK_AUTH_JSON: {
+    label: "Grok subscription",
+    command: "pullfrog auth grok",
+    docs: "https://docs.pullfrog.com/grok-auth",
+  },
 };
 
 /**
@@ -787,7 +792,7 @@ export function formatApiKeyErrorSummary(params: {
   // secrets — "rotate the key, update the GitHub secret" is wrong advice.
   if (isOAuthCredentialExpiredError(params.raw)) {
     return [
-      `**Your provider OAuth credential has expired or been revoked.** Re-authenticate the provider connection (e.g. \`pullfrog auth claude\` / \`pullfrog auth codex\`), then re-trigger the run.`,
+      `**Your provider OAuth credential has expired or been revoked.** Re-authenticate the provider connection (e.g. \`pullfrog auth claude\` / \`pullfrog auth codex\` / \`pullfrog auth grok\`), then re-trigger the run.`,
       "",
       `[Claude subscription →](https://docs.pullfrog.com/claude-auth) · [ChatGPT subscription →](https://docs.pullfrog.com/codex-auth) · [Model settings →](${settingsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
     ].join("\n");

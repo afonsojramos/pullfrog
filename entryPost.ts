@@ -29,54 +29,71 @@
 // checked-out action repo, which has no node_modules for sha-pinned consumers.
 
 import { existsSync, readFileSync } from "node:fs";
-import { detectCodexRefresh } from "./utils/codexRefreshDetect.ts";
+import {
+  detectCodexRefresh,
+  detectXaiRefresh,
+  type OAuthWriteback,
+} from "./utils/codexRefreshDetect.ts";
 import * as core from "./utils/ghaCore.ts";
 import { postApiFetch } from "./utils/postApiFetch.ts";
 
 async function main(): Promise<void> {
-  const raw = core.getState("codex_writeback");
+  const raw = core.getState("oauth_writeback");
   if (!raw) {
-    core.info("codex post-hook: no writeback state — skipping");
+    core.info("oauth post-hook: no writeback state — skipping");
     return;
   }
 
-  let state: {
-    apiToken: string;
-    authPath: string;
-    originalRefresh: string;
-    originalIdToken?: string;
-  };
+  let state: { apiToken: string; entries: OAuthWriteback[] };
   try {
     state = JSON.parse(raw) as typeof state;
   } catch (err) {
-    core.warning(`codex post-hook: malformed writeback state — ${err}`);
+    core.warning(`oauth post-hook: malformed writeback state — ${err}`);
     return;
   }
-  if (!state.apiToken || !state.authPath || !state.originalRefresh) {
-    core.warning("codex post-hook: incomplete writeback state — skipping");
+  if (!state.apiToken || !Array.isArray(state.entries)) {
+    core.warning("oauth post-hook: incomplete writeback state — skipping");
     return;
   }
 
-  if (!existsSync(state.authPath)) {
-    core.info(`codex post-hook: ${state.authPath} not found — nothing to write back`);
+  for (const entry of state.entries) {
+    await writeBackEntry(state.apiToken, entry);
+  }
+}
+
+/** Persist one provider's rotated chain. Each entry is independent — a
+ * failure on one must not strand the other, so this never throws. */
+async function writeBackEntry(apiToken: string, entry: OAuthWriteback): Promise<void> {
+  if (!entry.secretName || !entry.authPath || !entry.originalRefresh) {
+    core.warning("oauth post-hook: incomplete writeback entry — skipping");
+    return;
+  }
+  if (!existsSync(entry.authPath)) {
+    core.info(`oauth post-hook: ${entry.authPath} not found — nothing to write back`);
     return;
   }
 
   let authFileContent: string;
   try {
-    authFileContent = readFileSync(state.authPath, "utf8");
+    authFileContent = readFileSync(entry.authPath, "utf8");
   } catch (err) {
-    core.warning(`codex post-hook: cannot read ${state.authPath} — ${err}`);
+    core.warning(`oauth post-hook: cannot read ${entry.authPath} — ${err}`);
     return;
   }
 
-  const refreshedCodexJson = detectCodexRefresh({
-    authFileContent,
-    originalRefresh: state.originalRefresh,
-    originalIdToken: state.originalIdToken,
-  });
-  if (!refreshedCodexJson) {
-    core.info("codex post-hook: refresh chain unchanged — no writeback needed");
+  const refreshed =
+    entry.provider === "xai"
+      ? detectXaiRefresh({
+          authFileContent,
+          originalRefresh: entry.originalRefresh,
+        })
+      : detectCodexRefresh({
+          authFileContent,
+          originalRefresh: entry.originalRefresh,
+          originalIdToken: entry.originalIdToken,
+        });
+  if (!refreshed) {
+    core.info(`oauth post-hook: ${entry.secretName} chain unchanged — no writeback needed`);
     return;
   }
 
@@ -85,22 +102,22 @@ async function main(): Promise<void> {
       path: "/api/runtime/secret",
       method: "PUT",
       headers: {
-        authorization: `Bearer ${state.apiToken}`,
+        authorization: `Bearer ${apiToken}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ name: "CODEX_AUTH_JSON", value: refreshedCodexJson }),
+      body: JSON.stringify({ name: entry.secretName, value: refreshed }),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      core.warning(`codex post-hook: writeback returned ${response.status}: ${body}`);
+      core.warning(`oauth post-hook: writeback returned ${response.status}: ${body}`);
       return;
     }
-    core.info("codex post-hook: refreshed CODEX_AUTH_JSON persisted to Pullfrog");
+    core.info(`oauth post-hook: refreshed ${entry.secretName} persisted to Pullfrog`);
   } catch (err) {
-    core.warning(`codex post-hook: writeback failed — ${err}`);
+    core.warning(`oauth post-hook: writeback failed — ${err}`);
   }
 }
 
 main().catch((err) => {
-  core.warning(`codex post-hook: unexpected error — ${err}`);
+  core.warning(`oauth post-hook: unexpected error — ${err}`);
 });

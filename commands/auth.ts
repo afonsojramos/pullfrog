@@ -5,6 +5,8 @@
 //                          as the `CODEX_AUTH_JSON` Pullfrog secret
 //   pullfrog auth claude   save a Claude Code subscription OAuth token as
 //                          the `CLAUDE_CODE_OAUTH_TOKEN` Pullfrog secret
+//   pullfrog auth grok     mint a Grok (SuperGrok / X Premium) subscription
+//                          credential and save it as `GROK_AUTH_JSON`
 //
 // the `codex` subcommand runs `codex login --device-auth` against an
 // isolated `CODEX_HOME` (so the user's existing ~/.codex/auth.json is never
@@ -17,12 +19,25 @@
 // API, which verifies it with Anthropic before storing it. unlike Codex, the
 // token is static (no refresh chain), so there's no post-run write-back —
 // see wiki/codex-auth.md "Claude sibling".
+//
+// the `grok` subcommand runs the RFC 8628 device-code grant against xAI
+// directly — no second CLI to install, unlike codex. opencode consumes the
+// resulting chain natively via its XaiAuthPlugin. like codex (and unlike
+// claude) the refresh token rotates on every use, so the blob MUST live in
+// Pullfrog's runtime-writable store and gets written back after every run.
+// see wiki/grok-auth.md.
 
 import { spawn } from "node:child_process";
 import * as p from "@clack/prompts";
 import arg from "arg";
 import pc from "picocolors";
 import { mintCodexAuth, refreshCodexAuth } from "../utils/codexAuth.ts";
+import {
+  pollXaiDeviceAuth,
+  refreshXaiAuthBody,
+  startXaiDeviceAuth,
+  stringifyXaiAuthBody,
+} from "../utils/xaiOAuth.ts";
 import {
   bail,
   describeSecretTarget,
@@ -38,6 +53,7 @@ import {
 
 const CODEX_AUTH_SECRET = "CODEX_AUTH_JSON";
 const CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN";
+const GROK_AUTH_SECRET = "GROK_AUTH_JSON";
 
 /** prefix on `claude setup-token` OAuth tokens (`sk-ant-oat01-…`). a
  * warn-on-mismatch shape check only; whether the token actually WORKS is
@@ -103,6 +119,7 @@ function printAuthUsage(params: { stream: typeof console.log; prog: string }): v
   params.stream("providers:");
   params.stream("  codex    mint a Codex (ChatGPT) subscription credential");
   params.stream("  claude   save a Claude Code subscription OAuth token");
+  params.stream("  grok     mint a Grok (SuperGrok / X Premium) subscription credential");
   params.stream("");
   params.stream("options:");
   params.stream("  -h, --help   show help");
@@ -148,6 +165,11 @@ export async function runCli(params: AuthCliParams): Promise<void> {
 
   if (subcommand === "claude") {
     await runClaude({ args: rest, prog: params.prog });
+    return;
+  }
+
+  if (subcommand === "grok") {
+    await runGrok({ args: rest, prog: params.prog });
     return;
   }
 
@@ -491,6 +513,144 @@ async function runClaudeAuth(): Promise<void> {
     // mirror what `bail` does: stop the spinner with a red "failed" glyph
     // before clearing it, otherwise an in-flight spinner keeps animating
     // above the error message we're about to print.
+    spin.stop(pc.red("failed"));
+    setActiveSpin(null);
+    const message = error instanceof Error ? error.message : String(error);
+    p.log.error(message);
+    process.exit(1);
+  }
+}
+
+interface GrokCliParams {
+  args: string[];
+  prog: string;
+}
+
+function printGrokUsage(params: { stream: typeof console.log; prog: string }): void {
+  params.stream(`usage: ${params.prog} auth grok [options]\n`);
+  params.stream("mint a Grok subscription credential and save it as GROK_AUTH_JSON.");
+  params.stream("");
+  params.stream("options:");
+  params.stream("  -h, --help   show help");
+}
+
+async function runGrok(params: GrokCliParams): Promise<void> {
+  let parsed: ReturnType<typeof parseCodexArgs>;
+  try {
+    parsed = parseCodexArgs(params.args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${message}\n`);
+    printGrokUsage({ stream: console.error, prog: params.prog });
+    process.exit(1);
+  }
+
+  if (parsed["--help"]) {
+    printGrokUsage({ stream: console.log, prog: params.prog });
+    return;
+  }
+
+  await runGrokAuth();
+}
+
+async function runGrokAuth(): Promise<void> {
+  p.intro(pc.bgGreen(pc.black(" pullfrog auth grok ")));
+
+  const spin = p.spinner();
+  setActiveSpin(spin);
+
+  try {
+    spin.start("authenticating with github");
+    const token = getGhToken();
+    spin.stop("github authenticated");
+
+    spin.start("detecting repository");
+    const remote = parseGitRemote();
+    spin.stop(`detected repo ${pc.cyan(`${remote.owner}/${remote.repo}`)}`);
+
+    spin.start("checking pullfrog app installation");
+    const status = await fetchStatus({ token, owner: remote.owner, repo: remote.repo });
+    if (!status.installed) {
+      spin.stop(pc.red("pullfrog app not installed on this repo"));
+      bail(
+        `install pullfrog on ${pc.bold(`${remote.owner}/${remote.repo}`)} before configuring auth.\n` +
+          `  ${pc.dim("run:")} ${pc.cyan(`npx pullfrog init`)}`
+      );
+    }
+    spin.stop(`pullfrog app is installed on ${pc.cyan(`@${remote.owner}`)}`);
+
+    if (status.pullfrogSecrets.includes(GROK_AUTH_SECRET)) {
+      const overwrite = await p.select({
+        message: `${pc.cyan(GROK_AUTH_SECRET)} is already configured — overwrite?`,
+        options: [
+          { value: true, label: "overwrite", hint: "replace with a freshly minted credential" },
+          { value: false, label: "cancel" },
+        ],
+      });
+      handleCancel(overwrite);
+      if (!overwrite) {
+        p.cancel("canceled.");
+        return;
+      }
+    }
+
+    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
+    // store for user accounts), so we never bother prompting. on org-owned
+    // repos, prompt interactively — matches `init`'s behavior.
+    const scope = status.isOrg
+      ? await promptScope({ owner: remote.owner, repo: remote.repo })
+      : "account";
+
+    spin.start("requesting a device code from xAI");
+    const device = await startXaiDeviceAuth();
+    spin.stop("device code ready");
+
+    p.log.info(
+      [
+        `approve the sign-in in your browser, then come back here.`,
+        ``,
+        `${pc.dim("url: ")}${pc.cyan(device.verificationUrl)}`,
+        `${pc.dim("code:")} ${pc.bold(pc.cyan(device.userCode))}`,
+        ``,
+        `this uses your Grok subscription — no xAI API key and no per-token billing.`,
+      ].join("\n")
+    );
+    openInBrowser(device.verificationUrl);
+
+    spin.start("waiting for approval in the browser");
+    const minted = await pollXaiDeviceAuth(device);
+    spin.stop("signed in to Grok");
+
+    // eager refresh before saving, mirroring `auth codex`. xAI rotates the
+    // refresh token on every use, so storing the just-minted chain would hand
+    // Pullfrog a token the local process already spent. round-tripping once
+    // here means the stored chain is the freshest one in existence.
+    spin.start("rotating the credential before saving");
+    const fresh = await refreshXaiAuthBody(minted);
+    spin.stop("credential rotated");
+
+    const target = describeSecretTarget({ owner: remote.owner, repo: remote.repo, scope });
+    spin.start(`saving ${pc.cyan(GROK_AUTH_SECRET)} to ${target}`);
+    const result = await setPullfrogSecret({
+      token,
+      owner: remote.owner,
+      repo: remote.repo,
+      name: GROK_AUTH_SECRET,
+      value: stringifyXaiAuthBody(fresh),
+      scope,
+    });
+    if (!result.saved) {
+      spin.stop(pc.red("could not save secret"));
+      p.log.warn(
+        `${result.error}\n  ${pc.dim("set it manually at:")} ${PULLFROG_API_URL}/console/${remote.owner}`
+      );
+      process.exit(1);
+    }
+    spin.stop(`saved ${pc.cyan(GROK_AUTH_SECRET)} to ${target}`);
+
+    setActiveSpin(null);
+    p.outro("done.");
+  } catch (error) {
     spin.stop(pc.red("failed"));
     setActiveSpin(null);
     const message = error instanceof Error ? error.message : String(error);

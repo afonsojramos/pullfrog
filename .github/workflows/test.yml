@@ -90,6 +90,9 @@ jobs:
       # manually re-provision when smoke tests start failing. Do not copy this
       # pattern into user-facing workflows. See wiki/codex-auth.md.
       CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+      # Same CI-shortcut caveat, and staler sooner — Grok access tokens live
+      # ~6h. Production path is `pullfrog auth grok`. See wiki/grok-auth.md.
+      GROK_AUTH_JSON: ${{ secrets.GROK_AUTH_JSON }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4

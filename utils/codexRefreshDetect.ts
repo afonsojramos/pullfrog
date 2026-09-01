@@ -1,3 +1,17 @@
+/** One provider's post-run writeback plan, handed from the opencode harness to
+ * `entryPost.ts` via `core.saveState`. Type-only across that boundary, so it
+ * does not violate entryPost's stdlib-only import rule. */
+export interface OAuthWriteback {
+  /** Pullfrog secret to PUT the rotated chain back into. */
+  secretName: "CODEX_AUTH_JSON" | "GROK_AUTH_JSON";
+  /** opencode auth.json provider key this chain lives under. */
+  provider: "openai" | "xai";
+  authPath: string;
+  originalRefresh: string;
+  /** codex only — opencode's auth entry has no slot for it. see below. */
+  originalIdToken?: string | undefined;
+}
+
 /** Detect a mid-run Codex OAuth rotation from an on-disk auth.json and render
  * it in the Codex CLI shape the Pullfrog secret store holds. Returns null when
  * the file carries no usable OAuth entry or the refresh token is unchanged from
@@ -81,4 +95,33 @@ function readOpenCodeTokens(root: Record<string, unknown>): RotatedTokens | null
     id_token: undefined,
     account_id: typeof o.accountId === "string" ? o.accountId : undefined,
   };
+}
+
+/** Detect a mid-run Grok OAuth rotation and render it in the storage shape.
+ * Simpler than the Codex twin: opencode's `xai` entry carries the whole chain,
+ * there is no second on-disk shape to reconcile and no identity claim to
+ * re-attach. Returns null when the entry is missing or unrotated. */
+export function detectXaiRefresh(params: {
+  authFileContent: string;
+  originalRefresh: string;
+}): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(params.authFileContent);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const oauth = (parsed as Record<string, unknown>).xai;
+  if (!oauth || typeof oauth !== "object") return null;
+  const o = oauth as Record<string, unknown>;
+  if (o.type !== "oauth") return null;
+  if (typeof o.access !== "string" || typeof o.refresh !== "string") return null;
+  if (o.refresh === params.originalRefresh) return null;
+  const grokShape = {
+    auth_mode: "grok",
+    tokens: { access_token: o.access, refresh_token: o.refresh },
+    last_refresh: new Date().toISOString(),
+  };
+  return `${JSON.stringify(grokShape, null, 2)}\n`;
 }

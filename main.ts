@@ -24,7 +24,7 @@ import { buildRejectedCredentialError, validateAgentApiKey } from "./utils/apiKe
 import { formatCommercialGateSummary } from "./utils/billingErrors.ts";
 import { resolveBody } from "./utils/body.ts";
 import { log } from "./utils/cli.ts";
-import { installCodexAuth, PULLFROG_DATA_DIR } from "./utils/codexHome.ts";
+import { installCodexAuth, installXaiAuth, PULLFROG_DATA_DIR } from "./utils/codexHome.ts";
 import { checkConfiguredCredentials } from "./utils/credentialFallback.ts";
 import { recordDiffReadFromToolUse } from "./utils/diffCoverage.ts";
 import { onExitSignal } from "./utils/exitHandler.ts";
@@ -248,11 +248,16 @@ export async function main(): Promise<MainResult> {
     if (count > 0) log.info(`» ${count} db secret(s) loaded`);
   }
 
-  // materialize Codex auth.json (idempotent — opencode agent re-calls inside
-  // run() and writes the same file). this has to land BEFORE
-  // captureAuthorizedModels so OpenCode's model introspection sees the
-  // OAuth-routed openai/* models.
+  // materialize the subscription auth.json entries (idempotent — the opencode
+  // agent re-calls both inside run() and writes the same file; the writer
+  // merges per provider so neither clobbers the other). this has to land
+  // BEFORE captureAuthorizedModels so OpenCode's model introspection sees the
+  // OAuth-routed models: measured, `opencode models` lists 0 `xai/*` entries
+  // without the Grok credential on disk and 12 with it, so skipping this
+  // would read a subscription-only account as unable to run its own models
+  // and fall the run back to the free tier.
   installCodexAuth();
+  installXaiAuth();
 
   // capture the AUTHORIZED model set after dbSecrets + Codex auth.json are
   // applied. this is the authoritative source for the BYOK fallback

@@ -111,3 +111,9 @@ export {
   parseTimeString,
   TIMEOUT_DISABLED,
 } from "../utils/time.ts";
+export type { XaiAuthBody } from "../utils/xaiOAuth.ts";
+export {
+  parseXaiAuthBody,
+  refreshXaiAuthBody,
+  stringifyXaiAuthBody,
+} from "../utils/xaiOAuth.ts";

@@ -1,5 +1,5 @@
 /**
- * Pure-stdlib (fetch + Buffer) Codex OAuth refresh + JWT exp decoding.
+ * Pure-stdlib (fetch) Codex OAuth refresh.
  *
  * Lives here (not in codexAuth.ts) so the Next.js server side can import it
  * via pullfrog/internal without dragging in node:child_process / spawn /
@@ -9,6 +9,13 @@
  *
  * See wiki/codex-auth.md for the end-to-end refresh lifecycle.
  */
+
+// `decodeJwtExpMs` + `OAuthInvalidGrantError` moved to ./oauthShared.ts when
+// the Grok chain landed — both providers need them. re-exported so importers
+// (pullfrog/internal, codexHome, codexSecretRotation) keep working.
+import { decodeJwtExpMs, OAuthInvalidGrantError, parseOAuthErrorBody } from "./oauthShared.ts";
+
+export { decodeJwtExpMs, OAuthInvalidGrantError };
 
 export interface CodexAuthBody {
   auth_mode: "chatgpt";
@@ -20,8 +27,10 @@ export interface CodexAuthBody {
   };
   last_refresh?: string;
   /**
-   * ISO timestamp of an `invalid_grant` rejection. OpenAI rotates the refresh
-   * token on every use, so a rejection is PERMANENT — without a latch the
+   * ISO timestamp of a rejection OpenAI attributed to the token itself
+   * (`error.code: "token_expired"` — it does not emit RFC 6749's
+   * `invalid_grant` here). OpenAI rotates the refresh
+   * token on every use, so such a rejection is PERMANENT — without a latch the
    * server re-issued the identical doomed refresh on every run (455 futile
    * round trips in 7 days, one per run, each holding a Postgres row lock across
    * a 10s external call). Cleared implicitly: `pullfrog auth codex` and
@@ -45,16 +54,16 @@ interface OAuthTokenResponse {
   expires_in?: number;
 }
 
-/** thrown when the OAuth provider rejects the refresh token (4xx). callers
- * can distinguish "race-lost / token revoked" from network errors via
- * `instanceof OAuthInvalidGrantError`. */
-export class OAuthInvalidGrantError extends Error {
-  public readonly status: number;
-  constructor(status: number, body: string) {
-    super(`Codex token refresh failed: ${status} ${body}`);
-    this.name = "OAuthInvalidGrantError";
-    this.status = status;
-  }
+/** OpenAI does NOT answer RFC 6749 codes here: `error` is an OBJECT and the
+ * discriminator is `error.code`. Measured against auth.openai.com with negative
+ * controls — a spent refresh answers `401 code:"token_expired"`, while a bad
+ * `grant_type` answers `code: null` and an unknown client `code:"invalid_client"`.
+ * So checking for `invalid_grant` here would never match and the dead-chain
+ * latch (#1101) would never fire. */
+function codexChainIsDead(body: string): boolean {
+  const err = parseOAuthErrorBody(body)?.error;
+  if (!err || typeof err !== "object") return false;
+  return "code" in err && err.code === "token_expired";
 }
 
 /** force one refresh round-trip against the OAuth provider. returns the
@@ -82,7 +91,7 @@ export async function refreshCodexAuthBody(body: CodexAuthBody): Promise<CodexAu
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     if (response.status >= 400 && response.status < 500) {
-      throw new OAuthInvalidGrantError(response.status, text);
+      throw new OAuthInvalidGrantError("Codex", response.status, text, codexChainIsDead(text));
     }
     throw new Error(`Codex token refresh failed: ${response.status} ${text}`);
   }
@@ -99,28 +108,6 @@ export async function refreshCodexAuthBody(body: CodexAuthBody): Promise<CodexAu
     },
     last_refresh: new Date().toISOString(),
   };
-}
-
-/** decode the access_token's JWT payload and return its `exp` claim in ms
- * since epoch. returns null if the token isn't a parseable JWT or has no
- * `exp` claim — caller falls back to "treat as expired".
- *
- * We don't verify the JWT signature (we'd need OpenAI's JWKS); we're only
- * using the claim as a freshness hint. The actual auth check happens
- * server-side at OpenAI when the token is used — trusting a fake JWT here
- * would just delay the inevitable 401 from OpenAI. No security boundary
- * at this decode step. */
-export function decodeJwtExpMs(token: string): number | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  let payload: { exp?: unknown };
-  try {
-    payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
-  if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) return null;
-  return payload.exp * 1000;
 }
 
 /** parse + validate a Codex auth.json body from its JSON-string form.
