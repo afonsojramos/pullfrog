@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { type CodexAuthBody, refreshCodexAuthBody, stringifyCodexAuthBody } from "./codexOAuth.ts";
 
 /**
@@ -133,6 +133,101 @@ interface DeviceAuthInput {
  * don't want the CLI pinned forever. */
 const SIGTERM_GRACE_MS = 5_000;
 
+const DEVICE_AUTH_ARGS = ["login", "--device-auth"];
+
+/** what Windows falls back to when `PATHEXT` is unset. */
+const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+/** Windows environment variables are case-insensitive and it spells them `Path`
+ * and `ComSpec`. `process.env` honours that; a plain object — a spread copy, or
+ * an env a caller built — does not, and silently reads back undefined. */
+function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  if (env[name] !== undefined) return env[name];
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === name.toUpperCase());
+  return key === undefined ? undefined : env[key];
+}
+
+/** the command processor, by absolute path. a bare `cmd.exe` would lean on the
+ * very PATH resolution this module exists to stop relying on, and `spawn` finds
+ * nothing when `PATH` is narrowed. */
+function commandProcessor(env: NodeJS.ProcessEnv): string {
+  return (
+    envValue(env, "ComSpec") ??
+    join(envValue(env, "SystemRoot") ?? "C:\\Windows", "system32", "cmd.exe")
+  );
+}
+
+/** a resolved command, ready to hand to `spawn`. */
+interface SpawnTarget {
+  file: string;
+  args: string[];
+  /** the real process sits behind a `cmd.exe` wrapper, so a signal aimed at
+   * the child reaches only the wrapper. */
+  wrapped: boolean;
+}
+
+/**
+ * resolve a bare command the way a Windows *shell* would, which is not how
+ * `spawn` does it. Node's PATH search is libuv's `path_search_walk_ext`: it
+ * tries the name, then `.com`, then `.exe`, and never reads `PATHEXT`.
+ * `@openai/codex` installs as a `codex.cmd` shim, so `spawn("codex")` is ENOENT
+ * on a machine where `codex --version` works in every shell.
+ *
+ * POSIX resolves bare names correctly already and keeps the plain spawn.
+ */
+export function resolveSpawnTarget(params: {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+}): SpawnTarget | null {
+  if (process.platform !== "win32") {
+    return { file: params.command, args: params.args, wrapped: false };
+  }
+
+  const extensions = (envValue(params.env, "PATHEXT") ?? DEFAULT_PATHEXT)
+    .split(";")
+    .filter(Boolean);
+  for (const directory of (envValue(params.env, "PATH") ?? "").split(delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = join(directory, `${params.command}${extension.toLowerCase()}`);
+      // `existsSync` swallows EACCES on a PATH entry we can't read, which is
+      // what we want: keep walking, exactly as libuv's own search does.
+      if (!existsSync(candidate)) continue;
+      if (!/\.(cmd|bat)$/i.test(candidate)) {
+        return { file: candidate, args: params.args, wrapped: false };
+      }
+      // Node refuses to spawn a .bat/.cmd directly since CVE-2024-27980, so a
+      // shim must go through the command processor. the OUTER quote pair is
+      // what `/s` strips, leaving the inner quoted path intact — without it a
+      // path containing a space runs nothing at all, which is the common case
+      // under `C:\Users\First Last`. same shape Node's own `shell: true` emits.
+      // every argument here is a compile-time constant, so there is nothing to
+      // escape beyond that.
+      const command = [`"${candidate}"`, ...params.args].join(" ");
+      return {
+        file: commandProcessor(params.env),
+        args: ["/d", "/s", "/c", `"${command}"`],
+        wrapped: true,
+      };
+    }
+  }
+  return null;
+}
+
+/** on Windows a shell finding `codex` proves nothing about `spawn`, so name the
+ * extensions actually searched rather than telling a user whose PATH is already
+ * correct to reinstall. */
+function codexNotFoundMessage(env: NodeJS.ProcessEnv): string {
+  const install =
+    "install it with `npm i -g @openai/codex` or see https://developers.openai.com/codex/cli for other install options.";
+  if (process.platform !== "win32") return `codex CLI not found on PATH. ${install}`;
+  const extensions = (envValue(env, "PATHEXT") ?? DEFAULT_PATHEXT)
+    .split(";")
+    .filter(Boolean)
+    .join(" ");
+  return `codex CLI not found on PATH (searched every PATH entry for codex with ${extensions}). a working \`codex --version\` in a shell does not prove Node can spawn it. ${install}`;
+}
+
 /** spawn `codex login --device-auth` with stdin closed so Codex doesn't hang
  * waiting for input. by default inherits stdout/stderr so the user sees the
  * device URL + one-time code Codex prints; when `pipe`d, lines are forwarded
@@ -141,9 +236,21 @@ const SIGTERM_GRACE_MS = 5_000;
  */
 function runDeviceAuth(input: DeviceAuthInput): Promise<DeviceAuthResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn("codex", ["login", "--device-auth"], {
+    const target = resolveSpawnTarget({
+      command: "codex",
+      args: DEVICE_AUTH_ARGS,
+      env: process.env,
+    });
+    if (!target) {
+      reject(new Error(codexNotFoundMessage(process.env)));
+      return;
+    }
+
+    const child = spawn(target.file, target.args, {
       env: { ...process.env, CODEX_HOME: input.codexHome },
       stdio: ["ignore", input.childStdio, input.childStdio],
+      windowsVerbatimArguments: target.wrapped,
+      windowsHide: true,
     });
 
     if (input.childStdio === "pipe") {
@@ -156,6 +263,12 @@ function runDeviceAuth(input: DeviceAuthInput): Promise<DeviceAuthResult> {
     let timedOut = false;
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
+      // behind `cmd.exe` a signal reaches only the wrapper, leaving the real
+      // Codex process orphaned. `taskkill /t` takes the whole tree.
+      if (target.wrapped && child.pid) {
+        spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+        return;
+      }
       child.kill("SIGTERM");
       // give Codex a grace window to exit cleanly on SIGTERM. if it ignores
       // it, force SIGKILL so we don't pin the CLI on a stuck child.
@@ -171,7 +284,7 @@ function runDeviceAuth(input: DeviceAuthInput): Promise<DeviceAuthResult> {
       const errno = err as NodeJS.ErrnoException;
       const message =
         errno.code === "ENOENT"
-          ? "codex CLI not found on PATH. install it with `npm i -g @openai/codex` or see https://developers.openai.com/codex/cli for other install options."
+          ? codexNotFoundMessage(process.env)
           : `failed to spawn codex: ${errno.message}`;
       reject(new Error(message));
     });
