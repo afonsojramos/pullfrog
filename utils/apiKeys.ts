@@ -843,9 +843,13 @@ export function formatApiKeyErrorSummary(params: {
     ].join("\n");
   }
 
+  // unlike `buildCredentialRejection`, which probed a named credential, the
+  // mid-run path only has the provider's wording — so it can't know which store
+  // the rejected key came from. naming one sent a customer whose only copy lives
+  // in Pullfrog's store to an empty GitHub Actions settings page.
   return [
-    `**Your LLM provider API key was rejected.** Rotate the key in your provider dashboard, then update the matching GitHub Actions secret.`,
+    `**Your LLM provider API key was rejected.** Rotate the key in your provider dashboard, then update the copy Pullfrog uses — wherever you saved it.`,
     "",
-    `[Update repo secret →](${githubSecretsUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    `[Pullfrog secrets →](${getApiUrl()}/console/${params.owner}) · [Repo secrets →](${githubSecretsUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
   ].join("\n");
 }

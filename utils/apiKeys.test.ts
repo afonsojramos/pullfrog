@@ -396,6 +396,11 @@ describe("formatApiKeyErrorSummary", () => {
     });
     expect(msg).toContain("rejected");
     expect(msg).toContain("https://github.com/acme/repo/settings/secrets/actions");
+    // the key may live in Pullfrog's store instead, and only one of the two CTAs
+    // can be right — so both have to be offered. assert the LABEL: the sibling
+    // `Model settings` link is `/console/acme/repo`, so a bare `/console/acme`
+    // substring passes against copy that never gained the store link at all.
+    expect(msg).toContain("[Pullfrog secrets →](");
     expect(msg).toContain("https://discord.gg/8y96raFg8e");
   });
 
