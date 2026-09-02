@@ -28,6 +28,20 @@ export type ProviderEntry = {
   agent: "claude" | "opencode";
   /** repo-relative globs that invalidate this provider's matrix entries. */
   coverage: string[];
+  /**
+   * CI holds no credential for this provider, so `models-live` and
+   * `providers-live` emit no cell for it — the entry exists only to carry
+   * `coverage`, without which every alias of this provider would run on EVERY
+   * push (an undeclared coverage set reads as "any change touches me", the
+   * `opencode-go` lesson below).
+   *
+   * Deliberately a per-provider opt-out and NOT "skip whenever the env var is
+   * missing": the second one also swallows a rotation accident on a provider we
+   * do hold a key for, which is exactly what these jobs exist to catch. Delete
+   * the flag the moment the secret lands — the rest of the entry is already
+   * correct and the cells arm themselves.
+   */
+  noCiCredential?: true;
 };
 
 /** what EVERY provider entry depends on: the resolution table, and the runner
@@ -78,6 +92,16 @@ export const providers: ProviderEntry[] = [
     flagship: "moonshotai/kimi-k2",
     agent: "opencode",
     coverage: SHARED_OPENCODE_COVERAGE,
+  },
+  {
+    // the flagship is the all-tier model on purpose: K3 and HighSpeed 401 on a
+    // membership below Moderato / Allegretto, so any lower-tier CI key would
+    // fail them for a reason the smoke isn't testing.
+    name: "kimi-for-coding",
+    flagship: "kimi-for-coding/kimi-k2",
+    agent: "opencode",
+    coverage: SHARED_OPENCODE_COVERAGE,
+    noCiCredential: true,
   },
   {
     // one gateway key fronts every vendor; sonnet is the standard tier there too.

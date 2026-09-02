@@ -583,6 +583,7 @@ export function isApiKeyAuthError(text: string): boolean {
     /Your api key:.*is invalid/i.test(text) ||
     isMalformedKeyError(text) ||
     isClaudeSubscriptionDisabledError(text) ||
+    isKimiPlanTierError(text) ||
     isClaudeSessionLimitError(text) ||
     isOAuthCredentialExpiredError(text)
   );
@@ -637,6 +638,24 @@ export function isMalformedKeyError(text: string): boolean {
  */
 export function isClaudeSubscriptionDisabledError(text: string): boolean {
   return /disabled Claude subscription access/i.test(text);
+}
+
+/**
+ * Kimi Code entitlement denial — the key is valid and the membership is live,
+ * but the tier doesn't include the model or the context window the run asked
+ * for (`k3` and `k3-256k` need Moderato, `kimi-for-coding-highspeed` and K3's
+ * 1M window need Allegretto). Kimi answers all of them with **401**, the same
+ * status as a revoked key, so nothing but the sentence tells them apart — and
+ * without that the run renders "rotate the key in your provider dashboard",
+ * which names three things that will not fix it.
+ *
+ * Both published shapes, parameterised over the clause that varies rather than
+ * the model id inside it, per `isOAuthCredentialExpiredError`. Listed in
+ * `isApiKeyAuthError` below so the branch is reachable whatever `type` Kimi
+ * puts in the payload. See wiki/kimi-code.md.
+ */
+export function isKimiPlanTierError(text: string): boolean {
+  return /Your current (?:subscription does not have access to|plan supports only)\b/i.test(text);
 }
 
 /**
@@ -785,6 +804,17 @@ export function formatApiKeyErrorSummary(params: {
       `**Your organization has disabled Claude subscription access for Claude Code.** Ask your Claude organization's admin to re-enable it in the Claude Console, or set an \`ANTHROPIC_API_KEY\` for this repo instead, then re-trigger the run.`,
       "",
       `[Add repo secret →](${githubSecretsUrl}) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    ].join("\n");
+  }
+
+  // the Kimi membership doesn't cover the model that was asked for. same 401 a
+  // revoked key returns, so it has to be checked before every rotate-the-key
+  // branch below — the key is fine and there is nothing to re-issue.
+  if (isKimiPlanTierError(params.raw)) {
+    return [
+      "**Your Kimi membership doesn't include the model this run asked for.** Kimi K3 needs a Moderato plan or above, and K3's 1M context and Kimi K2 HighSpeed need Allegretto or above. Upgrade the membership, or switch this repo to **Kimi K2**, which every tier includes.",
+      "",
+      `[Kimi plans →](https://www.kimi.com/membership/pricing) · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/kimi-code) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
     ].join("\n");
   }
 

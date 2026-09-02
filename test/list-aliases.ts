@@ -50,6 +50,11 @@ function toMatrixEntry(alias: (typeof modelAliases)[number]): MatrixEntry {
 
 const aliasBySlug = new Map(modelAliases.map((a) => [a.slug, a]));
 
+/** providers CI holds no credential for — see `ProviderEntry.noCiCredential`. */
+const uncredentialedProviders = new Set(
+  providers.filter((p) => p.noCiCredential).map((p) => p.name)
+);
+
 export function buildAliasMatrix(opts: { filter?: string }): MatrixEntry[] {
   const filter = opts.filter ?? "";
   return modelAliases
@@ -58,6 +63,9 @@ export function buildAliasMatrix(opts: { filter?: string }): MatrixEntry[] {
       // routing slugs (bedrock/byok) need a per-run env var to pick the actual
       // model — there's no generic smoke test.
       if (alias.routing) return false;
+      // no key in CI, so every cell would fail on auth rather than on anything
+      // the smoke is asking about.
+      if (uncredentialedProviders.has(alias.provider)) return false;
       return true;
     })
     .map(toMatrixEntry);
@@ -66,6 +74,7 @@ export function buildAliasMatrix(opts: { filter?: string }): MatrixEntry[] {
 export function buildFlagshipMatrix(opts: { filter?: string }): MatrixEntry[] {
   const filter = opts.filter ?? "";
   return providers
+    .filter((p) => !p.noCiCredential)
     .map((p) => {
       const alias = aliasBySlug.get(p.flagship);
       if (!alias) {

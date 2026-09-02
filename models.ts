@@ -413,6 +413,69 @@ export const providers = {
       },
     },
   }),
+  // the same models as `moonshotai` above, billed against a Kimi membership
+  // instead of a Moonshot API balance — a separate endpoint, separate model
+  // ids and a separate key, which is why it is a provider rather than a second
+  // `envVars` entry. no provider injection is needed: models.dev carries
+  // `kimi-for-coding` (api `https://api.kimi.com/coding/v1`, npm
+  // `@ai-sdk/anthropic`) and opencode's env loop enables it from a bare
+  // `KIMI_API_KEY`, verified against our pinned opencode-ai@1.18.5 — all four
+  // ids list in `opencode models` and a run reaches Kimi's own auth check.
+  //
+  // NO `openRouterResolve` ON PURPOSE. OpenRouter cannot serve a Kimi
+  // membership, so a Router path here would silently bill the wallet for
+  // Moonshot pay-as-you-go under a slug picked for the opposite reason. The
+  // absence is load-bearing: `isCardGatedModel` reads it as "not Router-
+  // resolvable", `decideModelAccess` answers an explicit pick with the
+  // `router` copy ("add your own provider key"), and run-context clamps a
+  // keyless Router pick to the default subsidy model with `noRouterPath`.
+  "kimi-for-coding": provider({
+    // "Kimi Code" is the product name on kimi.com/code and in the console the
+    // key is minted from. The provider KEY has to stay `kimi-for-coding` — it
+    // is models.dev's id, so it is what `enabled_providers` and every
+    // `resolve` prefix must spell.
+    displayName: "Kimi Code",
+    envVars: ["KIMI_API_KEY"],
+    models: {
+      // the tier each model needs is in `description` because Kimi answers an
+      // out-of-tier request with 401 — indistinguishable from a bad key by
+      // status alone, and only `isKimiPlanTierError` tells them apart after the
+      // fact. saying it in the picker is the half that stops the run happening.
+      "kimi-k3": {
+        displayName: "Kimi K3",
+        description: "1M context, but only on Allegretto and above · Moderato caps it at 256K",
+        resolve: "kimi-for-coding/k3",
+        effort: ["low", "high", "max"],
+        subagentModel: "kimi-k2",
+      },
+      // `preferred` sits on the 256K variant rather than the 1M flagship, which
+      // inverts the usual "top tier wins" rule for a reason specific to Kimi:
+      // below Allegretto the two are the SAME 256K ceiling and `k3` charges
+      // roughly double the quota for it, so on the median tier the flagship is
+      // strictly dominated rather than merely pricier. This flag seeds the
+      // onboarding pick (`getRecommendedSlug`) and wins key-only auto-select
+      // (`autoSelectModel`), which are exactly the two moments nobody has
+      // chosen yet.
+      "kimi-k3-256k": {
+        displayName: "Kimi K3 256K",
+        description: "Same model at 256K for ~half the quota · Moderato or above",
+        resolve: "kimi-for-coding/k3-256k",
+        effort: ["low", "high", "max"],
+        preferred: true,
+        subagentModel: "kimi-k2",
+      },
+      "kimi-k2": {
+        displayName: "Kimi K2",
+        description: "Included in every Kimi membership tier",
+        resolve: "kimi-for-coding/kimi-for-coding",
+      },
+      "kimi-k2-highspeed": {
+        displayName: "Kimi K2 HighSpeed",
+        description: "~6x output speed for ~3x quota · needs Allegretto or above",
+        resolve: "kimi-for-coding/kimi-for-coding-highspeed",
+      },
+    },
+  }),
   opencode: provider({
     displayName: "OpenCode Zen",
     envVars: ["OPENCODE_API_KEY"],

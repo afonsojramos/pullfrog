@@ -29,6 +29,15 @@ const BYOK_ONLY_MODELS = new Set<string>([
   "vercel/deepseek-flash",
   "vercel/glm",
   "vercel/kimi-k3",
+  // same reason as the vercel/* entries, one step further: these aliases exist
+  // to spend a Kimi MEMBERSHIP, and OpenRouter cannot resell one — its
+  // `moonshotai/*` ids are the pay-as-you-go route the user picked these to
+  // avoid. never fillable, so rule 9 can't reach them (the scanner exact-matches
+  // `kimi-for-coding/<id>`, which OpenRouter does not carry). see wiki/kimi-code.md.
+  "kimi-for-coding/kimi-k3",
+  "kimi-for-coding/kimi-k3-256k",
+  "kimi-for-coding/kimi-k2",
+  "kimi-for-coding/kimi-k2-highspeed",
 ]);
 
 describe("openRouterResolve completeness", () => {
