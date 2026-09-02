@@ -102,16 +102,36 @@ export const CREDENTIAL_REJECTED_MARKER = "was rejected by its provider";
  * no key of your own, or you genuinely have no key. Every throw site picks by
  * these flags.
  */
-function buildKeyError(params: {
+/**
+ * Nothing in the environment can pay for this run — as distinct from a
+ * credential that IS configured but incompletely (the Bedrock/Vertex/Azure/
+ * OpenAI-compatible setup validators), an agent that could not start
+ * (`getModelsFailure`), or Pullfrog failing to hand its own secrets over.
+ *
+ * The trial fallback keys on this class, and that is the whole reason it
+ * exists: every other failure in `validateAgentApiKey` means the user HAS
+ * brought a key, so falling back would swap their model for a cheap one and
+ * swallow the message telling them what to fix.
+ */
+export class NoUsableCredentialError extends Error {}
+
+/**
+ * The three ways a run reaches the agent with nothing to authenticate with.
+ * Only two of them are the user's to fix, and only those two are a
+ * `NoUsableCredentialError`: when `secretsUnavailable` is set we could not
+ * READ their Pullfrog-stored credentials, so we do not know whether they have
+ * one — and guessing costs them a downgraded run to cover our own outage.
+ */
+function throwKeyError(params: {
   owner: string;
   name: string;
   model?: string | undefined;
   secretsUnavailable?: boolean | undefined;
   routerUnfunded?: boolean | undefined;
-}): string {
-  if (params.secretsUnavailable) return buildSecretsUnavailableError(params);
-  if (params.routerUnfunded) return buildRouterUnfundedError(params);
-  return buildMissingApiKeyError(params);
+}): never {
+  if (params.secretsUnavailable) throw new Error(buildSecretsUnavailableError(params));
+  if (params.routerUnfunded) throw new NoUsableCredentialError(buildRouterUnfundedError(params));
+  throw new NoUsableCredentialError(buildMissingApiKeyError(params));
 }
 
 /**
@@ -455,13 +475,25 @@ export function validateAgentApiKey(params: {
     // setup validator — `opencode models` doesn't help here because the
     // Bedrock/Vertex provider plugins need region/location/model-id wired
     // through env regardless of CLI-side auth.
+    // both sentinels are checked, because `resolveSlug` returns the env var's
+    // value verbatim — so a slash-less model matching NEITHER did not come from
+    // a routing slug at all. It is an unknown slug `resolveModel` passed through
+    // (having already warned "agent will auto-select"), and answering that with
+    // "Bedrock model selected but required configuration is missing" is advice
+    // about a provider the user never picked. Falling through sends it to the
+    // ordinary checks, where `getModelEnvVars` reports the actual `invalid
+    // model slug`. That is still not a `NoUsableCredentialError`, so a trial
+    // does not fund it — a typo'd slug is a fixable mistake, not a run nobody
+    // can pay for.
     if (!params.model.includes("/")) {
       if (process.env[VERTEX_MODEL_ID_ENV]?.trim() === params.model) {
         validateVertexSetup({ owner: params.owner, name: params.name });
         return;
       }
-      validateBedrockSetup({ owner: params.owner, name: params.name });
-      return;
+      if (process.env[BEDROCK_MODEL_ID_ENV]?.trim() === params.model) {
+        validateBedrockSetup({ owner: params.owner, name: params.name });
+        return;
+      }
     }
 
     if (params.agent.name === "opencode") {
@@ -476,28 +508,24 @@ export function validateAgentApiKey(params: {
       // failed or passed purely on where its slug sorted against the cut. only
       // trust the absence when the model's own env var is unset too.
       if (getModelEnvVars(params.model).some(hasEnvVar)) return;
-      throw new Error(
-        buildKeyError({
-          owner: params.owner,
-          name: params.name,
-          model: params.model,
-          secretsUnavailable: params.secretsUnavailable,
-          routerUnfunded: params.routerUnfunded,
-        })
-      );
-    }
-
-    // claude / codex: single-provider check on that vendor's auth shapes.
-    if (hasSingleProviderAuth(params.agent.name)) return;
-    throw new Error(
-      buildKeyError({
+      throwKeyError({
         owner: params.owner,
         name: params.name,
         model: params.model,
         secretsUnavailable: params.secretsUnavailable,
         routerUnfunded: params.routerUnfunded,
-      })
-    );
+      });
+    }
+
+    // claude / codex: single-provider check on that vendor's auth shapes.
+    if (hasSingleProviderAuth(params.agent.name)) return;
+    throwKeyError({
+      owner: params.owner,
+      name: params.name,
+      model: params.model,
+      secretsUnavailable: params.secretsUnavailable,
+      routerUnfunded: params.routerUnfunded,
+    });
   }
 
   // no model configured (auto-select path).
@@ -515,24 +543,20 @@ export function validateAgentApiKey(params: {
     // config empties the model set, and it is the likelier cause here too.
     const reason = getModelsFailure();
     if (reason) throw new Error(reason);
-    throw new Error(
-      buildKeyError({
-        owner: params.owner,
-        name: params.name,
-        secretsUnavailable: params.secretsUnavailable,
-        routerUnfunded: params.routerUnfunded,
-      })
-    );
-  }
-  if (hasSingleProviderAuth(params.agent.name)) return;
-  throw new Error(
-    buildKeyError({
+    throwKeyError({
       owner: params.owner,
       name: params.name,
       secretsUnavailable: params.secretsUnavailable,
       routerUnfunded: params.routerUnfunded,
-    })
-  );
+    });
+  }
+  if (hasSingleProviderAuth(params.agent.name)) return;
+  throwKeyError({
+    owner: params.owner,
+    name: params.name,
+    secretsUnavailable: params.secretsUnavailable,
+    routerUnfunded: params.routerUnfunded,
+  });
 }
 
 /**

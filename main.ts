@@ -20,7 +20,11 @@ import {
   DEFAULT_ACTIVITY_CHECK_INTERVAL_MS,
 } from "./utils/activity.ts";
 import { resolveAgent, resolveModel } from "./utils/agent.ts";
-import { buildRejectedCredentialError, validateAgentApiKey } from "./utils/apiKeys.ts";
+import {
+  buildRejectedCredentialError,
+  NoUsableCredentialError,
+  validateAgentApiKey,
+} from "./utils/apiKeys.ts";
 import { formatCommercialGateSummary } from "./utils/billingErrors.ts";
 import { resolveBody } from "./utils/body.ts";
 import { log } from "./utils/cli.ts";
@@ -520,15 +524,23 @@ export async function main(): Promise<MainResult> {
         // see — workflow `env:`, GitHub Actions secrets, the harness-specific
         // shapes — so an earlier mint would have downgraded accounts that were
         // fine. the server only granted permission; the verdict is here.
-        const funded = runContext.trialFallback
-          ? await resolveTrialFallback({
-              payload,
-              configuredModel: effectiveModel,
-              oidcCredentials,
-              repo: runContext.repo,
-              toolState,
-            })
-          : false;
+        //
+        // and only THAT verdict: the same function also throws when opencode
+        // could not start, when a Bedrock/Vertex/Azure/OpenAI-compatible setup
+        // is half-wired, and when we could not read our own stored secrets.
+        // every one of those means the user HAS brought a credential, so
+        // falling back would swap their model for a cheap one and swallow the
+        // message that says what to fix.
+        const funded =
+          runContext.trialFallback && missingKey instanceof NoUsableCredentialError
+            ? await resolveTrialFallback({
+                payload,
+                configuredModel: effectiveModel,
+                oidcCredentials,
+                repo: runContext.repo,
+                toolState,
+              })
+            : false;
         if (!funded) throw missingKey;
         // the run is now Router-served, and only opencode speaks that provider —
         // the harness picked above was chosen for a credential that does not
