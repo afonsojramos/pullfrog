@@ -36,6 +36,17 @@ export type EffortPosition = number;
 export const DEFAULT_EFFORT_POSITION: EffortPosition = 0.5;
 
 /**
+ * the rung a Pullfrog-subsidised OSS run is pinned to, whatever the repo or a
+ * per-kind-of-work row has stored — see `ossEffortFloor`, which spends it, and
+ * the console's Model card, which stops offering the control because of it.
+ *
+ * shared rather than written twice: the runtime pins the run and the console
+ * says so, and a console that names a different rung than the one that runs is
+ * the same class of bug as the Router opt-out the two surfaces disagreed on.
+ */
+export const SUBSIDY_RUNG = "high";
+
+/**
  * names we accept on user-facing surfaces (`--effort=`, the action input),
  * mapped to fixed points on the axis. these are a typing convenience, NOT an
  * ordering authority — a model's own ladder decides what each point resolves to.

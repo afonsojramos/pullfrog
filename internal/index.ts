@@ -54,6 +54,7 @@ export {
   resolveRung,
   rungLabel,
   rungPosition,
+  SUBSIDY_RUNG,
 } from "../external.ts";
 export type { Mode } from "../modes.ts";
 export { modes } from "../modes.ts";

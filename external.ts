@@ -94,6 +94,7 @@ export {
   resolveRung,
   rungLabel,
   rungPosition,
+  SUBSIDY_RUNG,
 } from "./effort.ts";
 // model alias registry lives in models.ts — re-exported here for shared access
 export type { AutoTier, ModelAlias, ModelProvider, ProviderConfig } from "./models.ts";
@@ -376,6 +377,14 @@ export interface WriteablePayload {
   "~pullfrog": true;
   /** semantic version of the payload to ensure compatibility */
   version: string;
+  /**
+   * which kind of work this run is (`pr-created`, `issue-created`, …). the
+   * server's own run-type vocabulary, opaque here: the action only forwards it
+   * to `run-context`, which resolves the repo's per-trigger model override
+   * against it. absent ⇒ the repo default, which is what every run got before
+   * overrides existed.
+   */
+  type?: string | undefined;
   /** provider/model slug (e.g. "anthropic/claude-opus") */
   model?: string | undefined;
   /**

@@ -33,6 +33,9 @@ const DebugInput = type.enumerated("disabled", "enabled");
 export const JsonPayload = type({
   "~pullfrog": "true",
   version: "string",
+  // the server's run type, forwarded verbatim to run-context. optional so a
+  // payload from an older server build still parses against a newer action.
+  "type?": "string | undefined",
   "model?": "string | undefined",
   "modelExplicit?": "boolean | undefined",
   "effort?": "number | string | undefined",

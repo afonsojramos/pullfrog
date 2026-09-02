@@ -35,6 +35,10 @@ export interface RunContextData {
 interface ResolveRunContextDataParams {
   octokit: OctokitWithPlugins;
   token: string;
+  /** the dispatch payload's run type, read before the payload is resolved
+   * because run-context is fetched first and needs it to pick this trigger's
+   * model override. */
+  runType?: string | undefined;
 }
 
 /**
@@ -106,7 +110,7 @@ export async function resolveRunContextData(
       retries: [100, 500],
       bail: (error) => !isTransientOctokitError(error),
     })(),
-    fetchRunContext({ token: params.token, repoContext, oidcToken }),
+    fetchRunContext({ token: params.token, repoContext, oidcToken, runType: params.runType }),
   ]);
 
   return {

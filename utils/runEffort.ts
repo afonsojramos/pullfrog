@@ -5,7 +5,12 @@
  * see wiki/effort.md.
  */
 
-import { DEFAULT_EFFORT_POSITION, type EffortPosition, rungPosition } from "../effort.ts";
+import {
+  DEFAULT_EFFORT_POSITION,
+  type EffortPosition,
+  rungPosition,
+  SUBSIDY_RUNG,
+} from "../effort.ts";
 import { AZURE_PROVIDER, type ModelAlias, modelAliases, resolveModelRung } from "../models.ts";
 import type { ResolvedPayload } from "./payload.ts";
 
@@ -96,7 +101,7 @@ export function ossEffortFloor(ctx: { payload: ResolvedPayload }): EffortPositio
   const alias = resolveRunAlias(ctx);
   const published = alias?.openRouterEffort ?? alias?.effort;
   if (!published) return 0;
-  return rungPosition({ rung: "high", published }) ?? 0;
+  return rungPosition({ rung: SUBSIDY_RUNG, published }) ?? 0;
 }
 
 export function resolveRunEffort(ctx: {

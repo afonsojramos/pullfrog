@@ -143,7 +143,11 @@ export async function main(): Promise<MainResult> {
   // get job token for initial API calls
   const jobToken = getJobToken();
   const initialOctokit = createOctokit(jobToken);
-  const runContext = await resolveRunContextData({ octokit: initialOctokit, token: jobToken });
+  const runContext = await resolveRunContextData({
+    octokit: initialOctokit,
+    token: jobToken,
+    runType: typeof resolvedPromptInput === "string" ? undefined : resolvedPromptInput.type,
+  });
   timer.checkpoint("runContextData");
 
   const payload = resolvePayload(resolvedPromptInput, runContext.repoSettings);

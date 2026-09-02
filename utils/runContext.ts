@@ -168,6 +168,9 @@ export async function fetchRunContext(params: {
   token: string;
   repoContext: RepoContext;
   oidcToken?: string | undefined;
+  /** `payload.type` — lets the server apply this repo's per-trigger model
+   * override, which it cannot derive from owner/repo alone. */
+  runType?: string | undefined;
 }): Promise<RunContext> {
   const timeoutMs = 30000;
   const controller = new AbortController();
@@ -181,8 +184,9 @@ export async function fetchRunContext(params: {
       headers["X-GitHub-OIDC-Token"] = params.oidcToken;
     }
 
+    const query = params.runType ? `?type=${encodeURIComponent(params.runType)}` : "";
     const response = await apiFetch({
-      path: `/api/repo/${params.repoContext.owner}/${params.repoContext.name}/run-context`,
+      path: `/api/repo/${params.repoContext.owner}/${params.repoContext.name}/run-context${query}`,
       headers,
       signal: controller.signal,
     });
