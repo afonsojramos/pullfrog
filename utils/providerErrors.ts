@@ -6,6 +6,15 @@ export const PROVIDER_BILLING_EXHAUSTED_LABEL = "provider billing exhausted";
 /** Stable label for "OpenRouter can route this model nowhere you permit". */
 export const PROVIDER_NO_ENDPOINTS_LABEL = "provider no routable endpoints";
 
+/**
+ * A SUBSCRIPTION usage window that has run out, which is deliberately NOT
+ * `PROVIDER_BILLING_EXHAUSTED_LABEL`: that label routes to a body whose CTA is
+ * "Top up your provider balance", and a capped ChatGPT or Zen plan has no
+ * balance to top up — it resets on its own. This label carries the cause into
+ * the headline and lets the generic body stand.
+ */
+export const PROVIDER_USAGE_LIMIT_LABEL = "provider usage limit reached";
+
 // status codes are only treated as provider errors when they are adjacent to
 // a recognised status key. this rejects commit SHAs that happen to contain
 // "429", version strings, file hashes, etc.
@@ -67,6 +76,14 @@ const PROVIDER_ERROR_PATTERNS: ProviderErrorPattern[] = [
   // the wallet-shaped patterns above reach, and its 400 sits nowhere near a
   // `status:` key either — so the whole message was dropped on the floor (#1208).
   { regex: ANTHROPIC_SPEND_CAP_PATTERN, label: PROVIDER_BILLING_EXHAUSTED_LABEL },
+  // OpenCode Zen / Codex-subscription cap: `AI_APICallError: The usage limit has
+  // been reached`. Its noun is "usage limit" with no "rate", no status code and
+  // no wallet wording, so every pattern here missed it and `lastProviderError`
+  // stayed unset — which suppresses nothing, so the run was reported as "The
+  // model produced no output at all … usually transient; re-running often
+  // succeeds" while the same log held nine of these. Measured on a live account
+  // whose ChatGPT subscription was capped.
+  { regex: /\bthe usage limit has been reached\b/i, label: PROVIDER_USAGE_LIMIT_LABEL },
   // the OpenRouter shapes `isRouterKeylimitExhaustedError` matches. on a Router
   // run those mean the PULLFROG wallet is empty and `renderRunError` returns a
   // `BillingError` before ever reaching this list; on a BYOK run the very same
