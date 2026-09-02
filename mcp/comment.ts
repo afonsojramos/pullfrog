@@ -43,6 +43,7 @@ function buildCommentFooter(ctx: ToolContext, customParts?: string[]): string {
     unselectedProxyDefault: ctx.toolState.unselectedProxyDefault,
     shaPinned: ctx.toolState.shaPinned,
     oss: ctx.oss,
+    owner: ctx.repo.owner,
   });
 }
 

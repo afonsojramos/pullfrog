@@ -36,10 +36,14 @@ import { reportErrorToComment } from "./errorReport.ts";
 import { fetchIdTokenFromStash, isTransientTokenError, type OidcCredentials } from "./github.ts";
 import type { ResolvedPayload } from "./payload.ts";
 
+/** which program pays for the minted key. the server re-derives entitlement for
+ * every value of this — it is a request, never a claim. */
+type FundingSource = "oss" | "router" | "trial";
+
 async function mintProxyKey(ctx: {
   oidcCredentials: OidcCredentials | null;
   repo: { owner: string; name: string };
-  oss: boolean;
+  fundingSource: FundingSource;
 }): Promise<string | null> {
   try {
     const headers = await buildProxyTokenHeaders(ctx);
@@ -131,9 +135,9 @@ async function mintProxyKey(ctx: {
 async function buildProxyTokenHeaders(ctx: {
   oidcCredentials: OidcCredentials | null;
   repo: { owner: string; name: string };
-  oss: boolean;
+  fundingSource: FundingSource;
 }): Promise<Record<string, string> | null> {
-  const fundingSource = ctx.oss ? "oss" : "router";
+  const fundingSource = ctx.fundingSource;
   if (ctx.oidcCredentials) {
     // retry transients — core.getIDToken (the previous mint path) retried
     // 5xx internally, and a soft-skip here degrades the run to BYOK
@@ -201,7 +205,7 @@ async function resolveProxyModel(ctx: {
   const key = await mintProxyKey({
     oidcCredentials: ctx.oidcCredentials,
     repo: ctx.repo,
-    oss: ctx.oss,
+    fundingSource: ctx.oss ? "oss" : "router",
   });
   if (!key) return;
 
@@ -340,4 +344,52 @@ export async function runProxyResolution(ctx: {
     }
     throw error;
   }
+}
+
+/**
+ * Late fallback for a run inside the no-card trial whose own key search came up
+ * dry. Mints a Pullfrog-funded key on the efficient tier so a new account's
+ * first run produces a review rather than a credentials error.
+ *
+ * Deliberately runs AFTER `validateAgentApiKey` rather than beside the ordinary
+ * proxy resolution: the server grants permission but cannot see workflow `env:`
+ * keys, so only the runner knows whether anything else could have paid. Minting
+ * eagerly would silently downgrade every account whose key lives in GitHub
+ * Actions secrets.
+ *
+ * Returns false when the mint is unavailable (no OIDC, server declined), leaving
+ * the caller to raise the original missing-key error unchanged.
+ */
+export async function resolveTrialFallback(ctx: {
+  payload: ResolvedPayload;
+  configuredModel: string | undefined;
+  oidcCredentials: OidcCredentials | null;
+  repo: { owner: string; name: string };
+  toolState: ToolState;
+}): Promise<boolean> {
+  // an explicit operator override is a deliberate pin — usually set to
+  // REPRODUCE a credential failure — so silently serving it from the subsidy
+  // would mask the very run it was set to produce.
+  if (process.env.PULLFROG_MODEL?.trim()) return false;
+  if (!ctx.oidcCredentials && !isLocalApiUrl()) return false;
+
+  const key = await mintProxyKey({
+    oidcCredentials: ctx.oidcCredentials,
+    repo: ctx.repo,
+    fundingSource: "trial",
+  });
+  if (!key) return false;
+
+  process.env.OPENROUTER_API_KEY = key;
+  core.setSecret(key);
+  ctx.payload.proxyModel = DEFAULT_PROXY_MODEL;
+  ctx.toolState.model = DEFAULT_PROXY_MODEL;
+  // `from` is what the repo was configured to use, so the disclosure can name
+  // what did NOT run. absent when the repo never picked a model at all.
+  ctx.toolState.modelClamped = {
+    from: ctx.configuredModel ?? DEFAULT_PROXY_MODEL,
+    reason: "trial",
+  };
+  log.info(`» proxy: trial → ${DEFAULT_PROXY_MODEL}`);
+  return true;
 }

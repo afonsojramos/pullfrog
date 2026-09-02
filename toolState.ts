@@ -261,7 +261,7 @@ export interface ToolState {
   // the card gate ("card") from a pick that has no openRouterResolve yet and
   // no stored provider key ("noRouterPath", a model OpenRouter doesn't serve
   // yet).
-  modelClamped?: { from: string; reason: "card" | "noRouterPath" | "oss" } | undefined;
+  modelClamped?: { from: string; reason: "card" | "noRouterPath" | "oss" | "trial" } | undefined;
   // true when the action is pinned to a full commit SHA (vs `@v0`). carried
   // into footers so the user sees the maintenance nudge in the PR, not just
   // the buried GHA log annotation — a SHA pin freezes the post-run cleanup

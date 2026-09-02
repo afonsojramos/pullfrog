@@ -1227,6 +1227,7 @@ export async function createAndSubmitWithFooter(
       unselectedProxyDefault: ctx.toolState.unselectedProxyDefault,
       shaPinned: ctx.toolState.shaPinned,
       oss: ctx.oss,
+      owner: ctx.repo.owner,
     });
 
     return await ctx.octokit.rest.pulls.submitReview({

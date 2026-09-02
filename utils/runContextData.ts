@@ -30,6 +30,11 @@ export interface RunContextData {
   /** the Router was declined because the wallet is empty. see
    * `RunContext.routerUnfunded`. */
   routerUnfunded?: boolean | undefined;
+  /** the account is inside its no-card trial and nothing else could fund this
+   * run, so the runner MAY mint a subsidized key on the efficient tier if its
+   * own key search comes up dry. a permission, not a routing decision — the
+   * server cannot see workflow `env:` keys. see `RunContext.trialFallback`. */
+  trialFallback?: boolean | undefined;
 }
 
 interface ResolveRunContextDataParams {
@@ -132,5 +137,6 @@ export async function resolveRunContextData(
       runContext.secretsUnavailable ||
       (!!process.env.ACTIONS_ID_TOKEN_REQUEST_URL && oidcToken === undefined),
     routerUnfunded: runContext.routerUnfunded,
+    trialFallback: runContext.trialFallback,
   };
 }
