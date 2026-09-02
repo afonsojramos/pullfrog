@@ -7,30 +7,20 @@
  *   - flagships: one harness smoke per provider (providers-live)
  *   - aliases:   one CLI smoke per model alias (models-live)
  *
- * input: a JSON array of repo-relative changed paths on stdin (the
- * `paths-filter` action's `*_files` output). PR pushes pass the diff;
- * the nightly `schedule` run and `workflow_dispatch` set FULL=1 to skip filtering and
- * emit every entry.
- *
- * each test/provider declares its own `coverage` globs colocated with the
- * test (`crossagent/`, `agnostic/`) or provider (`providers.ts`). the matrix
- * builder intersects coverage against the diff. a top-level `ALWAYS_RUN_ALL`
- * (see `coverage.ts`) bypasses filtering when test-harness or cross-cutting
- * agent code changes — keeps stale globs from silently skipping critical
- * tests on test runner / shared.ts churn.
+ * these matrices run only on the nightly `schedule` and on `workflow_dispatch`
+ * — never on PR or `main` pushes (see test.yml for the spend history).
+ * MATRIX_FILTER scopes a dispatch to the cells that matter: comma-separated
+ * substrings, OR'd, matched against each entry's name and slug.
  *
  * usage:
- *   echo '["action/agents/opencode.ts"]' | node action/test/matrix.ts
- *   FULL=1 node action/test/matrix.ts < /dev/null
- *   MATRIX_FILTER=gemini FULL=1 node action/test/matrix.ts < /dev/null
+ *   nub action/test/matrix.ts
+ *   MATRIX_FILTER=codex,smoke nub action/test/matrix.ts
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { shouldRun } from "./coverage.ts";
 import { buildAliasMatrix, buildFlagshipMatrix } from "./list-aliases.ts";
-import { providers } from "./providers.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -54,7 +44,6 @@ type MatrixOutput = {
 type ParsedTest = {
   name: string;
   agents: string[] | undefined;
-  coverage: string[] | undefined;
 };
 
 const STRING_LITERAL = /"((?:\\.|[^"\\])*)"/g;
@@ -82,23 +71,15 @@ function extractStringArray(source: string, key: string): string[] | undefined {
   return extractStringLiterals(m[1]);
 }
 
-function parseTestFile(source: string, selfPath: string): ParsedTest | null {
+function parseTestFile(source: string): ParsedTest | null {
   // strip line comments — `//` inside string literals is rare in test files,
-  // and the static parser doesn't need to be perfect (defensive default of
-  // "missing coverage = always run" covers parse misses).
+  // and the static parser doesn't need to be perfect.
   const stripped = source.replace(/\/\/[^\n]*$/gm, "");
   const nameMatch = stripped.match(/^\s+name:\s*"([^"]+)"/m);
   if (!nameMatch) return null;
-  const declared = extractStringArray(stripped, "coverage");
   return {
     name: nameMatch[1],
     agents: extractStringArray(stripped, "agents"),
-    // a test whose OWN file changed must always run. `coverage` globs name the
-    // SOURCE a test protects, so editing only the fixture, a probe or the
-    // validator matched nothing and the matrix skipped the very test being
-    // changed — CI then reported green having never executed it. left undefined
-    // when nothing is declared, since that already means "always run".
-    coverage: declared?.length ? [...declared, selfPath] : declared,
   };
 }
 
@@ -109,7 +90,7 @@ function loadDir(dir: string): ParsedTest[] {
   const out: ParsedTest[] = [];
   for (const file of files) {
     const source = readFileSync(join(dirPath, file), "utf8");
-    const parsed = parseTestFile(source, `action/test/${dir}/${file}`);
+    const parsed = parseTestFile(source);
     if (parsed) out.push(parsed);
   }
   return out;
@@ -136,29 +117,11 @@ function loadAgents(): string[] {
   return out.sort();
 }
 
-function readChangedFiles(): string[] {
-  const raw = readFileSync(0, "utf8").trim();
-  if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) {
-    throw new Error("matrix: stdin must be a JSON array of changed paths");
-  }
-  return parsed.map((p) => {
-    if (typeof p !== "string") {
-      throw new Error(`matrix: non-string entry in changed paths: ${JSON.stringify(p)}`);
-    }
-    return p;
-  });
-}
-
-function buildAgentsMatrix(input: { changedFiles: string[]; full: boolean }): AgentEntry[] {
+function buildAgentsMatrix(): AgentEntry[] {
   const tests = loadDir("crossagent");
   const allAgents = loadAgents();
   const out: AgentEntry[] = [];
   for (const t of tests) {
-    if (!shouldRun({ changedFiles: input.changedFiles, coverage: t.coverage, full: input.full })) {
-      continue;
-    }
     const agents = t.agents ?? allAgents;
     for (const agent of agents) {
       out.push({ agent, test: t.name, name: `${t.name}-${agent}` });
@@ -167,62 +130,31 @@ function buildAgentsMatrix(input: { changedFiles: string[]; full: boolean }): Ag
   return out;
 }
 
-function buildAgnosticMatrix(input: { changedFiles: string[]; full: boolean }): AgnosticEntry[] {
-  const tests = loadDir("agnostic");
-  const out: AgnosticEntry[] = [];
-  for (const t of tests) {
-    if (!shouldRun({ changedFiles: input.changedFiles, coverage: t.coverage, full: input.full })) {
-      continue;
-    }
-    out.push({ test: t.name, name: t.name });
-  }
-  return out;
+function buildAgnosticMatrix(): AgnosticEntry[] {
+  return loadDir("agnostic").map((t) => ({ test: t.name, name: t.name }));
 }
 
-function buildFlagshipsMatrix(input: {
-  changedFiles: string[];
-  full: boolean;
-  filter: string;
-}): SlugEntry[] {
-  const all = buildFlagshipMatrix({ filter: input.filter });
-  const byName = new Map(providers.map((p) => [p.flagship, p]));
-  return all.filter((entry) => {
-    const provider = byName.get(entry.slug);
-    return shouldRun({
-      changedFiles: input.changedFiles,
-      coverage: provider?.coverage,
-      full: input.full,
-    });
-  });
+/** comma-separated MATRIX_FILTER terms; empty = keep everything. */
+function parseFilter(): string[] {
+  const raw = process.env.MATRIX_FILTER ?? "";
+  return raw
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
 }
 
-function buildAliasesMatrix(input: {
-  changedFiles: string[];
-  full: boolean;
-  filter: string;
-}): SlugEntry[] {
-  const all = buildAliasMatrix({ filter: input.filter });
-  const coverageByProvider = new Map(providers.map((p) => [p.name, p.coverage]));
-  return all.filter((entry) => {
-    const provider = entry.slug.split("/")[0];
-    return shouldRun({
-      changedFiles: input.changedFiles,
-      coverage: coverageByProvider.get(provider),
-      full: input.full,
-    });
-  });
+function matchesFilter(terms: string[], fields: string[]): boolean {
+  if (terms.length === 0) return true;
+  return terms.some((t) => fields.some((f) => f.toLowerCase().includes(t)));
 }
 
 function main(): void {
-  const full = process.env.FULL === "1";
-  const filter = process.env.MATRIX_FILTER?.trim().toLowerCase() ?? "";
-  const changedFiles = full ? [] : readChangedFiles();
-
+  const terms = parseFilter();
   const output: MatrixOutput = {
-    agents: buildAgentsMatrix({ changedFiles, full }),
-    agnostic: buildAgnosticMatrix({ changedFiles, full }),
-    flagships: buildFlagshipsMatrix({ changedFiles, full, filter }),
-    aliases: buildAliasesMatrix({ changedFiles, full, filter }),
+    agents: buildAgentsMatrix().filter((e) => matchesFilter(terms, [e.name])),
+    agnostic: buildAgnosticMatrix().filter((e) => matchesFilter(terms, [e.name])),
+    flagships: buildFlagshipMatrix().filter((e) => matchesFilter(terms, [e.name, e.slug])),
+    aliases: buildAliasMatrix().filter((e) => matchesFilter(terms, [e.name, e.slug])),
   };
 
   process.stdout.write(JSON.stringify(output));

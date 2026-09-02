@@ -9,8 +9,7 @@
  * Actions job summary and the PR progress comment.
  *
  * Lives outside `main.ts` so adding a new error `code` branch is a one-file
- * edit that does not retrigger the full LLM CI matrix (`action/main.ts` is
- * in `action/test/coverage.ts::ALWAYS_RUN_ALL`).
+ * edit rather than an orchestrator edit (see wiki/main.md).
  */
 
 /**

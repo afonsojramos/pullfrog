@@ -30,10 +30,4 @@ export const test: TestRunnerOptions = {
     VERTEX_MODEL_ID: "gemini-2.5-flash",
     VERTEX_LOCATION: "global",
   },
-  coverage: [
-    "action/models.ts",
-    "action/main.ts",
-    "action/agents/opencode.ts",
-    "action/utils/{agent,apiKeys,vertex}.ts",
-  ],
 };

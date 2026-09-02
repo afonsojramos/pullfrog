@@ -65,9 +65,4 @@ export const test: TestRunnerOptions = {
     PULLFROG_DISABLE_LEARNINGS_REFLECTION: "1",
     PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1",
   },
-  coverage: [
-    "action/utils/normalizeEnv.ts",
-    "action/mcp/shell.ts",
-    "action/agents/{claude,codex,opencode}.ts",
-  ],
 };

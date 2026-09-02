@@ -30,12 +30,6 @@ export const test: TestRunnerOptions = {
     BEDROCK_MODEL_ID: "us.anthropic.claude-sonnet-4-6",
     AWS_REGION: "us-east-1",
   },
-  coverage: [
-    "action/models.ts",
-    "action/main.ts",
-    "action/agents/claude.ts",
-    "action/utils/{agent,apiKeys}.ts",
-  ],
   // disabled: our AWS account rejects every Bedrock invoke with
   // `400 Operation not allowed`, which is an account-side entitlement problem,
   // not a Pullfrog regression. delete this line once the account is fixed.

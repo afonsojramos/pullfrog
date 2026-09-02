@@ -379,10 +379,6 @@ export interface TestRunnerOptions {
   //   - "agnostic": runs with opencode only, excluded when filtering by agent
   //   - "adhoc": excluded from default runs, must be explicitly requested
   tags?: TestTag[];
-  // repo-relative globs of source files that, when changed in a PR, should
-  // trigger this test in CI. omit to opt out of filtering (test always runs
-  // — the defensive default). see action/test/coverage.ts.
-  coverage?: string[];
   /** evaluated at test-runtime (after `pnpm install`, before agent spawn).
    * return a non-empty reason string to skip the test entirely — the runner
    * records a passing-with-skipped result so the matrix doesn't fail-fast

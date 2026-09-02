@@ -11,7 +11,7 @@
  *   `providers-live`, which runs the full harness smoke
  *   (`pnpm runtest smoke <agent>`) to validate provider-class tool-calling
  *   (e.g. Gemini schema sanitizer, OpenAI tool-call format). flagship slugs
- *   live in `providers.ts` alongside their per-provider coverage globs.
+ *   live in `providers.ts`.
  *
  * Every keyed alias is smoked — including `openrouter/*` and keyed `opencode/*`
  * passthroughs. They look like routing-layer wrappers but each one is a
@@ -25,10 +25,9 @@
  * usage:
  *   node action/test/list-aliases.ts
  *   MODE=flagships node action/test/list-aliases.ts
- *   MATRIX_FILTER=gemini node action/test/list-aliases.ts
  *
- * NOTE: the per-PR-precision matrix lives in `matrix.ts`, which calls into
- * this file. raw invocation here emits the unfiltered matrix.
+ * NOTE: the CI matrix (with MATRIX_FILTER scoping) lives in `matrix.ts`,
+ * which calls into this file. raw invocation here emits the full list.
  */
 import { modelAliases } from "../models.ts";
 import { providers } from "./providers.ts";
@@ -55,11 +54,9 @@ const uncredentialedProviders = new Set(
   providers.filter((p) => p.noCiCredential).map((p) => p.name)
 );
 
-export function buildAliasMatrix(opts: { filter?: string }): MatrixEntry[] {
-  const filter = opts.filter ?? "";
+export function buildAliasMatrix(): MatrixEntry[] {
   return modelAliases
     .filter((alias) => {
-      if (filter && !alias.slug.toLowerCase().includes(filter)) return false;
       // routing slugs (bedrock/byok) need a per-run env var to pick the actual
       // model — there's no generic smoke test.
       if (alias.routing) return false;
@@ -71,8 +68,7 @@ export function buildAliasMatrix(opts: { filter?: string }): MatrixEntry[] {
     .map(toMatrixEntry);
 }
 
-export function buildFlagshipMatrix(opts: { filter?: string }): MatrixEntry[] {
-  const filter = opts.filter ?? "";
+export function buildFlagshipMatrix(): MatrixEntry[] {
   return providers
     .filter((p) => !p.noCiCredential)
     .map((p) => {
@@ -84,14 +80,11 @@ export function buildFlagshipMatrix(opts: { filter?: string }): MatrixEntry[] {
       }
       return alias;
     })
-    .filter((alias) => !filter || alias.slug.toLowerCase().includes(filter))
     .map(toMatrixEntry);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const mode = process.env.MODE === "flagships" ? "flagships" : "aliases";
-  const filter = process.env.MATRIX_FILTER?.trim().toLowerCase() ?? "";
-  const matrix =
-    mode === "flagships" ? buildFlagshipMatrix({ filter }) : buildAliasMatrix({ filter });
+  const matrix = mode === "flagships" ? buildFlagshipMatrix() : buildAliasMatrix();
   process.stdout.write(JSON.stringify(matrix));
 }

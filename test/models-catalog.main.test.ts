@@ -1,6 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROXY_MODEL, modelAliases, resolveDisplayAlias } from "../models.ts";
-import { ZEN_UNDEPLOYED } from "./coverage.ts";
+
+/**
+ * models Zen LISTS in `/zen/v1/models` but will not actually serve — the
+ * endpoint answers 400 `[NOT_FOUND] ... not deployed`. Membership is not
+ * availability, and the catalog checks read membership, so without this they
+ * stay green on a dead model AND actively block the fix: `opencode mirrors
+ * don't trail their siblings` reads the same list, so it forces a mirror onto
+ * an undeployed build and rejects the step down to a served one.
+ *
+ * Deliberately a hand-maintained literal rather than a live probe. `test:catalog`
+ * is the release gate in `push-to-action.yml` precisely because it makes no
+ * provider calls; adding them would hand any mute provider a veto over shipping.
+ * Add an entry when `models-live` — which does call the model — catches one,
+ * and delete it once the model completes a run again.
+ */
+const ZEN_UNDEPLOYED: string[] = [
+  // 2026-08-28: 400 `[NOT_FOUND] ... not deployed` on both Zen tiers, while
+  // kimi-k2.6 and kimi-k3 answer 200 on the same key.
+  "kimi-k2.7-code",
+];
 
 // ── catalog drift tests ─────────────────────────────────────────────────────
 //

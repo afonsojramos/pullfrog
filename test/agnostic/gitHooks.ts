@@ -114,10 +114,4 @@ export const test: TestRunnerOptions = {
   repoSetup,
   env: { PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1" },
   tags: ["agnostic", "security"],
-  coverage: [
-    "action/utils/gitAuth.ts",
-    "action/utils/gitAuthServer.ts",
-    "action/mcp/git.ts",
-    "action/mcp/checkout.ts",
-  ],
 };

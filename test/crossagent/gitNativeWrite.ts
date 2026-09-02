@@ -100,9 +100,4 @@ export const test: TestRunnerOptions = {
   fixture,
   validator,
   env: { PULLFROG_DISABLE_SECURITY_INSTRUCTIONS: "1" },
-  coverage: [
-    "action/agents/nativeFsDenies.ts",
-    "action/agents/{claude,codex,opencode}.ts",
-    "action/mcp/shell.ts",
-  ],
 };

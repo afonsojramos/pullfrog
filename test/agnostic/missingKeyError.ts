@@ -61,12 +61,4 @@ export const test: TestRunnerOptions = {
     PULLFROG_MODEL: "moonshotai/kimi-k2",
   },
   tags: ["agnostic"],
-  coverage: [
-    "action/utils/apiKeys.ts",
-    "action/utils/agent.ts",
-    "action/utils/openCodeModels.ts",
-    "action/utils/runErrorRenderer.ts",
-    "action/main.ts",
-    "action/models.ts",
-  ],
 };
