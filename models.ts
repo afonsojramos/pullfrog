@@ -492,6 +492,15 @@ export const providers = {
         // the model does cost nothing.
         isFree: true,
       },
+      // Zen meters Fable like any other model, so this route reaches it without
+      // the Anthropic access grant `anthropic/claude-fable` still needs.
+      "claude-fable": {
+        displayName: "Claude Fable",
+        resolve: "opencode/claude-fable-5-1",
+        effort: ["low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/~anthropic/claude-fable-latest",
+        subagentModel: "claude-sonnet",
+      },
       "claude-opus": {
         displayName: "Claude Opus",
         resolve: "opencode/claude-opus-5",
@@ -605,6 +614,17 @@ export const providers = {
         effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/google/gemini-3.6-flash",
       },
+      // Zen serves K3, but rule 7 can only move a mirror when its upstream moves,
+      // so the K3 generation could never reach this block by bumping `kimi-k2`.
+      "kimi-k3": {
+        displayName: "Kimi K3",
+        resolve: "opencode/kimi-k3",
+        // Zen publishes a single rung for K3 where OpenRouter publishes three.
+        effort: ["max"],
+        openRouterEffort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/moonshotai/kimi-k3",
+        subagentModel: "kimi-k2",
+      },
       "kimi-k2": {
         displayName: "Kimi K2",
         // k2.7-code is UNDEPLOYED on Zen — still listed in /zen/v1/models, but
@@ -616,11 +636,33 @@ export const providers = {
         resolve: "opencode/kimi-k2.6",
         openRouterResolve: "openrouter/moonshotai/kimi-k2.7-code",
       },
+      // M3 is its own line beside M2, not a bump of it — same reason `kimi-k3`
+      // sits beside `kimi-k2` rather than replacing it.
+      "minimax-m3": {
+        displayName: "MiniMax M3",
+        resolve: "opencode/minimax-m3",
+        openRouterResolve: "openrouter/minimax/minimax-m3",
+      },
       // slug pins the m2 line for DB stability; resolve tracks the current m2.7.
       "minimax-m2.5": {
         displayName: "MiniMax M2",
         resolve: "opencode/minimax-m2.7",
         openRouterResolve: "openrouter/minimax/minimax-m2.7",
+      },
+      // Z.ai and xAI reach Zen subscribers only here — before this, `opencode-go`
+      // was the catalog's only GLM route, and Grok had no Zen route at all.
+      glm: {
+        displayName: "GLM",
+        resolve: "opencode/glm-5.2",
+        effort: ["high", "max"],
+        openRouterEffort: ["high", "xhigh"],
+        openRouterResolve: "openrouter/z-ai/glm-5.2",
+      },
+      grok: {
+        displayName: "Grok",
+        resolve: "opencode/grok-4.6",
+        effort: ["low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/x-ai/grok-4.6",
       },
       "gpt-5-nano": {
         displayName: "GPT Nano",
@@ -628,13 +670,24 @@ export const providers = {
         effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/openai/gpt-5-nano",
       },
+      // Zen's live free MiMo, and the second free row in a menu that big-pickle
+      // was alone in since `mimo-v2-pro-free` lost its model.
+      mimo: {
+        displayName: "MiMo",
+        resolve: "opencode/mimo-v2.5-free",
+        // free to run, still gated on the provider's own OPENCODE_API_KEY —
+        // see the big-pickle note above (#1077).
+        isFree: true,
+      },
       "mimo-v2-pro-free": {
         displayName: "MiMo V2 Pro",
         resolve: "opencode/mimo-v2-pro-free",
         // free to run, still gated on the provider's own OPENCODE_API_KEY —
         // see the big-pickle note above (#1077).
         isFree: true,
-        fallback: "opencode/big-pickle",
+        // the model id Zen dropped; land a stored MiMo pick back on MiMo rather
+        // than on the unrelated model it had to settle for while none was live.
+        fallback: "opencode/mimo",
       },
       "minimax-m2.5-free": {
         displayName: "MiniMax M2",
@@ -728,6 +781,16 @@ export const providers = {
         displayName: "Qwen Plus",
         resolve: "opencode-go/qwen3.7-plus",
         openRouterResolve: "openrouter/qwen/qwen3.7-plus",
+      },
+      // the cheap rung Alibaba added under Plus (0.15/0.47 against 0.5/3), and
+      // the only model either OpenCode plan has added since this block was written.
+      "qwen-flash": {
+        displayName: "Qwen Flash",
+        resolve: "opencode-go/qwen3.8-flash",
+        effort: ["low", "medium", "xhigh"],
+        // the Go route publishes rungs where OpenRouter publishes none.
+        openRouterEffort: [],
+        openRouterResolve: "openrouter/qwen/qwen3.8-flash",
       },
       // MiniMax — parity with opencode/* and openrouter/*; the m2 slug pins the
       // line for DB stability while the resolve tracks the current m2.7.
