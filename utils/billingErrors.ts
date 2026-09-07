@@ -82,12 +82,17 @@ export function commercialPaywallBody(params: {
   url: string;
 }): string {
   if (params.reason === "commercial") {
+    // "$30/month per organization" is the wording the trial emails use; the price
+    // is hardcoded in those templates too, so the copy stays in one register.
+    // deliberately says nothing about a trial ending: a canceled paid
+    // subscription maps to `paused` and lands here as well, so any past-tense
+    // claim about a free month would be false for a churned payer.
     return [
-      `**Pullfrog needs a confirmed Pro plan for ${params.ownerLogin}, so this run paused.**`,
+      `**Pullfrog needs Pro on ${params.ownerLogin}, so this run didn't start.**`,
       "",
-      "Open Plan and payment to confirm Pro or review the organization's billing status.",
+      "Pro is $30/month per organization and covers private repositories. Public repos and personal accounts keep running free.",
       "",
-      `[Review plan and payment →](${params.url})`,
+      `[Upgrade to Pro →](${params.url})`,
     ].join("\n");
   }
   params.reason satisfies "subscription_unpaid";
