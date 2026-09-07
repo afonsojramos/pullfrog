@@ -224,6 +224,15 @@ interface PullRequestReviewSubmittedEvent extends BasePayloadEvent {
   body: string | null;
   review_state: string;
   branch: string;
+  /**
+   * How far past the dispatching review this run may read: `all` on a
+   * Pullfrog-authored PR, `mentions` when only `@pullfrog`-mentioning threads
+   * are in scope. The server already computes this to decide whether to
+   * dispatch; forwarding it is what lets `get_review_comments` pick up the
+   * comments that land while the run is working. Optional so a payload from an
+   * older server build still parses against a newer action.
+   */
+  address_scope?: "all" | "mentions";
 }
 
 interface PullRequestReviewCommentCreatedEvent extends BasePayloadEvent {

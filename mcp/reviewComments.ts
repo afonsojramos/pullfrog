@@ -4,6 +4,7 @@ import type { Octokit } from "@octokit/rest";
 import { type } from "arktype";
 import { resolveBodyAssets } from "../utils/body.ts";
 import { stripExistingFooter } from "../utils/buildPullfrogFooter.ts";
+import { isPullfrog } from "../utils/isPullfrog.ts";
 import { log } from "../utils/log.ts";
 import * as yes from "../yes/index.ts";
 import type { ToolContext } from "./server.ts";
@@ -302,6 +303,9 @@ function extractFromFilePatches(
 export const GetReviewComments = type({
   pull_number: type.number.describe("The pull request number"),
   review_id: type.number.describe("The review ID to get comments for"),
+  "fresh?": type.boolean.describe(
+    "Bypass the 60s thread cache. Use for the re-read before committing, so comments that landed while you worked are actually seen; leave unset otherwise."
+  ),
 });
 
 function hasThumbsUpFrom(comment: ReviewThreadComment, username: string): boolean {
@@ -351,7 +355,7 @@ export function formatReviewThreads(
 
   const lines: string[] = [];
   lines.push(
-    `# Review Threads (${threadBlocks.length}) for PR #${header.pullNumber} - Review ${header.reviewId} by ${header.reviewer}`
+    `# Open Threads (${threadBlocks.length}) on PR #${header.pullNumber} - dispatched by Review ${header.reviewId} from ${header.reviewer}`
   );
   lines.push("");
   if (threadBlocks.length > 0) {
@@ -561,12 +565,78 @@ async function getReviewThreads(input: GetReviewDataInput) {
     return thread.comments.nodes.some((c) => c?.pullRequestReview?.databaseId === input.reviewId);
   });
 
-  if (!input.approvedBy) {
-    return threadsForReview;
+  if (input.approvedBy) {
+    const username = input.approvedBy;
+    return threadsForReview.filter((thread) => threadHasThumbsUpFrom(thread, username));
   }
 
-  const username = input.approvedBy;
-  return threadsForReview.filter((thread) => threadHasThumbsUpFrom(thread, username));
+  if (!input.addressScope) return threadsForReview;
+
+  return [...threadsForReview, ...concurrentThreads(allThreads, threadsForReview, input)];
+}
+
+/**
+ * Open threads on the PR that this run should also address, beyond the review
+ * that dispatched it.
+ *
+ * A reviewer working through a PR emits one `pull_request_review_submitted` per
+ * submission, so a second review lands seconds after the first — and until this
+ * existed, the run already working on the PR could never see it: the filter
+ * above keeps only threads carrying a comment from the *dispatched* `reviewId`,
+ * so a new comment on a different line was invisible no matter how often the
+ * agent re-read. That is what made the in-flight cap in `handleWebhook.ts` a
+ * silent loss rather than the coalescing it was documented as (#1103).
+ *
+ * `fetchAllReviewThreads` already pulls every thread on the PR and caches it for
+ * 60s, so this costs no extra round trip and a re-read mid-run picks up whatever
+ * landed behind the run.
+ *
+ * Three exclusions, each load-bearing:
+ *   - resolved threads are done, and re-opening that conversation is noise.
+ *   - a thread Pullfrog has already spoken in was handled by an earlier run.
+ *     That deliberately includes the pushbacks AddressReviews leaves open for a
+ *     human to mediate — re-addressing one re-litigates a settled disagreement —
+ *     and it is also what stops this mode replying to Pullfrog's own reviews.
+ *   - under `mentions` a concurrent thread is in scope only if it actually asked
+ *     for Pullfrog. Deliberately asymmetric with `threadsForReview`, which is
+ *     returned whole and always was: the dispatching review is the one the
+ *     server already adjudicated, and the agent needs its unmentioned threads as
+ *     context for the comment that did mention it. Which of those to ACT on stays
+ *     the mode prompt's job. A concurrent review has had no such adjudication, so
+ *     the mention is the only thing that can authorize it.
+ */
+export function concurrentThreads(
+  allThreads: (ReviewThread | null)[],
+  threadsForReview: ReviewThread[],
+  input: GetReviewDataInput
+): ReviewThread[] {
+  const alreadyIncluded = new Set(threadsForReview.map((thread) => thread.id));
+
+  return allThreads.filter((thread): thread is ReviewThread => {
+    if (!thread?.comments?.nodes || alreadyIncluded.has(thread.id)) return false;
+    if (thread.isResolved) return false;
+
+    const comments = thread.comments.nodes.filter((c): c is ReviewThreadComment => c !== null);
+    if (comments.length === 0) return false;
+    if (comments.some((c) => isPullfrog(c.author?.login))) return false;
+
+    return input.addressScope === "all" || comments.some((c) => mentionsPullfrog(c.body));
+  });
+}
+
+/**
+ * Mirrors the server-side `containsTriggerPhrase` gate that decided this run was
+ * dispatched at all: blockquoted mentions don't count, so quoting someone else's
+ * `@pullfrog` while replying doesn't pull an unrelated thread into scope.
+ */
+function mentionsPullfrog(body: string | null | undefined): boolean {
+  if (!body) return false;
+  return body
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith(">"))
+    .join("\n")
+    .toLowerCase()
+    .includes("@pullfrog");
 }
 
 interface GetReviewDataInput {
@@ -576,6 +646,14 @@ interface GetReviewDataInput {
   pullNumber: number;
   reviewId: number;
   approvedBy?: string | undefined;
+  /**
+   * Widen the read past the dispatching review to the other open threads on the
+   * PR — `all` on a Pullfrog-authored PR, `mentions` when only `@pullfrog`-
+   * mentioning threads are in scope. Absent (console `fix_review`, and any
+   * payload from a server build that predates the field) keeps the read scoped
+   * to the dispatching review exactly as before.
+   */
+  addressScope?: "all" | "mentions" | undefined;
   tmpdir: string;
   githubToken: string;
 }
@@ -763,6 +841,12 @@ export function GetReviewCommentsTool(ctx: ToolContext) {
           ? ctx.payload.triggerer
           : undefined;
 
+      // the 60s TTL exists to collapse a burst of identical calls (#1097), which
+      // is exactly wrong for the deliberate re-read before committing: a run
+      // that reached its commit inside the window would be handed its own
+      // opening snapshot and see none of the comments it re-read for.
+      if (params.fresh) invalidateReviewThreadCache(ctx.repo);
+
       const result = await getReviewData({
         octokit: ctx.octokit,
         owner: ctx.repo.owner,
@@ -770,6 +854,7 @@ export function GetReviewCommentsTool(ctx: ToolContext) {
         pullNumber: params.pull_number,
         reviewId: params.review_id,
         approvedBy,
+        addressScope: ctx.payload.event.address_scope,
         tmpdir: ctx.tmpdir,
         githubToken: ctx.githubInstallationToken,
       });
@@ -808,7 +893,8 @@ export function GetReviewCommentsTool(ctx: ToolContext) {
         toc: formatted.toc,
         instructions:
           `the file at commentsPath contains ${threadBlocks.length} review threads with full conversation history. ` +
-          `comments marked with * are from the target review (${params.review_id}). ` +
+          `comments marked with * are from the target review (${params.review_id}); any other thread is open feedback ` +
+          `on this PR that is also yours to address, including comments that landed after this run started. ` +
           `the TOC shows each thread's file:line and the line number where it appears in the file. ` +
           `to read a specific thread, use: grep -A 50 "^## <file:line>" ${commentsPath} ` +
           `(replace <file:line> with the path from the TOC, e.g. "^## action/utils/foo.ts:42"). ` +

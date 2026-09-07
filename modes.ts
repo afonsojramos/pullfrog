@@ -148,6 +148,7 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
    - record what was done (or why nothing was done)
 
 5. Quality check:
+   - re-call \`${t("get_review_comments")}\` with \`fresh: true\` before committing: reviewers keep commenting while you work, and any thread it now returns that you have not addressed is in scope for this run.
    - test changes, then review the diff before committing — verify only intended changes are present, no debug artifacts remain, no fix turned out to be bloat in context (revert any that did), and the changes are clean enough that a senior engineer would approve without hesitation
    - ${commitStep}
 
@@ -157,7 +158,7 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
    - **once the fix is live on the remote**, for each thread you acted on:
      - reply ONCE via \`${t("reply_to_review_comment")}\`. The \`comment_id\` parameter takes the root comment's numeric \`id=\` (from the first \`comment author=...\` tag in the \`${t("get_review_comments")}\` output) — NOT the \`thread=\` value; that's a separate GraphQL ID used by resolve. The runtime dedupes identical bodies within a session.
      - **immediately** call \`${t("resolve_review_thread")}\` with that thread's \`thread=\` value as \`thread_id\`. Resolve every thread where you (a) made the requested code change in full — partial fixes leave the thread open — OR (b) replied with a substantive answer the user explicitly asked for. Do NOT resolve threads where you pushed back on the request and the disagreement is unresolved; leave those open for the human to mediate.
-   - call \`${t("report_progress")}\` with a brief summary`,
+   - call \`${t("report_progress")}\` with a brief summary. If your last \`${t("get_review_comments")}\` turned up threads you did not address, name them there — a review arriving this late is suppressed as a duplicate and nothing else will pick it up.`,
     },
     // Review and IncrementalReview route the minimum reviewfrog specialists
     // needed to cover unresolved, disposition-changing hypotheses. Most runs

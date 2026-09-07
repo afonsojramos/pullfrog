@@ -653,10 +653,9 @@ export const providers = {
       // was the catalog's only GLM route, and Grok had no Zen route at all.
       glm: {
         displayName: "GLM",
-        resolve: "opencode/glm-5.2",
-        effort: ["high", "max"],
-        openRouterEffort: ["high", "xhigh"],
-        openRouterResolve: "openrouter/z-ai/glm-5.2",
+        resolve: "opencode/glm-5.3",
+        effort: ["low", "high", "max"],
+        openRouterResolve: "openrouter/z-ai/glm-5.3",
       },
       grok: {
         displayName: "Grok",
@@ -703,10 +702,11 @@ export const providers = {
   // OpenCode Go is a separate $10/mo subscription from Zen, served on its own
   // base URL (`https://opencode.ai/zen/go/v1`) but authenticated with the SAME
   // `OPENCODE_API_KEY`. it carries the open-weight coding models plus a couple
-  // of frontier ones, and 14 of the ids below are served ONLY here — Zen's
-  // `/v1/models` does not list glm-5.3*, qwen3.7/3.8-*, mimo-*, longcat-2.0,
-  // hy3 or muse-spark. so for a Go subscriber this provider is not a duplicate
-  // route to Zen, it is the only route to most of what they pay for.
+  // of frontier ones, six of which are served ONLY here — Zen's `/v1/models`
+  // does not list qwen3.7/3.8-*, mimo-v2.5-pro, longcat-2.0 or hy3. (it listed
+  // no glm-5.3* either until 2026-09, which is why `opencode/glm` trailed on
+  // 5.2.) so for a Go subscriber this provider is not a duplicate route to Zen,
+  // it is the only route to a large part of what they pay for.
   // like `opencode` and `openrouter` this is a ROUTER, not a vendor: slugs and
   // display names mirror the upstream brand tier, and the picker groups them
   // under the upstream vendor.
@@ -775,7 +775,9 @@ export const providers = {
         // `high` the Go route does not.
         effort: ["low", "medium", "xhigh"],
         openRouterEffort: ["minimal", "low", "medium", "high", "xhigh"],
-        openRouterResolve: "openrouter/qwen/qwen3.8-max",
+        // OpenRouter retired the rolling `qwen3.8-max` for a dated snapshot, so
+        // this side has to pin one; the Go route still carries the rolling id.
+        openRouterResolve: "openrouter/qwen/qwen3.8-max-0902",
       },
       "qwen-plus": {
         displayName: "Qwen Plus",
