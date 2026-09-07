@@ -232,7 +232,7 @@ interface PullRequestReviewSubmittedEvent extends BasePayloadEvent {
    * comments that land while the run is working. Optional so a payload from an
    * older server build still parses against a newer action.
    */
-  address_scope?: "all" | "mentions";
+  address_scope?: "all" | "mentions" | undefined;
 }
 
 interface PullRequestReviewCommentCreatedEvent extends BasePayloadEvent {
