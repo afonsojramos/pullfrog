@@ -127,7 +127,7 @@ function formatModelLabel(params: {
     // short form only: the IMPORTANT call-out above the footer already explains
     // what the trial is and how to leave it. repeating it here would say the
     // same thing twice in one comment.
-    return `${base} (free trial)`;
+    return `${base} (model usage covered by Pullfrog)`;
   }
   if (params.clamped) {
     // name the tier (not its backing model) when the user picked a tier, so the
@@ -177,8 +177,9 @@ function buildTrialDisclosure(owner: string | undefined): string {
     "---",
     "",
     "> [!IMPORTANT]",
-    "> **This run used the free trial model.** `DeepSeek Flash` is fast and cheap — expect lighter " +
-      `work than a frontier model. [Connect a subscription or API key →](${consoleUrl})`,
+    "> **Pullfrog covered this run's model usage.** `DeepSeek Flash` is fast and cheap — expect lighter " +
+      "work than a frontier model. This model allowance is temporary and separate from your Pullfrog plan. " +
+      `[Connect a model-provider subscription or API key →](${consoleUrl})`,
   ].join("\n");
 }
 
