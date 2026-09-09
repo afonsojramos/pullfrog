@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { getModelEnvVars, modelAliases, resolveCliModel, resolveDisplayAlias } from "../models.ts";
+import {
+  getModelEnvVars,
+  modelAliases,
+  resolveCliModel,
+  resolveDisplayAlias,
+  resolveModelRung,
+  resolveOpenRouterModel,
+} from "../models.ts";
+
+describe("GPT Astra routing and effort", () => {
+  it.each([
+    ["openai", "openai"],
+    ["opencode", "opencode"],
+    ["openrouter", "openrouter/openai"],
+    ["vercel", "vercel/openai"],
+  ])("resolves %s without offering disabled reasoning", (provider, route) => {
+    const slug = `${provider}/gpt-astra`;
+    expect(resolveCliModel(slug)).toBe(`${route}/gpt-6-astra`);
+    expect(resolveOpenRouterModel(slug)).toBe(
+      provider === "vercel" ? undefined : "openrouter/openai/gpt-6-astra"
+    );
+    for (const useOpenRouter of [false, true]) {
+      expect(resolveModelRung({ slug, useOpenRouter, position: 0 })).toBe("low");
+      expect(resolveModelRung({ slug, useOpenRouter, position: 1 })).toBe("max");
+    }
+  });
+});
 
 // ── pure alias-registry invariants ──────────────────────────────────────────────
 //
@@ -21,6 +47,7 @@ const BYOK_ONLY_MODELS = new Set<string>([
   "vercel/claude-sonnet",
   "vercel/claude-haiku",
   "vercel/gpt-sol",
+  "vercel/gpt-astra",
   "vercel/gpt-terra",
   "vercel/gpt-luna",
   "vercel/gemini-pro",

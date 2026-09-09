@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROXY_MODEL, modelAliases, resolveDisplayAlias } from "../models.ts";
 
@@ -128,12 +129,24 @@ describe("openRouterResolve models.dev validity", async () => {
 // fetching them per run. drift is not cosmetic: claude-code hard-errors on an
 // out-of-range `--effort` before it makes any API call, so a stale ladder
 // breaks runs outright. see wiki/effort.md.
-describe("effort ladders mirror models.dev", async () => {
+describe("effort ladders mirror published catalogs", async () => {
   const data = await api;
+  // the gateway's own catalog takes precedence: models.dev incorrectly
+  // advertises `none` for Astra, which requires reasoning on every route.
+  const gateway = type({
+    data: type({
+      id: "string",
+      "reasoning_options?": type({ type: "string", "values?": "string[]" }).array(),
+    }).array(),
+  }).assert(await fetch("https://ai-gateway.vercel.sh/v1/models").then((r) => r.json()));
 
   const publishedEffort = (spec: string) => {
     const parsed = parseResolve(spec);
-    const options = data[parsed.provider]?.models[parsed.modelId]?.reasoning_options;
+    const model =
+      parsed.provider === "vercel"
+        ? gateway.data.find((m) => m.id === parsed.modelId)
+        : data[parsed.provider]?.models[parsed.modelId];
+    const options = model?.reasoning_options;
     return options?.find((o) => o.type === "effort")?.values;
   };
 
@@ -148,7 +161,7 @@ describe("effort ladders mirror models.dev", async () => {
   for (const alias of modelAliases) {
     if (alias.routing || alias.fallback) continue;
 
-    it(`${alias.slug} effort matches models.dev`, () => {
+    it(`${alias.slug} effort matches its published catalog`, () => {
       expect(rungs(publishedEffort(alias.resolve))).toEqual(rungs(alias.effort));
     });
 

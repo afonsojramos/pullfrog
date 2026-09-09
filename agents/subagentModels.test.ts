@@ -39,6 +39,14 @@ describe("deriveSubagentModels", () => {
   });
 
   describe("openai family", () => {
+    it.each(["openai", "opencode", "openrouter/openai", "vercel/openai"])(
+      "Astra uses Sol on the same route (%s)",
+      (route) => {
+        expect(deriveSubagentModels(`${route}/gpt-6-astra`)).toEqual({
+          reviewer: `${route}/gpt-5.6-sol`,
+        });
+      }
+    );
     it("gpt → gpt-terra (direct)", () => {
       expect(deriveSubagentModels("openai/gpt-5.6-sol")).toEqual({
         reviewer: "openai/gpt-5.6-terra",

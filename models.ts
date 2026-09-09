@@ -179,6 +179,13 @@ export const providers = {
       // brand-tier names the slug convention asks for — the pre-5.6 `gpt` /
       // `gpt-pro` / `gpt-mini` slugs are holdovers from the retired GPT / GPT Pro
       // / GPT Mini tiering and are carried below as deprecated aliases.
+      "gpt-astra": {
+        displayName: "GPT Astra",
+        resolve: "openai/gpt-6-astra",
+        effort: ["low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/openai/gpt-6-astra",
+        subagentModel: "gpt-sol",
+      },
       "gpt-sol": {
         displayName: "GPT Sol",
         resolve: "openai/gpt-5.6-sol",
@@ -539,6 +546,13 @@ export const providers = {
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         subagentModel: "gpt-terra",
+      },
+      "gpt-astra": {
+        displayName: "GPT Astra",
+        resolve: "opencode/gpt-6-astra",
+        effort: ["low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/openai/gpt-6-astra",
+        subagentModel: "gpt-sol",
       },
       // see openai/gpt-sol-pro — Zen has no -pro id, so direct resolves to plain Sol.
       "gpt-sol-pro": {
@@ -957,6 +971,13 @@ export const providers = {
         openRouterResolve: "openrouter/openai/gpt-5.6-sol",
         subagentModel: "gpt-terra",
       },
+      "gpt-astra": {
+        displayName: "GPT Astra",
+        resolve: "openrouter/openai/gpt-6-astra",
+        effort: ["low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/openai/gpt-6-astra",
+        subagentModel: "gpt-sol",
+      },
       // see openai/gpt-sol-pro. openrouter serves sol-pro directly on both routes.
       "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
@@ -1126,6 +1147,12 @@ export const providers = {
         resolve: "vercel/openai/gpt-5.6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
         subagentModel: "gpt-terra",
+      },
+      "gpt-astra": {
+        displayName: "GPT Astra",
+        resolve: "vercel/openai/gpt-6-astra",
+        effort: ["low", "medium", "high", "xhigh", "max"],
+        subagentModel: "gpt-sol",
       },
       "gpt-terra": {
         displayName: "GPT Terra",
