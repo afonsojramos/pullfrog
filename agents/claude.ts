@@ -26,6 +26,7 @@ import { pullfrogMcpName } from "../external.ts";
 import {
   BEDROCK_MODEL_ID_ENV,
   isVertexAnthropicId,
+  modelAliases,
   stripProviderPrefix,
   VERTEX_MODEL_ID_ENV,
 } from "../models.ts";
@@ -1119,13 +1120,31 @@ function installManagedSettings(params: ManagedSettingsParams): boolean {
 
 // ── agent ───────────────────────────────────────────────────────────────────────
 
+/**
+ * The Anthropic model a claude-code run falls back to when nothing resolved
+ * one — the mirror of `autoSelectModel` on the opencode side. `resolveAgent`
+ * routes here for an account whose only Anthropic credential is a subscription
+ * and whose model was never pinned; without a pick the CLI would quietly choose
+ * its own, so the run persisted `WorkflowRun.model = null` and named no model in
+ * its footer. That blindness is exactly what let this path fail unnoticed.
+ */
+function autoSelectClaudeModel(): string | undefined {
+  return modelAliases.find(
+    (a) => a.provider === "anthropic" && a.preferred && !a.hidden && !a.fallback && !a.routing
+  )?.resolve;
+}
+
 export const claude = agent({
   name: "claude",
   install: installClaudeCli,
   run: async (ctx) => {
     const cliPath = await installClaudeCli();
 
-    const specifier = ctx.payload.proxyModel ?? ctx.resolvedModel;
+    const specifier = ctx.payload.proxyModel ?? ctx.resolvedModel ?? autoSelectClaudeModel();
+    // mirror opencode's writeback: `main.ts` could not know the fallback pick,
+    // so `toolState.model` (footers + the end-of-run PATCH that persists
+    // `WorkflowRun.model`) would otherwise report nothing for these runs.
+    if (specifier) ctx.toolState.model = specifier;
     // claude-code on Bedrock takes the bare AWS model ID — no provider prefix
     // to strip. agent selection already decides whether the model is Anthropic;
     // the env-var sentinel identifies the backend after that decision.
@@ -1164,7 +1183,16 @@ export const claude = agent({
     installBundledSkills({ home: homeEnv.HOME });
 
     const mcpConfigPath = writeMcpConfig(ctx);
-    const effort = resolveRunEffort(ctx);
+    // resolve effort against the model that actually runs: a fallback-selected
+    // run has no `ctx.resolvedModel`, so `resolveRunAlias` could not place it and
+    // the run silently dropped its configured effort. same reason the opencode
+    // harness passes its own auto-select pick here. see wiki/effort.md.
+    const effort = resolveRunEffort({ ...ctx, resolvedModel: specifier });
+    // the startup block prints before the fallback is picked, so it can only say
+    // "pending" for those runs. this is the first point the real level is known.
+    if (!ctx.resolvedModel && !ctx.payload.proxyModel) {
+      log.info(`» effort: ${effort.rung ?? "n/a (model has no effort control)"}`);
+    }
 
     // PreToolUse gate that hard-blocks state-mutating MCP tool calls from
     // subagents (the `agent_id` field is non-empty in the hook input only

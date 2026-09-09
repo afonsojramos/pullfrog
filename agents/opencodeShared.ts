@@ -11,7 +11,7 @@ import {
   AZURE_MAX_OUTPUT_ENV,
   AZURE_PROVIDER,
   AZURE_USE_CHAT_COMPLETIONS_ENV,
-  getModelEnvVars,
+  getOpenCodeEnvVars,
   modelAliases,
   OPENAI_COMPATIBLE_API_KEY_ENV,
   OPENAI_COMPATIBLE_BASE_URL_ENV,
@@ -253,7 +253,11 @@ export function autoSelectModel(): string | undefined {
   // `bedrock`/`vertex`/`azure` sentinel only resolveModel can expand.
   const selectable = modelAliases.filter((a) => !a.hidden && !a.fallback && !a.routing);
   const servable = selectable.filter((a) => {
-    const envVars = getModelEnvVars(a.resolve);
+    // `getOpenCodeEnvVars`, not `getModelEnvVars`: a Claude subscription token
+    // is an Anthropic credential but not one OPENCODE can present, so counting
+    // it here pinned `anthropic/claude-opus-5` on subscription-only accounts
+    // and handed it to a harness that dies on `Model not found`.
+    const envVars = getOpenCodeEnvVars(a.resolve);
     return envVars.length === 0 || envVars.some((name) => process.env[name]);
   });
   const pick = (list: typeof servable) => list.find((a) => a.preferred) ?? list[0];

@@ -1250,18 +1250,44 @@ export function getModelManagedCredentials(slug: string): string[] {
 }
 
 /**
+ * Anthropic credentials that ONLY claude-code can present. opencode's anthropic
+ * provider authenticates from `ANTHROPIC_API_KEY` and nothing else (see
+ * `packages/llm/src/providers/anthropic.ts` upstream), so holding one of these
+ * is not evidence opencode can serve a Claude model.
+ *
+ * `ANTHROPIC_AUTH_TOKEN` (the gateway variable) is kept out of
+ * `providers.anthropic.envVars` entirely. `CLAUDE_CODE_OAUTH_TOKEN` cannot be:
+ * the console offers it as a paste target and `credentialFallback` preflights
+ * it, both of which read `getModelEnvVars`. So it stays in `envVars` and is
+ * subtracted here instead, via `getOpenCodeEnvVars` at every opencode-facing
+ * gate. Leaving it un-subtracted let `autoSelectModel` pin
+ * `anthropic/claude-opus-5` on a subscription-only account and hand it to
+ * opencode, which died with `Model not found` before the first turn.
+ */
+export const CLAUDE_CODE_ONLY_CREDENTIALS = ["ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"];
+
+/**
  * Credentials that can serve a provider's models without belonging in its
- * `envVars`, because only one harness understands them. `ANTHROPIC_AUTH_TOKEN`
- * is claude-code's gateway variable: opencode cannot use it, so it must stay
- * out of `providers.anthropic.envVars` (which `getModelEnvVars` feeds to the
- * opencode-validation path) — but an account holding one DOES have a working
- * Anthropic credential, and reading it as "no BYOK" routes the run onto a
- * billed proxy, which `resolveAgent` then hands to opencode, bypassing the
- * gateway entirely.
+ * `envVars`, because only one harness understands them. An account holding one
+ * DOES have a working Anthropic credential, and reading it as "no BYOK" routes
+ * the run onto a billed proxy, which `resolveAgent` then hands to opencode,
+ * bypassing the gateway entirely. Listing a credential that IS in `envVars`
+ * (`CLAUDE_CODE_OAUTH_TOKEN`) is harmless — every consumer asks `.some()`.
  */
 const HARNESS_ONLY_CREDENTIALS: Record<string, string[]> = {
-  anthropic: ["ANTHROPIC_AUTH_TOKEN"],
+  anthropic: CLAUDE_CODE_ONLY_CREDENTIALS,
 };
+
+/**
+ * `getModelEnvVars` minus the credentials only claude-code can present — the
+ * right question for every opencode-facing gate (auto-select, key validation).
+ * `getModelEnvVars` answers "which credentials can serve this model", which is
+ * the product's question; this answers "which can serve it UNDER OPENCODE",
+ * which is the only one those gates may act on.
+ */
+export function getOpenCodeEnvVars(slug: string): string[] {
+  return getModelEnvVars(slug).filter((v) => !CLAUDE_CODE_ONLY_CREDENTIALS.includes(v));
+}
 
 /**
  * Whether one of `secretNames` can run `model` — the Router opt-out predicate,

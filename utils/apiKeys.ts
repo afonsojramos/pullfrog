@@ -8,6 +8,7 @@ import {
   BEDROCK_MODEL_ID_ENV,
   getModelEnvVars,
   getModelManagedCredentials,
+  getOpenCodeEnvVars,
   OPENAI_COMPATIBLE_API_KEY_ENV,
   OPENAI_COMPATIBLE_BASE_URL_ENV,
   OPENAI_COMPATIBLE_CONTEXT_ENV,
@@ -324,7 +325,7 @@ function hasEnvVar(name: string): boolean {
  * `openai/gpt-5.6-sol`. Don't widen this to share it with the picker.
  */
 function modelHasRuntimeAuth(model: string): boolean {
-  const authVars = [...getModelEnvVars(model), ...getModelManagedCredentials(model)];
+  const authVars = [...getOpenCodeEnvVars(model), ...getModelManagedCredentials(model)];
   return authVars.length === 0 || authVars.some(hasEnvVar);
 }
 
@@ -513,8 +514,11 @@ export function validateAgentApiKey(params: {
       // `opencode models` can exit 0 having printed only a prefix of its
       // catalog, so a missing entry is not proof the key is absent — a run
       // failed or passed purely on where its slug sorted against the cut. only
-      // trust the absence when the model's own env var is unset too.
-      if (getModelEnvVars(params.model).some(hasEnvVar)) return;
+      // trust the absence when the model's own env var is unset too. the rescue
+      // asks `getOpenCodeEnvVars` because it is rescuing an OPENCODE run: a
+      // Claude subscription token would otherwise wave through the very model
+      // opencode is about to reject.
+      if (getOpenCodeEnvVars(params.model).some(hasEnvVar)) return;
       throwKeyError({
         owner: params.owner,
         name: params.name,

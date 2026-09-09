@@ -4,6 +4,7 @@ import {
   AZURE_DEPLOYMENT_ENV,
   AZURE_PROVIDER,
   BEDROCK_MODEL_ID_ENV,
+  CLAUDE_CODE_ONLY_CREDENTIALS,
   getModelProvider,
   isBedrockAnthropicId,
   isVertexAnthropicId,
@@ -204,19 +205,18 @@ export function resolveAgent(ctx: {
     }
   }
 
-  // 6. auto-select with no configured model. an account whose ONLY Anthropic
-  //    credential is `ANTHROPIC_AUTH_TOKEN` has to take claude-code: opencode
-  //    cannot use that variable, so `autoSelectModel` would rank a catalog it
-  //    has no way to authenticate and the run dies on a missing key. a plain
-  //    API key stays on opencode, whose ranking across providers beats guessing
-  //    from whichever env var we tested first — which is also why a
-  //    Codex/OpenAI credential yields to any Anthropic one.
+  // 6. auto-select with no configured model. an account whose only Anthropic
+  //    credential is one claude-code alone can present (the `ANTHROPIC_AUTH_TOKEN`
+  //    gateway variable, or a `CLAUDE_CODE_OAUTH_TOKEN` subscription) has to take
+  //    claude-code: opencode cannot use either, so `autoSelectModel` would rank a
+  //    catalog it has no way to authenticate and the run dies on a missing key.
+  //    the model is still unknown here — auto-select runs INSIDE the harness — so
+  //    this is the last point at which the credential can pick the harness that
+  //    matches it. a plain API key stays on opencode, whose ranking across
+  //    providers beats guessing from whichever env var we tested first — which is
+  //    also why a Codex/OpenAI credential yields to any Anthropic one.
   if (!ctx.model) {
-    if (
-      hasEnvVar("ANTHROPIC_AUTH_TOKEN") &&
-      !hasEnvVar("ANTHROPIC_API_KEY") &&
-      !hasEnvVar("CLAUDE_CODE_OAUTH_TOKEN")
-    ) {
+    if (!hasEnvVar("ANTHROPIC_API_KEY") && CLAUDE_CODE_ONLY_CREDENTIALS.some(hasEnvVar)) {
       return agents.claude;
     }
     if (ctx.codexAgent && hasCodexAuth() && !hasClaudeCodeAuth()) return agents.codex;
