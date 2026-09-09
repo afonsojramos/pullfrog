@@ -294,9 +294,9 @@ export const providers = {
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
-        resolve: "google/gemini-3.6-flash",
-        effort: ["minimal", "low", "medium", "high"],
-        openRouterResolve: "openrouter/google/gemini-3.6-flash",
+        resolve: "google/gemini-3.8-flash",
+        effort: ["low", "medium", "high"],
+        openRouterResolve: "openrouter/google/gemini-3.8-flash",
       },
     },
   }),
@@ -624,9 +624,9 @@ export const providers = {
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
-        resolve: "opencode/gemini-3.6-flash",
-        effort: ["minimal", "low", "medium", "high"],
-        openRouterResolve: "openrouter/google/gemini-3.6-flash",
+        resolve: "opencode/gemini-3.8-flash",
+        effort: ["low", "medium", "high"],
+        openRouterResolve: "openrouter/google/gemini-3.8-flash",
       },
       // Zen serves K3, but rule 7 can only move a mirror when its upstream moves,
       // so the K3 generation could never reach this block by bumping `kimi-k2`.
@@ -1054,10 +1054,9 @@ export const providers = {
       "gemini-flash": {
         displayName: "Gemini Flash",
         resolve: "openrouter/~google/gemini-flash-latest",
-        // no `minimal` here, unlike the google/ and opencode/ entries for the
-        // same model: OpenRouter's floating `~google/gemini-flash-latest` stopped
-        // publishing that rung. mirroring it is not cosmetic — claude-code
-        // hard-errors on an out-of-range `--effort` before it calls the API.
+        // a floating pointer, not a pinned id — it already serves 3.8, so this
+        // entry tracks its siblings' generation bumps for free. the ladder still
+        // mirrors exactly: claude-code hard-errors on an out-of-range `--effort`.
         effort: ["low", "medium", "high"],
         openRouterResolve: "openrouter/~google/gemini-flash-latest",
       },
@@ -1171,8 +1170,8 @@ export const providers = {
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
-        resolve: "vercel/google/gemini-3.6-flash",
-        effort: ["minimal", "low", "medium", "high"],
+        resolve: "vercel/google/gemini-3.8-flash",
+        effort: ["low", "medium", "high"],
       },
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
@@ -1192,6 +1191,7 @@ export const providers = {
       "kimi-k3": {
         displayName: "Kimi K3",
         resolve: "vercel/moonshotai/kimi-k3",
+        effort: ["low", "high", "max"],
       },
     },
   }),

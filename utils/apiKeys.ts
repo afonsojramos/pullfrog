@@ -180,9 +180,16 @@ function buildSecretsUnavailableError(params: {
 
 /**
  * Markdown body used for both the thrown error and the formatted PR comment
- * summary. When the configured model is known, names it and the exact env
- * var(s) it needs so the user knows precisely what to fix; otherwise falls
- * back to the generic "any provider key" copy (auto-select path).
+ * summary. When the model is known, names it and the exact env var(s) it needs
+ * so the user knows precisely what to fix; otherwise falls back to the generic
+ * "any provider key" copy (auto-select path).
+ *
+ * The lead says "this run used" rather than "this repo is configured to use",
+ * because the resolved model does not always come from the repo's config — a
+ * trigger-time `--model=`, a `PULLFROG_MODEL` variable or a server-side canary
+ * arm all land here too, and asserting provenance we do not have blames the
+ * user's configuration for a model they never chose. A model canary did exactly
+ * that to vite-hub/vitehub#1347 on 2026-09-08.
  */
 function buildMissingApiKeyError(params: {
   owner: string;
@@ -199,7 +206,7 @@ function buildMissingApiKeyError(params: {
     : undefined;
 
   const lead = envVarList
-    ? `**${MISSING_KEY_MARKER}** — this repo is configured to use \`${params.model}\`, which needs ${envVarList}, but the runner has no key for it.`
+    ? `**${MISSING_KEY_MARKER}** — this run used \`${params.model}\`, which needs ${envVarList}, but the runner has no key for it.`
     : `**${MISSING_KEY_MARKER}** — Pullfrog needs at least one LLM provider API key (e.g. \`ANTHROPIC_API_KEY\`, \`OPENAI_API_KEY\`, \`GEMINI_API_KEY\`) configured as a GitHub Actions secret.`;
 
   return [
