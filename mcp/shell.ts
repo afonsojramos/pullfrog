@@ -9,6 +9,7 @@ import { type } from "arktype";
 import { ensureBrowserDaemon } from "../utils/browser.ts";
 import { log } from "../utils/log.ts";
 import { resolveEnv } from "../utils/secrets.ts";
+import { DEFAULT_MAX_RETAINED_BYTES, TailBuffer } from "../utils/subprocess.ts";
 import type { ToolContext } from "./server.ts";
 import { execute, tool } from "./shared.ts";
 
@@ -463,16 +464,19 @@ export async function runSandboxed(params: {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let stdout = "",
-    stderr = "",
-    timedOut = false,
+  // bounded: agent-chosen output accumulates in OUR process, and a `data`
+  // handler sits outside `execute()`'s try/catch — so an unbounded string
+  // killed the whole run past V8's limit (pullfrog/pullfrog#91).
+  const stdout = new TailBuffer(DEFAULT_MAX_RETAINED_BYTES);
+  const stderr = new TailBuffer(DEFAULT_MAX_RETAINED_BYTES);
+  let timedOut = false,
     exited = false,
     spawnError = "";
   proc.stdout?.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString();
+    stdout.append(chunk.toString());
   });
   proc.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
+    stderr.append(chunk.toString());
   });
 
   const timeoutId = setTimeout(async () => {
@@ -507,7 +511,9 @@ export async function runSandboxed(params: {
   proc.stdout?.destroy();
   proc.stderr?.destroy();
 
-  let output = stderr ? (stdout ? `${stdout}\n${stderr}` : stderr) : stdout;
+  const outText = stdout.toString();
+  const errText = stderr.toString();
+  let output = errText ? (outText ? `${outText}\n${errText}` : errText) : outText;
   if (spawnError) output = output ? `${output}\n${spawnError}` : spawnError;
   if (timedOut)
     output = output
@@ -526,7 +532,7 @@ export function capOutput(output: string): string {
   const fullPath = join(getTempDir(), `shell-${randomUUID().slice(0, 8)}.log`);
   writeFileSync(fullPath, output);
   const elided = output.length - MAX_OUTPUT_CHARS;
-  return `... [${elided} chars truncated; full output saved to ${fullPath}] ...\n${output.slice(-MAX_OUTPUT_CHARS)}`;
+  return `... [${elided} chars truncated; output saved to ${fullPath}] ...\n${output.slice(-MAX_OUTPUT_CHARS)}`;
 }
 
 /** detect git as a command invocation (not as part of another word like .gitignore) */
@@ -550,7 +556,7 @@ Use this tool to:
 - Execute build tools (npm, pnpm, cargo, make, etc.)
 - Run tests and linters
 
-Output is capped at ${MAX_OUTPUT_CHARS} chars: if exceeded, only the tail is returned and the full body is saved to a tempfile (path included in the response). Re-read the tempfile with cat/tail/grep when you need more.
+Output is capped at ${MAX_OUTPUT_CHARS} chars: if exceeded, only the tail is returned and the captured output is saved to a tempfile (path included in the response). Re-read the tempfile with cat/tail/grep when you need more.
 
 Do NOT use this tool for git commands — use the dedicated git tools instead.`,
     parameters: ShellParams,
