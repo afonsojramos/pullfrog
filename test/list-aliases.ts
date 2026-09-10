@@ -18,9 +18,10 @@
  * distinct catalog entry on models.dev (under the `openrouter` / `opencode`
  * provider sections) that can drift independently of the upstream provider
  * mirror — testing the direct google entry tells you nothing about whether
- * the openrouter mirror has the same model id. The only entries pruned are
+ * the openrouter mirror has the same model id. Two kinds of entry are pruned:
  * routing slugs (bedrock/byok) whose `resolve` is a sentinel that picks the
- * actual model id from a per-run env var.
+ * actual model id from a per-run env var, and every alias of a provider
+ * `isExcluded` rejects — no CI credential, or excluded to control spend.
  *
  * usage:
  *   node action/test/list-aliases.ts
@@ -30,7 +31,7 @@
  * which calls into this file. raw invocation here emits the full list.
  */
 import { modelAliases } from "../models.ts";
-import { providers } from "./providers.ts";
+import { type ProviderEntry, providers } from "./providers.ts";
 
 export type MatrixEntry = {
   slug: string;
@@ -49,10 +50,12 @@ function toMatrixEntry(alias: (typeof modelAliases)[number]): MatrixEntry {
 
 const aliasBySlug = new Map(modelAliases.map((a) => [a.slug, a]));
 
-/** providers CI holds no credential for — see `ProviderEntry.noCiCredential`. */
-const uncredentialedProviders = new Set(
-  providers.filter((p) => p.noCiCredential).map((p) => p.name)
-);
+/** providers that emit no cell — no CI credential, or excluded to control spend. */
+function isExcluded(provider: ProviderEntry): boolean {
+  return provider.noCiCredential === true || provider.ciCostExcluded === true;
+}
+
+const excludedProviders = new Set(providers.filter(isExcluded).map((p) => p.name));
 
 export function buildAliasMatrix(): MatrixEntry[] {
   return modelAliases
@@ -60,9 +63,8 @@ export function buildAliasMatrix(): MatrixEntry[] {
       // routing slugs (bedrock/byok) need a per-run env var to pick the actual
       // model — there's no generic smoke test.
       if (alias.routing) return false;
-      // no key in CI, so every cell would fail on auth rather than on anything
-      // the smoke is asking about.
-      if (uncredentialedProviders.has(alias.provider)) return false;
+      // no key in CI, or deliberately not spent here — see `isExcluded`.
+      if (excludedProviders.has(alias.provider)) return false;
       return true;
     })
     .map(toMatrixEntry);
@@ -70,7 +72,7 @@ export function buildAliasMatrix(): MatrixEntry[] {
 
 export function buildFlagshipMatrix(): MatrixEntry[] {
   return providers
-    .filter((p) => !p.noCiCredential)
+    .filter((p) => !isExcluded(p))
     .map((p) => {
       const alias = aliasBySlug.get(p.flagship);
       if (!alias) {

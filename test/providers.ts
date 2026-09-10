@@ -32,6 +32,16 @@ export type ProviderEntry = {
    * correct and the cells arm themselves.
    */
   noCiCredential?: true;
+  /**
+   * CI holds a working credential but deliberately spends it elsewhere, so
+   * `models-live` and `providers-live` emit no cell for this provider.
+   *
+   * Distinct from `noCiCredential` on purpose: that one means the cells CANNOT
+   * run, this one means they are not worth what they cost. Collapsing the two
+   * would make a rotation accident look like a budget decision. Delete the flag
+   * to arm the cells again — the rest of the entry stays correct.
+   */
+  ciCostExcluded?: true;
 };
 
 export const providers: ProviderEntry[] = [
@@ -41,9 +51,15 @@ export const providers: ProviderEntry[] = [
     agent: "claude",
   },
   {
+    // every GPT alias here is mirrored by `openrouter/*` (11 of 12) and
+    // `vercel/*`, so pulling the direct entry keeps the models under test and
+    // stops paying OpenAI twice for the same answer. what it does give up is
+    // proof that the direct BYOK path still resolves — the mirrors are separate
+    // catalog entries and drift independently. `openai/o3` has no mirror at all.
     name: "openai",
     flagship: "openai/gpt-sol",
     agent: "opencode",
+    ciCostExcluded: true,
   },
   {
     name: "google",
