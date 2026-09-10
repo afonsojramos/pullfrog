@@ -10,6 +10,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  CLI_CONTRACT_HEADER,
+  CLI_CONTRACT_VERSION,
+  CLI_UPGRADE_MESSAGE,
+  CliContractError,
+} from "../cliContract.ts";
 import { PULLFROG_API_URL } from "./_shared.ts";
 
 export type StreamEvent = {
@@ -48,8 +54,14 @@ export class PrEventsAccessError extends Error {}
 
 /** an answer no retry can improve: the token is bad, or the repo is not ours to
  * read. everything else is worth another attempt. */
-export function isTerminal(error: unknown): error is PrEventsAuthError | PrEventsAccessError {
-  return error instanceof PrEventsAuthError || error instanceof PrEventsAccessError;
+export function isTerminal(
+  error: unknown
+): error is PrEventsAuthError | PrEventsAccessError | CliContractError {
+  return (
+    error instanceof PrEventsAuthError ||
+    error instanceof PrEventsAccessError ||
+    error instanceof CliContractError
+  );
 }
 
 export async function pollPrEvents(
@@ -72,9 +84,13 @@ export async function pollPrEvents(
   else ctx.signal?.addEventListener("abort", onCallerAbort, { once: true });
   try {
     const response = await fetch(`${PULLFROG_API_URL}/api/cli/pr-events?${params}`, {
-      headers: { authorization: `Bearer ${ctx.token}` },
+      headers: {
+        authorization: `Bearer ${ctx.token}`,
+        [CLI_CONTRACT_HEADER]: CLI_CONTRACT_VERSION,
+      },
       signal: controller.signal,
     });
+    if (response.status === 426) throw new CliContractError(CLI_UPGRADE_MESSAGE);
     if (response.status === 401 || response.status === 403) {
       throw new PrEventsAuthError("invalid or expired github token — run `gh auth login`.");
     }

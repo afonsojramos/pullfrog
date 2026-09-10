@@ -5,6 +5,12 @@
 import { execFileSync } from "node:child_process";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
+import {
+  CLI_CONTRACT_HEADER,
+  CLI_CONTRACT_VERSION,
+  CLI_UPGRADE_MESSAGE,
+  CliContractError,
+} from "../cliContract.ts";
 
 export const PULLFROG_API_URL = (process.env.PULLFROG_API_URL || "https://pullfrog.com").replace(
   /\/+$/,
@@ -134,13 +140,19 @@ type ApiResult<T = Record<string, unknown>> = {
   data: T;
 };
 
-async function pullfrogApi<T = Record<string, unknown>>(ctx: {
+export async function pullfrogApi<T = Record<string, unknown>>(ctx: {
   path: string;
   token: string;
-  method?: string;
-  body?: Record<string, unknown>;
+  method?: string | undefined;
+  body?: object | undefined;
 }): Promise<ApiResult<T>> {
-  const headers: Record<string, string> = { authorization: `Bearer ${ctx.token}` };
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${ctx.token}`,
+    [CLI_CONTRACT_HEADER]: CLI_CONTRACT_VERSION,
+  };
+  if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+    headers["x-vercel-protection-bypass"] = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  }
   if (ctx.body) headers["content-type"] = "application/json";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -151,6 +163,7 @@ async function pullfrogApi<T = Record<string, unknown>>(ctx: {
       body: ctx.body ? JSON.stringify(ctx.body) : null,
       signal: controller.signal,
     });
+    if (response.status === 426) throw new CliContractError(CLI_UPGRADE_MESSAGE);
     const data = (await response.json().catch(() => ({}))) as T;
     return { ok: response.ok, status: response.status, data };
   } finally {

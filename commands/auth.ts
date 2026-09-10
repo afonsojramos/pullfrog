@@ -38,6 +38,7 @@ import {
   startXaiDeviceAuth,
   stringifyXaiAuthBody,
 } from "../utils/xaiOAuth.ts";
+import { configurationApi, resolveTarget, scopeArgs } from "./_configuration.ts";
 import {
   bail,
   describeSecretTarget,
@@ -45,11 +46,11 @@ import {
   getGhToken,
   handleCancel,
   PULLFROG_API_URL,
-  parseGitRemote,
   promptScope,
   setActiveSpin,
   setPullfrogSecret,
 } from "./_shared.ts";
+import { secretNamesSchema } from "./secret.ts";
 
 const CODEX_AUTH_SECRET = "CODEX_AUTH_JSON";
 const CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN";
@@ -122,6 +123,7 @@ function printAuthUsage(params: { stream: typeof console.log; prog: string }): v
   params.stream("  grok     mint a Grok (SuperGrok / X Premium) subscription credential");
   params.stream("");
   params.stream("options:");
+  params.stream("  --org OWNER | --repo OWNER/REPO   select the credential scope");
   params.stream("  -h, --help   show help");
 }
 
@@ -130,6 +132,7 @@ function printCodexUsage(params: { stream: typeof console.log; prog: string }): 
   params.stream("mint a Codex subscription credential and save it as CODEX_AUTH_JSON.");
   params.stream("");
   params.stream("options:");
+  params.stream("  --org OWNER | --repo OWNER/REPO   select the credential scope");
   params.stream("  -h, --help   show help");
 }
 
@@ -138,6 +141,7 @@ function printClaudeUsage(params: { stream: typeof console.log; prog: string }):
   params.stream("save a Claude Code subscription OAuth token as CLAUDE_CODE_OAUTH_TOKEN.");
   params.stream("");
   params.stream("options:");
+  params.stream("  --org OWNER | --repo OWNER/REPO   select the credential scope");
   params.stream("  -h, --help   show help");
 }
 
@@ -186,8 +190,7 @@ interface CodexCliParams {
 function parseCodexArgs(args: string[]) {
   return arg(
     {
-      "--help": Boolean,
-      "-h": "--help",
+      ...scopeArgs,
     },
     { argv: args }
   );
@@ -209,10 +212,11 @@ async function runCodex(params: CodexCliParams): Promise<void> {
     return;
   }
 
-  await runCodexAuth();
+  if (parsed._.length) throw new Error("unexpected auth argument");
+  await runCodexAuth(parsed);
 }
 
-async function runCodexAuth(): Promise<void> {
+async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<void> {
   p.intro(pc.bgGreen(pc.black(" pullfrog auth codex ")));
 
   const spin = p.spinner();
@@ -224,11 +228,21 @@ async function runCodexAuth(): Promise<void> {
     spin.stop("github authenticated");
 
     spin.start("detecting repository");
-    const remote = parseGitRemote();
-    spin.stop(`detected repo ${pc.cyan(`${remote.owner}/${remote.repo}`)}`);
+    const selectedTarget = resolveTarget({ org: parsed["--org"], repo: parsed["--repo"] });
+    const remote = { owner: selectedTarget.owner, repo: selectedTarget.repo ?? "" };
+    spin.stop(`selected ${pc.cyan(remote.repo ? `${remote.owner}/${remote.repo}` : remote.owner)}`);
 
     spin.start("checking pullfrog app installation");
-    const status = await fetchStatus({ token, owner: remote.owner, repo: remote.repo });
+    const status =
+      selectedTarget.repo && parsed["--repo"] === undefined
+        ? await fetchStatus({ token, owner: remote.owner, repo: selectedTarget.repo })
+        : {
+            installed: true,
+            isOrg: true,
+            pullfrogSecrets: secretNamesSchema.parse(
+              await configurationApi({ target: selectedTarget, path: "credentials", token })
+            ).secrets,
+          };
     if (!status.installed) {
       spin.stop(pc.red("pullfrog app not installed on this repo"));
       bail(
@@ -238,7 +252,33 @@ async function runCodexAuth(): Promise<void> {
     }
     spin.stop(`pullfrog app is installed on ${pc.cyan(`@${remote.owner}`)}`);
 
-    if (status.pullfrogSecrets.includes(CODEX_AUTH_SECRET)) {
+    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
+    // store for user accounts), so we never bother prompting. on org-owned
+    // repos, prompt interactively — matches `init`'s behavior.
+    // explicit scopes override the legacy no-flag selection above.
+    const scope =
+      parsed["--org"] !== undefined
+        ? "account"
+        : parsed["--repo"] !== undefined
+          ? "repo"
+          : status.isOrg
+            ? await promptScope({ owner: remote.owner, repo: remote.repo })
+            : "account";
+    const access = secretNamesSchema.parse(
+      await configurationApi({
+        target: { owner: remote.owner, repo: scope === "repo" ? remote.repo : undefined },
+        path: "credentials",
+        token,
+      })
+    );
+    if (!access.writable)
+      bail(
+        scope === "repo"
+          ? "repo admin required to change secrets"
+          : "org owner required to change secrets"
+      );
+
+    if (access.secrets.includes(CODEX_AUTH_SECRET)) {
       const overwrite = await p.select({
         message: `${pc.cyan(CODEX_AUTH_SECRET)} is already configured — overwrite?`,
         options: [
@@ -252,13 +292,6 @@ async function runCodexAuth(): Promise<void> {
         return;
       }
     }
-
-    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
-    // store for user accounts), so we never bother prompting. on org-owned
-    // repos, prompt interactively — matches `init`'s behavior.
-    const scope = status.isOrg
-      ? await promptScope({ owner: remote.owner, repo: remote.repo })
-      : "account";
 
     p.log.info(
       [
@@ -383,8 +416,7 @@ interface ClaudeCliParams {
 function parseClaudeArgs(args: string[]) {
   return arg(
     {
-      "--help": Boolean,
-      "-h": "--help",
+      ...scopeArgs,
     },
     { argv: args }
   );
@@ -406,10 +438,11 @@ async function runClaude(params: ClaudeCliParams): Promise<void> {
     return;
   }
 
-  await runClaudeAuth();
+  if (parsed._.length) throw new Error("unexpected auth argument");
+  await runClaudeAuth(parsed);
 }
 
-async function runClaudeAuth(): Promise<void> {
+async function runClaudeAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<void> {
   p.intro(pc.bgGreen(pc.black(" pullfrog auth claude ")));
 
   const spin = p.spinner();
@@ -421,11 +454,21 @@ async function runClaudeAuth(): Promise<void> {
     spin.stop("github authenticated");
 
     spin.start("detecting repository");
-    const remote = parseGitRemote();
-    spin.stop(`detected repo ${pc.cyan(`${remote.owner}/${remote.repo}`)}`);
+    const selectedTarget = resolveTarget({ org: parsed["--org"], repo: parsed["--repo"] });
+    const remote = { owner: selectedTarget.owner, repo: selectedTarget.repo ?? "" };
+    spin.stop(`selected ${pc.cyan(remote.repo ? `${remote.owner}/${remote.repo}` : remote.owner)}`);
 
     spin.start("checking pullfrog app installation");
-    const status = await fetchStatus({ token, owner: remote.owner, repo: remote.repo });
+    const status =
+      selectedTarget.repo && parsed["--repo"] === undefined
+        ? await fetchStatus({ token, owner: remote.owner, repo: selectedTarget.repo })
+        : {
+            installed: true,
+            isOrg: true,
+            pullfrogSecrets: secretNamesSchema.parse(
+              await configurationApi({ target: selectedTarget, path: "credentials", token })
+            ).secrets,
+          };
     if (!status.installed) {
       spin.stop(pc.red("pullfrog app not installed on this repo"));
       bail(
@@ -435,7 +478,33 @@ async function runClaudeAuth(): Promise<void> {
     }
     spin.stop(`pullfrog app is installed on ${pc.cyan(`@${remote.owner}`)}`);
 
-    if (status.pullfrogSecrets.includes(CLAUDE_OAUTH_SECRET)) {
+    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
+    // store for user accounts), so we never bother prompting. on org-owned
+    // repos, prompt interactively — matches `init`'s behavior.
+    // explicit scopes override the legacy no-flag selection above.
+    const scope =
+      parsed["--org"] !== undefined
+        ? "account"
+        : parsed["--repo"] !== undefined
+          ? "repo"
+          : status.isOrg
+            ? await promptScope({ owner: remote.owner, repo: remote.repo })
+            : "account";
+    const access = secretNamesSchema.parse(
+      await configurationApi({
+        target: { owner: remote.owner, repo: scope === "repo" ? remote.repo : undefined },
+        path: "credentials",
+        token,
+      })
+    );
+    if (!access.writable)
+      bail(
+        scope === "repo"
+          ? "repo admin required to change secrets"
+          : "org owner required to change secrets"
+      );
+
+    if (access.secrets.includes(CLAUDE_OAUTH_SECRET)) {
       const overwrite = await p.select({
         message: `${pc.cyan(CLAUDE_OAUTH_SECRET)} is already configured — overwrite?`,
         options: [
@@ -449,13 +518,6 @@ async function runClaudeAuth(): Promise<void> {
         return;
       }
     }
-
-    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
-    // store for user accounts), so we never bother prompting. on org-owned
-    // repos, prompt interactively — matches `init`'s behavior.
-    const scope = status.isOrg
-      ? await promptScope({ owner: remote.owner, repo: remote.repo })
-      : "account";
 
     p.log.info(
       [
@@ -531,6 +593,7 @@ function printGrokUsage(params: { stream: typeof console.log; prog: string }): v
   params.stream("mint a Grok subscription credential and save it as GROK_AUTH_JSON.");
   params.stream("");
   params.stream("options:");
+  params.stream("  --org OWNER | --repo OWNER/REPO   select the credential scope");
   params.stream("  -h, --help   show help");
 }
 
@@ -550,10 +613,11 @@ async function runGrok(params: GrokCliParams): Promise<void> {
     return;
   }
 
-  await runGrokAuth();
+  if (parsed._.length) throw new Error("unexpected auth argument");
+  await runGrokAuth(parsed);
 }
 
-async function runGrokAuth(): Promise<void> {
+async function runGrokAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<void> {
   p.intro(pc.bgGreen(pc.black(" pullfrog auth grok ")));
 
   const spin = p.spinner();
@@ -565,11 +629,21 @@ async function runGrokAuth(): Promise<void> {
     spin.stop("github authenticated");
 
     spin.start("detecting repository");
-    const remote = parseGitRemote();
-    spin.stop(`detected repo ${pc.cyan(`${remote.owner}/${remote.repo}`)}`);
+    const selectedTarget = resolveTarget({ org: parsed["--org"], repo: parsed["--repo"] });
+    const remote = { owner: selectedTarget.owner, repo: selectedTarget.repo ?? "" };
+    spin.stop(`selected ${pc.cyan(remote.repo ? `${remote.owner}/${remote.repo}` : remote.owner)}`);
 
     spin.start("checking pullfrog app installation");
-    const status = await fetchStatus({ token, owner: remote.owner, repo: remote.repo });
+    const status =
+      selectedTarget.repo && parsed["--repo"] === undefined
+        ? await fetchStatus({ token, owner: remote.owner, repo: selectedTarget.repo })
+        : {
+            installed: true,
+            isOrg: true,
+            pullfrogSecrets: secretNamesSchema.parse(
+              await configurationApi({ target: selectedTarget, path: "credentials", token })
+            ).secrets,
+          };
     if (!status.installed) {
       spin.stop(pc.red("pullfrog app not installed on this repo"));
       bail(
@@ -579,7 +653,33 @@ async function runGrokAuth(): Promise<void> {
     }
     spin.stop(`pullfrog app is installed on ${pc.cyan(`@${remote.owner}`)}`);
 
-    if (status.pullfrogSecrets.includes(GROK_AUTH_SECRET)) {
+    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
+    // store for user accounts), so we never bother prompting. on org-owned
+    // repos, prompt interactively — matches `init`'s behavior.
+    // explicit scopes override the legacy no-flag selection above.
+    const scope =
+      parsed["--org"] !== undefined
+        ? "account"
+        : parsed["--repo"] !== undefined
+          ? "repo"
+          : status.isOrg
+            ? await promptScope({ owner: remote.owner, repo: remote.repo })
+            : "account";
+    const access = secretNamesSchema.parse(
+      await configurationApi({
+        target: { owner: remote.owner, repo: scope === "repo" ? remote.repo : undefined },
+        path: "credentials",
+        token,
+      })
+    );
+    if (!access.writable)
+      bail(
+        scope === "repo"
+          ? "repo admin required to change secrets"
+          : "org owner required to change secrets"
+      );
+
+    if (access.secrets.includes(GROK_AUTH_SECRET)) {
       const overwrite = await p.select({
         message: `${pc.cyan(GROK_AUTH_SECRET)} is already configured — overwrite?`,
         options: [
@@ -593,13 +693,6 @@ async function runGrokAuth(): Promise<void> {
         return;
       }
     }
-
-    // user-owned repos can only ever be "account" (Pullfrog has no per-repo
-    // store for user accounts), so we never bother prompting. on org-owned
-    // repos, prompt interactively — matches `init`'s behavior.
-    const scope = status.isOrg
-      ? await promptScope({ owner: remote.owner, repo: remote.repo })
-      : "account";
 
     spin.start("requesting a device code from xAI");
     const device = await startXaiDeviceAuth();

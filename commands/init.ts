@@ -2,11 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as p from "@clack/prompts";
 import arg from "arg";
 import pc from "picocolors";
-
-const PULLFROG_API_URL = (process.env.PULLFROG_API_URL || "https://pullfrog.com").replace(
-  /\/+$/,
-  ""
-);
+import { PULLFROG_API_URL, pullfrogApi } from "./_shared.ts";
 
 function link(text: string, url: string): string {
   return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
@@ -131,26 +127,6 @@ type InstallationNotFound = {
 type StatusResult =
   | { installed: true; installationId: number | null; isOrg: boolean }
   | ({ installed: false } & InstallationNotFound);
-
-type ApiResult<T = Record<string, unknown>> = { ok: boolean; status: number; data: T };
-
-async function pullfrogApi<T = Record<string, unknown>>(ctx: {
-  path: string;
-  token: string;
-}): Promise<ApiResult<T>> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-  try {
-    const response = await fetch(`${PULLFROG_API_URL}${ctx.path}`, {
-      headers: { authorization: `Bearer ${ctx.token}` },
-      signal: controller.signal,
-    });
-    const data = (await response.json().catch(() => ({}))) as T;
-    return { ok: response.ok, status: response.status, data };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 async function fetchStatus(ctx: {
   token: string;
