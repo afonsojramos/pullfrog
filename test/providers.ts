@@ -66,9 +66,16 @@ export const providers: ProviderEntry[] = [
     agent: "opencode",
   },
   {
+    // the other account the 2 September runaway drained, and the only thing
+    // left keeping the nightly red once Zen is out. not a spend of Zen's size —
+    // 4 metered aliases — so this is the cheapest exclusion here to undo:
+    // refill the account, delete the flag, and all 5 cells arm themselves.
+    // `openrouter/*` and `vercel/*` mirror 3 of the 4 meanwhile; only
+    // `deepseek-reasoner` goes fully dark.
     name: "deepseek",
     flagship: "deepseek/deepseek-pro",
     agent: "opencode",
+    ciCostExcluded: true,
   },
   {
     name: "moonshotai",
