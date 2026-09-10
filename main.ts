@@ -601,6 +601,7 @@ export async function main(): Promise<MainResult> {
     const setupHook = await executeLifecycleHook({
       event: "setup",
       script: runContext.repoSettings.setupScript,
+      shell: payload.shell,
       normalizeWorkingTreeAfter: true,
     });
     if (setupHook.warning) {

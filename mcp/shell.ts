@@ -250,7 +250,28 @@ function buildFsMounts(repoDir: string): string {
     `mount -t tmpfs tmpfs /var/lib/pullfrog 2>/dev/null;`,
     `[ -n "$RUNNER_TEMP" ] && [ -d "$RUNNER_TEMP/_runner_file_commands" ] && mount -t tmpfs tmpfs "$RUNNER_TEMP/_runner_file_commands" 2>/dev/null;`,
     `[ -e '${escaped}/.git' ] && mount --bind '${escaped}/.git' '${escaped}/.git' 2>/dev/null && mount -o remount,bind,ro '${escaped}/.git' 2>/dev/null;`,
-  ].join(" ");
+    // the corepack shim dir sits FIRST on PATH (utils/packageManager.ts) and
+    // PATH survives filterEnv, so a writable pm-bin lets sandboxed code plant
+    // a `git`/`pnpm` that a later UNSANDBOXED spawn resolves with the parent
+    // env. read-only closes that for every sandboxed command at once.
+    //
+    // the path is interpolated HERE rather than read as `$PULLFROG_TEMP_DIR`
+    // inside the sandbox: that name is not on the `filterEnv` safe list, so in
+    // restricted mode it expands to empty and the mount silently no-ops in the
+    // one tier it exists to protect. `$RUNNER_TEMP` above is safe only because
+    // `RUNNER_` is an allowed prefix.
+    shimMount(),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** read-only bind for the corepack shim dir, or "" when this run has no tmpdir. */
+function shimMount(): string {
+  const tempDir = process.env.PULLFROG_TEMP_DIR;
+  if (!tempDir) return "";
+  const dir = join(tempDir, "pm-bin").replace(/'/g, "'\\''");
+  return `[ -d '${dir}' ] && mount --bind '${dir}' '${dir}' 2>/dev/null && mount -o remount,bind,ro '${dir}' 2>/dev/null;`;
 }
 
 /** locate the repo root once at action startup. process.cwd() is unreliable
@@ -456,6 +477,11 @@ export async function runSandboxed(params: {
   env: Record<string, string | undefined>;
   cwd: string;
   timeout: number;
+  /** live-stream chunks as they arrive, on top of the buffered `output`.
+   * lifecycle hooks use this to keep a long `pnpm test` visible in the
+   * workflow log instead of silent until it exits. */
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
 }): Promise<{ output: string; exitCode: number; timedOut: boolean }> {
   const proc = spawnShell({
     command: params.command,
@@ -473,10 +499,14 @@ export async function runSandboxed(params: {
     exited = false,
     spawnError = "";
   proc.stdout?.on("data", (chunk: Buffer) => {
-    stdout.append(chunk.toString());
+    const text = chunk.toString();
+    stdout.append(text);
+    params.onStdout?.(text);
   });
   proc.stderr?.on("data", (chunk: Buffer) => {
-    stderr.append(chunk.toString());
+    const text = chunk.toString();
+    stderr.append(text);
+    params.onStderr?.(text);
   });
 
   const timeoutId = setTimeout(async () => {

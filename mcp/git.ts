@@ -281,6 +281,7 @@ async function runPrepushHook(ctx: ToolContext, retryTool: string): Promise<bool
   const prepushHook = await executeLifecycleHook({
     event: "prepush",
     script: ctx.prepushScript,
+    shell: ctx.payload.shell,
   });
   if (prepushHook.failure) {
     ctx.toolState.prepushFailureCount += 1;
