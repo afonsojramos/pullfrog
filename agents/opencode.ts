@@ -77,6 +77,7 @@ import type { AgentDiagnostic } from "../utils/agentHangReport.ts";
 import { formatJsonValue, log } from "../utils/cli.ts";
 import { installCodexAuth, installXaiAuth } from "../utils/codexHome.ts";
 import type { OAuthWriteback } from "../utils/codexRefreshDetect.ts";
+import { OAUTH_WRITEBACK_STATE } from "../utils/oauthWriteback.ts";
 import { findProviderErrorMatch } from "../utils/providerErrors.ts";
 import { resolveRunEffort } from "../utils/runEffort.ts";
 import { addSkill, installBundledSkills } from "../utils/skills.ts";
@@ -1300,7 +1301,7 @@ export const opencode = agent({
     }
     if (writebacks.length > 0) {
       core.saveState(
-        "oauth_writeback",
+        OAUTH_WRITEBACK_STATE,
         JSON.stringify({ apiToken: ctx.apiToken, entries: writebacks })
       );
     }

@@ -2,6 +2,7 @@ import { dirname } from "node:path";
 import * as core from "@actions/core";
 import arg from "arg";
 import { main } from "../main.ts";
+import { runOAuthWriteback } from "../utils/oauthWriteback.ts";
 import { acquireInstallationToken, revokeInstallationToken } from "../utils/token.ts";
 
 // GitHub Actions runs the action entry point with the node24 binary specified
@@ -69,6 +70,7 @@ function printGhaUsage(params: { stream: typeof console.log; prog: string }): vo
   params.stream("");
   params.stream("options:");
   params.stream("  -h, --help   show help");
+  params.stream("  --post       run the post-step cleanup (post-step usage only)");
 }
 
 function printGhaTokenUsage(params: { stream: typeof console.log; prog: string }): void {
@@ -84,6 +86,7 @@ function parseGhaArgs(args: string[]) {
   return arg(
     {
       "--help": Boolean,
+      "--post": Boolean,
       "-h": "--help",
     },
     {
@@ -131,7 +134,7 @@ export async function runCli(params: GhaCliParams): Promise<void> {
   const subcommand = positional[0];
 
   if (!subcommand) {
-    await run(["gha"]);
+    await run(parsed["--post"] ? ["gha", "--post"] : ["gha"]);
     return;
   }
 
@@ -171,6 +174,14 @@ export async function runCli(params: GhaCliParams): Promise<void> {
 }
 
 export async function run(args: string[]) {
+  // the cleanup step runs after the agent has already exited, so it must never
+  // reach `setFailed` below — a red X there flips a finished, successful run to
+  // `failure` with nothing actionable in the comment. that is #815's shape.
+  if (args.includes("--post") && !args.includes("token")) {
+    await runOAuthWriteback().catch((error) => core.warning(`oauth post-hook: ${error}`));
+    return;
+  }
+
   try {
     if (args.includes("token")) {
       if (args.includes("--post")) {

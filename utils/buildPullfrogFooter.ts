@@ -55,12 +55,6 @@ export interface BuildPullfrogFooterParams {
    */
   unselectedProxyDefault?: boolean | undefined;
   /**
-   * true when the action is pinned to a full commit SHA — the footer leads
-   * with a maintenance nudge to switch to the moving `@v0` tag (a SHA pin
-   * freezes the post-run cleanup step, which silently fails the workflow).
-   */
-  shaPinned?: boolean | undefined;
-  /**
    * true when the run's model costs are covered by the Pullfrog for OSS
    * program — the footer renders `Using <model> (free via Pullfrog for OSS)`
    * with the phrase linking to the OSS application page.
@@ -190,12 +184,6 @@ function buildTrialDisclosure(owner: string | undefined): string {
  */
 export function buildPullfrogFooter(params: BuildPullfrogFooterParams): string {
   const parts: string[] = [];
-
-  if (params.shaPinned) {
-    parts.push(
-      "⚠️ this action is pinned to a commit SHA, which [freezes the cleanup step](https://docs.pullfrog.com/versioning) — switch to `@v0` or keep the SHA fresh with Dependabot"
-    );
-  }
 
   if (params.customParts) {
     parts.push(...params.customParts);

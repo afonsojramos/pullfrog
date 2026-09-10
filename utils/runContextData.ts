@@ -47,31 +47,6 @@ interface ResolveRunContextDataParams {
 }
 
 /**
- * true when the action is pinned to a full commit SHA (vs the moving `@v0`
- * tag or a branch). GitHub runs the action's `post:` hook (and reads
- * `action.yml`) straight from the checked-out action ref, so a SHA pin freezes
- * that checkout forever: the main agent still floats to the latest `^semver`
- * via the npm bootstrap (this code is proof — it ran), but the post-run
- * cleanup step keeps executing the pinned commit's source and never receives
- * fixes. surfaced in the log and PR footers to nudge repos back to `@v0`.
- */
-export function isActionPinnedToSha(): boolean {
-  const ref = process.env.GITHUB_ACTION_REF;
-  return !!ref && /^[0-9a-f]{40}$/i.test(ref);
-}
-
-function warnIfPinnedToSha(): void {
-  if (isActionPinnedToSha()) {
-    log.warning(
-      `» pinned to a commit SHA (${process.env.GITHUB_ACTION_REF}); the post-run cleanup step is ` +
-        "frozen at that commit and won't receive fixes. keep the SHA fresh with Dependabot, or " +
-        "pin to `pullfrog/pullfrog@v0` if your org doesn't require full-SHA action pinning — " +
-        "see https://docs.pullfrog.com/versioning"
-    );
-  }
-}
-
-/**
  * initialize run context data: parse context, fetch repo info and settings
  */
 export async function resolveRunContextData(
@@ -85,7 +60,6 @@ export async function resolveRunContextData(
   log.info(
     `» running Pullfrog v${packageJson.version}${actionRef ? ` (ref: ${actionRef})` : ""}...`
   );
-  warnIfPinnedToSha();
 
   const repoContext = parseRepoContext();
 

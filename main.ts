@@ -66,7 +66,7 @@ import { resolveOutputSchema, resolvePayload, resolvePromptInput } from "./utils
 import { resolveTrialFallback, runProxyResolution } from "./utils/proxy.ts";
 import { fetchPreviousSnapshot, persistSummary, seedSummaryFile } from "./utils/prSummary.ts";
 import { handleAgentResult } from "./utils/run.ts";
-import { isActionPinnedToSha, resolveRunContextData } from "./utils/runContextData.ts";
+import { resolveRunContextData } from "./utils/runContextData.ts";
 import { ossEffortFloor } from "./utils/runEffort.ts";
 import { renderRunError } from "./utils/runErrorRenderer.ts";
 import {
@@ -167,7 +167,6 @@ export async function main(): Promise<MainResult> {
   });
   toolState.model = payload.model;
   toolState.oss = runContext.oss;
-  toolState.shaPinned = isActionPinnedToSha();
   // seed the comment target before every terminal branch. `reportErrorToComment`
   // reads only toolState, so silent triggers otherwise have nowhere to post.
   if (payload.event.issue_number !== undefined) {

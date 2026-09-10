@@ -8,6 +8,11 @@ import { describe, expect, it } from "vitest";
 // imports) crashes the post-step with `ERR_MODULE_NOT_FOUND` AFTER the agent
 // already exited 0, flipping the workflow to `failure`. see #834.
 //
+// entryPost.ts is now only a bootstrap — the cleanup logic itself floats with
+// the npm package (utils/oauthWriteback.ts) and is NOT covered here. What this
+// still pins is the handful of files GHA executes from the frozen checkout,
+// which is exactly the set that must never grow a bare specifier.
+//
 // This test parses the static-import graph rooted at entryPost.ts and refuses
 // any specifier that isn't one of:
 //   - node:* (stdlib)
@@ -84,21 +89,11 @@ describe("entryPost.ts stdlib-only invariant (#834)", () => {
     const visited = [...result.visited]
       .map((f) => relative(import.meta.dirname, f).replaceAll("\\", "/"))
       .sort();
-    expect(visited).toEqual([
-      "entryPost.ts",
-      "utils/codexRefreshDetect.ts",
-      "utils/ghaCore.ts",
-      "utils/postApiFetch.ts",
-    ]);
+    expect(visited).toEqual(["entryPost.ts", "runCli.ts"]);
   });
 
   it("locks down the direct-import surface of entryPost.ts (including stdlib)", () => {
     const direct = extractImports(ENTRY_FILE).sort();
-    expect(direct).toEqual([
-      "./utils/codexRefreshDetect.ts",
-      "./utils/ghaCore.ts",
-      "./utils/postApiFetch.ts",
-      "node:fs",
-    ]);
+    expect(direct).toEqual(["./runCli.ts"]);
   });
 });
