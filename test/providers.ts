@@ -51,15 +51,9 @@ export const providers: ProviderEntry[] = [
     agent: "claude",
   },
   {
-    // every GPT alias here is mirrored by `openrouter/*` (11 of 12) and
-    // `vercel/*`, so pulling the direct entry keeps the models under test and
-    // stops paying OpenAI twice for the same answer. what it does give up is
-    // proof that the direct BYOK path still resolves — the mirrors are separate
-    // catalog entries and drift independently. `openai/o3` has no mirror at all.
     name: "openai",
     flagship: "openai/gpt-sol",
     agent: "opencode",
-    ciCostExcluded: true,
   },
   {
     name: "google",
@@ -97,9 +91,14 @@ export const providers: ProviderEntry[] = [
     agent: "opencode",
   },
   {
+    // Zen is the largest model spend in CI: 39 metered alias cells, more than
+    // any other provider, fanned out over the whole funded OSS menu. 30 of them
+    // are mirrored by `openrouter/*` or `vercel/*` and stay under test there.
+    // the flagship survives the exclusion because `big-pickle` is free.
     name: "opencode",
     flagship: "opencode/big-pickle",
     agent: "opencode",
+    ciCostExcluded: true,
   },
   {
     name: "openrouter",
@@ -107,8 +106,14 @@ export const providers: ProviderEntry[] = [
     agent: "opencode",
   },
   {
+    // the Go endpoint is a different base URL on the SAME `OPENCODE_API_KEY`
+    // and the same Zen balance, so excluding `opencode` above without this one
+    // would leave 15 cells still drawing on the account it was meant to stop
+    // spending from. every model here is metered, so unlike `opencode` this
+    // entry loses its flagship cell too.
     name: "opencode-go",
     flagship: "opencode-go/glm",
     agent: "opencode",
+    ciCostExcluded: true,
   },
 ];

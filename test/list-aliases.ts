@@ -20,8 +20,9 @@
  * mirror — testing the direct google entry tells you nothing about whether
  * the openrouter mirror has the same model id. Two kinds of entry are pruned:
  * routing slugs (bedrock/byok) whose `resolve` is a sentinel that picks the
- * actual model id from a per-run env var, and every alias of a provider
- * `isExcluded` rejects — no CI credential, or excluded to control spend.
+ * actual model id from a per-run env var, and whatever `isExcluded` rejects —
+ * a provider CI holds no key for, or a metered model on one we decline to pay
+ * for.
  *
  * usage:
  *   node action/test/list-aliases.ts
@@ -31,7 +32,7 @@
  * which calls into this file. raw invocation here emits the full list.
  */
 import { modelAliases } from "../models.ts";
-import { type ProviderEntry, providers } from "./providers.ts";
+import { providers } from "./providers.ts";
 
 export type MatrixEntry = {
   slug: string;
@@ -50,12 +51,25 @@ function toMatrixEntry(alias: (typeof modelAliases)[number]): MatrixEntry {
 
 const aliasBySlug = new Map(modelAliases.map((a) => [a.slug, a]));
 
-/** providers that emit no cell — no CI credential, or excluded to control spend. */
-function isExcluded(provider: ProviderEntry): boolean {
-  return provider.noCiCredential === true || provider.ciCostExcluded === true;
-}
+/** providers CI holds no credential for — see `ProviderEntry.noCiCredential`. */
+const uncredentialedProviders = new Set(
+  providers.filter((p) => p.noCiCredential).map((p) => p.name)
+);
 
-const excludedProviders = new Set(providers.filter(isExcluded).map((p) => p.name));
+/** providers whose metered models CI declines to pay for — see `ciCostExcluded`. */
+const costExcludedProviders = new Set(providers.filter((p) => p.ciCostExcluded).map((p) => p.name));
+
+/**
+ * A cost exclusion spares the provider's free models: they bill nothing, they
+ * keep working after the balance runs dry (all 4 free Zen aliases passed the
+ * 2026-09-10 nightly while all 39 metered ones failed on `Insufficient
+ * balance`), and they are the only live coverage of tiers no other provider
+ * mirrors. A missing credential spares nothing, because nothing can run.
+ */
+function isExcluded(alias: (typeof modelAliases)[number]): boolean {
+  if (uncredentialedProviders.has(alias.provider)) return true;
+  return costExcludedProviders.has(alias.provider) && !alias.isFree;
+}
 
 export function buildAliasMatrix(): MatrixEntry[] {
   return modelAliases
@@ -63,8 +77,8 @@ export function buildAliasMatrix(): MatrixEntry[] {
       // routing slugs (bedrock/byok) need a per-run env var to pick the actual
       // model — there's no generic smoke test.
       if (alias.routing) return false;
-      // no key in CI, or deliberately not spent here — see `isExcluded`.
-      if (excludedProviders.has(alias.provider)) return false;
+      // no key in CI, or a metered model on a provider we decline to pay for.
+      if (isExcluded(alias)) return false;
       return true;
     })
     .map(toMatrixEntry);
@@ -72,7 +86,7 @@ export function buildAliasMatrix(): MatrixEntry[] {
 
 export function buildFlagshipMatrix(): MatrixEntry[] {
   return providers
-    .filter((p) => !isExcluded(p))
+    .filter((p) => !p.noCiCredential)
     .map((p) => {
       const alias = aliasBySlug.get(p.flagship);
       if (!alias) {
@@ -82,6 +96,7 @@ export function buildFlagshipMatrix(): MatrixEntry[] {
       }
       return alias;
     })
+    .filter((alias) => !isExcluded(alias))
     .map(toMatrixEntry);
 }
 
