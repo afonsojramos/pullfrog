@@ -15,6 +15,12 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # npm holds a new version in automated review before serving it, and the wait
+    # below has to outlast that hold rather than fail on it (see its comment for
+    # the measurements). 360 is GitHub's hard cap for a hosted runner, not a
+    # tunable; the wait is set under it so the step, not the job, reports a stall.
+    # this repo is public, so an idle runner costs nothing.
+    timeout-minutes: 360
     steps:
       # `ref: main` rather than the pushed sha, because the tag step below cannot
       # push an arbitrary commit. GitHub refuses a GITHUB_TOKEN ref push whose
@@ -63,16 +69,14 @@ jobs:
       # release unrecoverable: the tag is pushed by this same job, so any later failure
       # left a re-run seeing its own tag and skipping the publish it still owed.
       #
-      # `--prefer-online` on every registry read here and below: npm revalidates a
-      # cached packument rather than refetching it, so a freshly published version
-      # can stay invisible to `npm view` for minutes. That is indistinguishable from
-      # slow propagation and it is the likelier half of what stalled 0.1.66 — the
-      # 5min wait below expired, then the very next run saw the version at once.
+      # every registry read here and below hits the registry URL directly rather than
+      # going through `npm view`, which revalidates a cached packument and so reports a
+      # live version as missing for minutes. That ambiguity is what made a slow read
+      # indistinguishable from a stalled publish while 0.1.66 and 0.1.72 were diagnosed.
       - name: Check whether npm already serves this version
         id: check_npm
         run: |
-          FOUND=$(npm view --prefer-online "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
-          if [ "$FOUND" = "${{ steps.version.outputs.version }}" ]; then
+          if curl -sf "https://registry.npmjs.org/pullfrog/${{ steps.version.outputs.version }}" > /dev/null; then
             echo "published=true" >> $GITHUB_OUTPUT
             echo "ℹ️ npm already serves ${{ steps.version.outputs.version }} - skipping publish"
           else
@@ -80,26 +84,42 @@ jobs:
             echo "✅ ${{ steps.version.outputs.version }} is not on npm yet - will publish"
           fi
 
+      # `continue-on-error`, because a publish that npm has already accepted into review
+      # fails here with `E409 Cannot publish over previously staged version` — the version
+      # is on its way to the registry and the run must proceed to the wait, not abort.
+      # 0.1.71 died exactly this way on a re-run and left `v0` two versions behind for 19h.
+      # Registry liveness below is the only gate that decides whether this release moves.
+      # A publish that failed for a real reason waits the whole window and then fails
+      # there, with this step's log to read.
       - name: Publish to npm
         if: steps.check_npm.outputs.published == 'false'
+        continue-on-error: true
         run: npm publish --provenance --access public
 
       # the release invariant: the major tag must never advance past what npm actually
       # serves, because the action bakes `pullfrog@^<own version>` into its npx spec, so
-      # a major tag ahead of npm is ETARGET on every consumer run. registry propagation
-      # is not instant, so confirm rather than assume before any tag moves.
+      # a major tag ahead of npm is ETARGET on every consumer run. confirm rather than
+      # assume before any tag moves.
+      #
+      # npm holds a new version in automated review before serving it, and the version
+      # simply does not exist until that finishes. Measured here: 0.1.70 sat 3.5 minutes,
+      # 0.1.71 sat ~54, 0.1.72 sat 236. zod sees the same thing (16, 25, 116). None of
+      # those is an upper bound, and the old 10-minute budget caught only the fastest.
+      # The version does arrive and every step below is worthless without it, so wait
+      # rather than fail — an expiry here means something is wrong, not merely slow.
       - name: Wait for npm to serve the version
         run: |
-          for attempt in $(seq 1 60); do
-            FOUND=$(npm view --prefer-online "pullfrog@${{ steps.version.outputs.version }}" version 2>/dev/null || true)
-            if [ "$FOUND" = "${{ steps.version.outputs.version }}" ]; then
-              echo "✅ npm is serving ${{ steps.version.outputs.version }}"
+          for i in $(seq 1 330); do
+            if curl -sf "https://registry.npmjs.org/pullfrog/${{ steps.version.outputs.version }}" > /dev/null; then
+              echo "✅ npm is serving ${{ steps.version.outputs.version }} (after $i min)"
               exit 0
             fi
-            echo "waiting for npm to serve ${{ steps.version.outputs.version }} (attempt $attempt/60)"
-            sleep 10
+            if [ $((i % 15)) -eq 0 ]; then
+              echo "waiting for npm to serve ${{ steps.version.outputs.version }} ($i minutes)"
+            fi
+            sleep 60
           done
-          echo "::error::npm never served ${{ steps.version.outputs.version }}; refusing to move ${{ steps.version.outputs.major_tag }}"
+          echo "::error::npm never served ${{ steps.version.outputs.version }} in 330min; refusing to move ${{ steps.version.outputs.major_tag }}. see the publish step's log for why"
           exit 1
 
       - name: Create and push tags
