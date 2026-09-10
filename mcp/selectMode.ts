@@ -41,10 +41,9 @@ type OrchestratorGuidance = {
   orchestratorGuidance: string;
 };
 
-// IncrementalReview inherits Review's user instructions, Fix inherits Build's
+// IncrementalReview inherits Review's user instructions; Fix has its own prompt.
 const modeInstructionParent: Record<string, string> = {
   IncrementalReview: "Review",
-  Fix: "Build",
 };
 
 function buildOrchestratorGuidance(

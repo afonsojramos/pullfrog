@@ -155,6 +155,20 @@ export const repoConfigFields: ConfigField[] = [
     nullable: true,
     description: "additional instructions for planning",
   },
+  {
+    key: "prompts.address-reviews",
+    field: "AddressReviews",
+    kind: "prompt",
+    nullable: true,
+    description: "additional instructions for addressing review feedback",
+  },
+  {
+    key: "prompts.fix-ci",
+    field: "Fix",
+    kind: "prompt",
+    nullable: true,
+    description: "additional instructions for fixing CI failures",
+  },
   { key: "mention.enabled", field: "mention", kind: "toggle", description: "respond to mentions" },
   {
     key: "mention.instructions",
