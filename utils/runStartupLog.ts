@@ -75,6 +75,12 @@ export function logRunStartup(ctx: {
   log.info(
     `» effort:  ${resolveEffortForLog({ payload: ctx.payload, resolvedModel: ctx.resolvedModel })}`
   );
+  const routing = ctx.payload.routing;
+  if (routing) {
+    log.info(
+      `» routed:  ${routing.tier} (${routing.source}: stakes ${routing.stakes}, workload ${routing.workload}) — ${routing.rationale}`
+    );
+  }
   log.info(
     `» agent:   ${resolveAgentForLog({ agentName: ctx.agentName, resolvedModel: ctx.resolvedModel })}`
   );

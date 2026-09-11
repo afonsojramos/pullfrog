@@ -1,4 +1,5 @@
 import type { Octokit } from "@octokit/rest";
+import type { RouterTier } from "../models.ts";
 import packageJson from "../package.json" with { type: "json" };
 import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
@@ -44,6 +45,8 @@ interface ResolveRunContextDataParams {
    * because run-context is fetched first and needs it to pick this trigger's
    * model override. */
   runType?: string | undefined;
+  /** the model router's tier from the payload, forwarded so run-context applies it to the proxy mint. */
+  routedTier?: RouterTier | undefined;
 }
 
 /**
@@ -89,7 +92,13 @@ export async function resolveRunContextData(
       retries: [100, 500],
       bail: (error) => !isTransientOctokitError(error),
     })(),
-    fetchRunContext({ token: params.token, repoContext, oidcToken, runType: params.runType }),
+    fetchRunContext({
+      token: params.token,
+      repoContext,
+      oidcToken,
+      runType: params.runType,
+      routedTier: params.routedTier,
+    }),
   ]);
 
   return {

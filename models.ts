@@ -1383,6 +1383,160 @@ export function resolveAutoTier(params: { model: string | null; hasCard: boolean
   return isAutoTier(params.model) ? params.model : defaultAutoTier(params.hasCard);
 }
 
+// ── model router tiers ─────────────────────────────────────────────────────────
+
+/**
+ * the four rungs the model router scores a review into, ascending. `minimal` is
+ * a PR with no behavioural surface, `deep` one whose defects are absences the
+ * diff does not show. see wiki/router.md for how a tier is earned.
+ */
+export const ROUTER_TIERS = ["minimal", "light", "standard", "deep"] as const;
+export type RouterTier = (typeof ROUTER_TIERS)[number];
+
+export function isRouterTier(value: unknown): value is RouterTier {
+  return typeof value === "string" && ROUTER_TIERS.some((tier) => tier === value);
+}
+
+type Ladder = Record<RouterTier, string>;
+
+/**
+ * the model each tier runs on, per provider, as alias slugs — so a rung follows
+ * its alias's fallback chain and never names a retired model. only providers
+ * where one credential serves every rung get a ladder: a repo pinned to a
+ * provider absent here (bedrock, vertex, azure, openai-compatible, kimi-for-
+ * coding) keeps its pin, because the sibling model may be unreachable on the
+ * route the repo actually takes. openai uses all four durable tiers
+ * (Luna/Terra/Sol/Astra): the console lists the whole ladder as what Auto runs
+ * on, so every rung is a model the customer can see. anthropic doubles Opus at
+ * `deep` because Fable is access-gated (see its alias) and an automatic rung
+ * must run on every accepted credential; a two-model provider doubles up at
+ * the cheap end.
+ */
+const PROVIDER_LADDERS: Record<string, Ladder> = {
+  anthropic: {
+    minimal: "anthropic/claude-haiku",
+    light: "anthropic/claude-sonnet",
+    standard: "anthropic/claude-opus",
+    deep: "anthropic/claude-opus",
+  },
+  openai: {
+    minimal: "openai/gpt-luna",
+    light: "openai/gpt-terra",
+    standard: "openai/gpt-sol",
+    deep: "openai/gpt-astra",
+  },
+  google: {
+    minimal: "google/gemini-flash",
+    light: "google/gemini-flash",
+    standard: "google/gemini-pro",
+    deep: "google/gemini-pro",
+  },
+  deepseek: {
+    minimal: "deepseek/deepseek-flash",
+    light: "deepseek/deepseek-flash",
+    standard: "deepseek/deepseek-pro",
+    deep: "deepseek/deepseek-pro",
+  },
+  xai: {
+    minimal: "xai/grok-fast",
+    light: "xai/grok-fast",
+    standard: "xai/grok",
+    deep: "xai/grok",
+  },
+  moonshotai: {
+    minimal: "moonshotai/kimi-k2",
+    light: "moonshotai/kimi-k2",
+    standard: "moonshotai/kimi-k3",
+    deep: "moonshotai/kimi-k3",
+  },
+  openrouter: {
+    minimal: "openrouter/deepseek-flash",
+    light: "openrouter/gpt-luna",
+    standard: "openrouter/gpt-sol",
+    deep: "openrouter/claude-opus",
+  },
+  opencode: {
+    minimal: "opencode/gpt-luna",
+    light: "opencode/gpt-luna",
+    standard: "opencode/gpt-sol",
+    deep: "opencode/claude-opus",
+  },
+};
+
+/**
+ * the Router's own ladder for an account on `auto/router` with a card on
+ * file. an account without a card is never routed onto this:
+ * `resolveAutoTier` clamps it to the efficient default at every tier, exactly
+ * as before the router existed.
+ */
+export const ROUTER_LADDER: Ladder = {
+  minimal: "deepseek/deepseek-flash",
+  light: "openai/gpt-luna",
+  standard: "openai/gpt-sol",
+  deep: "anthropic/claude-opus",
+};
+
+/**
+ * the `repo.model` sentinel that turns the router on: `auto/<provider>` runs
+ * each piece of work on that provider's ladder, `auto/router` on the Pullfrog
+ * Router's. distinct from the two managed tiers above, which each name ONE
+ * model. a Pro feature — outside Pro the sentinel simply runs its ladder's
+ * `standard` rung, which is what `resolveDisplayAlias` resolves it to.
+ */
+export const AUTO_ROUTER = "auto/router";
+const AUTO_PREFIX = "auto/";
+
+/** the ladder an Auto sentinel routes on; undefined for a tier or a pin */
+export function autoLadder(slug: string | null | undefined): Ladder | undefined {
+  if (!slug || !slug.startsWith(AUTO_PREFIX) || isAutoTier(slug)) return undefined;
+  const target = slug.slice(AUTO_PREFIX.length);
+  return target === "router" ? ROUTER_LADDER : PROVIDER_LADDERS[target];
+}
+
+export function isAutoRouted(slug: string | null | undefined): boolean {
+  return autoLadder(slug) !== undefined;
+}
+
+/** any `auto/*` sentinel — a managed tier or the router — as opposed to a concrete pin */
+export function isAutoSlug(slug: string | null | undefined): boolean {
+  return isAutoTier(slug) || isAutoRouted(slug);
+}
+
+export function autoRoutedSlug(provider: string): string {
+  return `${AUTO_PREFIX}${provider}`;
+}
+
+/** the providers a BYOK repo can put on Auto — exactly the ones with a ladder */
+export const ROUTED_PROVIDERS: readonly { key: string; displayName: string }[] = Object.keys(
+  PROVIDER_LADDERS
+).map((key) => ({ key, displayName: providers[key as keyof typeof providers].displayName }));
+
+/**
+ * a ladder's distinct models in ascending order, each with the tiers it
+ * serves — the console's "what Auto runs on" list, where a model that covers
+ * two tiers is one row.
+ */
+export function ladderRungs(ladder: Ladder): { slug: string; tiers: RouterTier[] }[] {
+  const rungs: { slug: string; tiers: RouterTier[] }[] = [];
+  for (const tier of ROUTER_TIERS) {
+    const last = rungs[rungs.length - 1];
+    if (last?.slug === ladder[tier]) last.tiers.push(tier);
+    else rungs.push({ slug: ladder[tier], tiers: [tier] });
+  }
+  return rungs;
+}
+
+/**
+ * the model a routed run takes: the tier's rung on the ladder the configured
+ * Auto sentinel names. undefined for a pin — a pin opts out of routing.
+ */
+export function resolveRoutedModel(params: {
+  configured: string | null | undefined;
+  tier: RouterTier;
+}): string | undefined {
+  return autoLadder(params.configured)?.[params.tier];
+}
+
 /**
  * Router-resolvable — the set a card on file unlocks. custom (non-Auto) picks
  * are card-gated wholesale on the Router: the console locks the Custom tab
@@ -1416,9 +1570,10 @@ const MAX_FALLBACK_DEPTH = 10;
  * deprecated and internal-only aliases by filtering on `!a.fallback && !a.hidden`.
  */
 export function resolveDisplayAlias(slug: string): ModelAlias | undefined {
-  // auto-tier sentinels aren't real aliases — map them to their concrete
-  // target first so CLI/OpenRouter resolution and display labels all work.
-  let current = isAutoTier(slug) ? AUTO_TIER_TARGET[slug] : slug;
+  // auto sentinels aren't real aliases — map them to their concrete target
+  // first so CLI/OpenRouter resolution and display labels all work. a router
+  // sentinel stands for its ladder's standard rung wherever no tier is known.
+  let current = isAutoTier(slug) ? AUTO_TIER_TARGET[slug] : (autoLadder(slug)?.standard ?? slug);
   const visited = new Set<string>();
   for (let i = 0; i < MAX_FALLBACK_DEPTH; i++) {
     if (visited.has(current)) return undefined;
@@ -1498,6 +1653,13 @@ if (!defaultProxyAlias?.openRouterResolve) {
 }
 export const DEFAULT_PROXY_MODEL = defaultProxyAlias.openRouterResolve;
 const defaultProxyDisplayName = defaultProxyAlias.displayName;
+
+// every router ladder rung must be a live alias, for the same reason the proxy default is checked
+for (const [name, ladder] of Object.entries({ ...PROVIDER_LADDERS, router: ROUTER_LADDER })) {
+  for (const slug of Object.values(ladder)) {
+    if (!resolveDisplayAlias(slug)) throw new Error(`${name} ladder names unknown alias ${slug}`);
+  }
+}
 
 // ── OSS allowlist ──────────────────────────────────────────────────────────────
 

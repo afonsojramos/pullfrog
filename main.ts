@@ -151,6 +151,8 @@ export async function main(): Promise<MainResult> {
     octokit: initialOctokit,
     token: jobToken,
     runType: typeof resolvedPromptInput === "string" ? undefined : resolvedPromptInput.type,
+    routedTier:
+      typeof resolvedPromptInput === "string" ? undefined : resolvedPromptInput.routing?.tier,
   });
   timer.checkpoint("runContextData");
 

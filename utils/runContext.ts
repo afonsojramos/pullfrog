@@ -1,4 +1,5 @@
 import type { PushPermission, ShellPermission } from "../external.ts";
+import type { RouterTier } from "../models.ts";
 import { apiFetch } from "./apiFetch.ts";
 import type { RepoContext } from "./github.ts";
 
@@ -175,6 +176,9 @@ export async function fetchRunContext(params: {
   /** `payload.type` — lets the server apply this repo's per-trigger model
    * override, which it cannot derive from owner/repo alone. */
   runType?: string | undefined;
+  /** `payload.routing.tier` — the model router's tier, which run-context
+   * applies to the Router proxy mint the same way it applies `runType`. */
+  routedTier?: RouterTier | undefined;
 }): Promise<RunContext> {
   const timeoutMs = 30000;
   const controller = new AbortController();
@@ -188,9 +192,12 @@ export async function fetchRunContext(params: {
       headers["X-GitHub-OIDC-Token"] = params.oidcToken;
     }
 
-    const query = params.runType ? `?type=${encodeURIComponent(params.runType)}` : "";
+    const query = new URLSearchParams();
+    if (params.runType) query.set("type", params.runType);
+    if (params.routedTier) query.set("tier", params.routedTier);
+    const search = query.toString();
     const response = await apiFetch({
-      path: `/api/repo/${params.repoContext.owner}/${params.repoContext.name}/run-context${query}`,
+      path: `/api/repo/${params.repoContext.owner}/${params.repoContext.name}/run-context${search ? `?${search}` : ""}`,
       headers,
       signal: controller.signal,
     });
