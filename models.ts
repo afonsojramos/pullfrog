@@ -349,6 +349,12 @@ export const providers = {
       // $0.0405. there is no `~deepseek/*-pro-latest` pointer to track, so this
       // one has to be a dated pin; the `models-catalog` drift test is what
       // catches the next release.
+      // from 2026-09-14 DeepSeek serves every direct `deepseek-v4-pro` call with
+      // V4.1-Flash at Flash rates until V4.1-Pro ships. it is still the only Pro
+      // id the vendor lists, and the OpenRouter 0813 pin is third-party-hosted
+      // and unaffected — so no `fallback` to Flash, which would drag the Router
+      // route down with it. the OSS program dropped Pro from its menu instead;
+      // see `OSS_MODEL_ALLOWLIST`.
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
         resolve: "deepseek/deepseek-v4-pro",
@@ -357,30 +363,24 @@ export const providers = {
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro-0813",
         preferred: true,
       },
-      // DeepSeek upgrades the `deepseek-v4-flash` API model in place, so the
-      // direct `resolve` needs no version. OpenRouter instead forked the 0731
-      // release into its own id and left the April preview live under the
-      // unversioned one at a HIGHER price ($0.14/$0.28 vs $0.09/$0.18) — so the
-      // OpenRouter route can never use the bare id. it tracks the rolling
-      // `~deepseek/*-latest` pointer (rule 4), which follows the next in-place
-      // upgrade on its own rather than pinning a dated snapshot that goes stale
-      // every release. that pointer is NOT priced like 0731 — its listed rates
-      // run +40% on output and +57.5% on cache read, and it costs 12% more per
-      // run on authoritative spend ($0.0405 vs $0.0361). kept anyway: ~$45/yr
-      // buys auto-following the upgrade, and the listed gap overstates the real
-      // one because a rolling alias prices at its routing ceiling.
-      // 0731 gained a `low` rung and renamed the top to `max`, and that ladder
-      // now reads the same on BOTH routes — the in-place direct upgrade caught
-      // up to the fork. so `low`, not `high`, is position 0 either way, which is
-      // why the OSS effort floor in `main.ts` pins the `high` rung by name. Pro
-      // is the same shape via OpenRouter since 0813; only its direct route still
-      // starts at `high`.
+      // V4.1-Flash (2026-09-10) retired `deepseek-v4-flash`; DeepSeek's /models
+      // now lists the unversioned `deepseek-flash`, so the direct resolve is the
+      // rolling id at the same price. OpenRouter treats V4.1 as its own id
+      // (`deepseek/deepseek-v4.1-flash`, $0.15/$0.6, cache $0.003) and its
+      // `~deepseek/deepseek-v4-flash-latest` pointer still served 0731 on
+      // 2026-09-11, so this is a pinned id rather than the pointer and the next
+      // Flash release is a catalog edit (the bump cron flags it). this target is
+      // the funded OSS default: priced on the measured OSS token mix at x1.34
+      // the pointer's $0.0531/run on the DeepSeek-hosted endpoint — see
+      // wiki/oss-model-allowlist.md. the bare `deepseek-v4-flash` on OpenRouter
+      // is still the April preview, so that route can never use it. both routes
+      // publish `low, high, max`; the OSS effort floor pins `high` by name.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
-        resolve: "deepseek/deepseek-v4-flash",
+        resolve: "deepseek/deepseek-flash",
         effort: ["low", "high", "max"],
         openRouterEffort: ["low", "high", "max"],
-        openRouterResolve: "openrouter/~deepseek/deepseek-v4-flash-latest",
+        openRouterResolve: "openrouter/deepseek/deepseek-v4.1-flash",
       },
       // legacy aliases — deepseek retires these on 2026-07-24; transparently
       // upgrade existing users to the v4 family via the fallback chain.
@@ -1074,13 +1074,14 @@ export const providers = {
         effort: ["low", "high", "max"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro-0813",
       },
-      // rolling pointer, not the bare id — see `deepseek/deepseek-flash` for why
-      // OpenRouter's unversioned `deepseek-v4-flash` is the stale April preview.
+      // the V4.1 id, not the bare one — see `deepseek/deepseek-flash` for why
+      // OpenRouter's unversioned `deepseek-v4-flash` is the stale April preview
+      // and why the `~deepseek/*-latest` pointer is no longer the target.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
-        resolve: "openrouter/~deepseek/deepseek-v4-flash-latest",
+        resolve: "openrouter/deepseek/deepseek-v4.1-flash",
         effort: ["low", "high", "max"],
-        openRouterResolve: "openrouter/~deepseek/deepseek-v4-flash-latest",
+        openRouterResolve: "openrouter/deepseek/deepseek-v4.1-flash",
       },
       // legacy alias — deepseek retires this on 2026-07-24; transparently
       // upgrade existing users to the v4 family via the fallback chain.
@@ -1178,10 +1179,13 @@ export const providers = {
         resolve: "vercel/deepseek/deepseek-v4-pro-0813",
         effort: ["high", "xhigh"],
       },
+      // the gateway's bare `deepseek-v4-flash` is the April preview — the same
+      // fork trap as OpenRouter, with `deepseek-v4-flash-0731` beside it — so
+      // this entry sat on the preview until V4.1. the gateway publishes no
+      // effort ladder for the V4.1 id.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
-        resolve: "vercel/deepseek/deepseek-v4-flash",
-        effort: ["high", "xhigh"],
+        resolve: "vercel/deepseek/deepseek-v4.1-flash",
       },
       glm: {
         displayName: "GLM",
@@ -1679,6 +1683,12 @@ for (const [name, ladder] of Object.entries({ ...PROVIDER_LADDERS, router: ROUTE
  * over 2,203 real runs ($0.4782 vs $0.0362), almost entirely on its cache-read
  * RATE — 8.5x Flash's. it also fails 2.9% of runs against Flash's 0.0%. best
  * achievable was 10.9x (cheapest OpenRouter endpoint), so no routing fixes it.
+ *
+ * DeepSeek Pro was funded and then dropped on 2026-09-11: 88% of OSS spend at
+ * $0.3117/run authoritative over 4,795 runs (30d), against Flash's $0.0531 —
+ * and DeepSeek's V4.1-Flash release says it beats V4-Pro and phases Pro out.
+ * a subsidised Pro pick now runs V4.1 Flash; BYOK and Router Pro are untouched.
+ * re-add it only after V4.1-Pro ships AND is priced on a real run.
  * see wiki/oss-model-allowlist.md.
  */
 // MiniMax has no direct-vendor block (it ships only through the routers), so
@@ -1697,7 +1707,6 @@ for (const [name, ladder] of Object.entries({ ...PROVIDER_LADDERS, router: ROUTE
 // stopped defaulting to, for two allowlist edits running.
 export const OSS_MODEL_ALLOWLIST: readonly string[] = [
   "deepseek/deepseek-flash",
-  "deepseek/deepseek-pro",
   "openai/gpt-luna",
   "openrouter/minimax-m2.5",
 ];

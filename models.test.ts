@@ -103,7 +103,7 @@ describe("resolveCliModel", () => {
 
   it("walks fallback chain for deprecated deepseek aliases", () => {
     expect(resolveCliModel("deepseek/deepseek-reasoner")).toBe("deepseek/deepseek-v4-pro");
-    expect(resolveCliModel("deepseek/deepseek-chat")).toBe("deepseek/deepseek-v4-flash");
+    expect(resolveCliModel("deepseek/deepseek-chat")).toBe("deepseek/deepseek-flash");
   });
 
   it("walks fallback chain for deprecated openai codex aliases", () => {
@@ -154,10 +154,10 @@ describe("resolveOpenRouterModel", () => {
       "openrouter/deepseek/deepseek-v4-pro-0813"
     );
     expect(resolveOpenRouterModel("deepseek/deepseek-chat")).toBe(
-      "openrouter/~deepseek/deepseek-v4-flash-latest"
+      "openrouter/deepseek/deepseek-v4.1-flash"
     );
     expect(resolveOpenRouterModel("openrouter/deepseek-chat")).toBe(
-      "openrouter/~deepseek/deepseek-v4-flash-latest"
+      "openrouter/deepseek/deepseek-v4.1-flash"
     );
   });
 
