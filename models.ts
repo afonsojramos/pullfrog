@@ -492,15 +492,28 @@ export const providers = {
     displayName: "Meta",
     envVars: ["META_MODEL_API_KEY"],
     models: {
-      // the Standard tier. the `-contributor` id is priced for training-data
-      // collection and is deliberately on no route — it is the variant Go gates
-      // behind DataPolicyError. no `subagentModel`: Meta has no cheaper sibling.
+      // the Standard tier. no `subagentModel`: the contributor tier below is
+      // the same model, not a cheaper sibling.
       "muse-spark": {
         displayName: "Muse Spark",
         resolve: "meta/muse-spark-1.3",
         effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/meta/muse-spark-1.3",
         preferred: true,
+      },
+      // the Contributor tier: the same model at $0.10 / $0.20 (cache read
+      // $0.002) because Meta trains on the prompts and completions. an opt-in
+      // pick on the OSS menu (public code, headless runs), never the default.
+      // OpenRouter only serves it when the account allows paid-model training,
+      // so the runtime opens data collection for this id alone — see
+      // `openRouterProvider` in opencodeShared.ts.
+      "muse-spark-contributor": {
+        displayName: "Muse Spark Contributor",
+        description: "Meta trains on prompts and completions",
+        resolve: "meta/muse-spark-1.3-contributor",
+        effort: ["minimal", "low", "medium", "high", "xhigh"],
+        openRouterEffort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/meta/muse-spark-1.3-contributor",
       },
     },
   }),
@@ -1155,6 +1168,13 @@ export const providers = {
         effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/meta/muse-spark-1.3",
       },
+      "muse-spark-contributor": {
+        displayName: "Muse Spark Contributor",
+        description: "Meta trains on prompts and completions",
+        resolve: "openrouter/meta/muse-spark-1.3-contributor",
+        effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/meta/muse-spark-1.3-contributor",
+      },
     },
   }),
   vercel: provider({
@@ -1756,6 +1776,10 @@ export const OSS_MODEL_ALLOWLIST: readonly string[] = [
   "deepseek/deepseek-flash",
   "openai/gpt-luna",
   "openrouter/minimax-m2.5",
+  // opt-in: 0.86x the old default on the measured mix, and Meta trains on the
+  // traffic — fine for public code on headless runs, the human decided
+  // 2026-09-11. unmeasured on a real run; not the default until it is.
+  "meta/muse-spark-contributor",
 ];
 
 /** the pick the console badges. DERIVED from the efficient tier rather than

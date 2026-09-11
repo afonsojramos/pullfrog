@@ -96,9 +96,10 @@ import {
   azureProvider,
   buildReviewerAgentConfig,
   installOpencodeCli,
-  kimiOpenRouterProviderOverrides,
   type OpenCodeConfig,
   openAICompatibleProvider,
+  openRouterDataCollection,
+  openRouterProvider,
   providerGatewayOverride,
 } from "./opencodeShared.ts";
 import { buildReflectionPrompt, runPostRunRetryLoop } from "./postRun.ts";
@@ -147,13 +148,12 @@ function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): s
       log.info(`» subagent models: reviewfrog=${reviewerModel}`);
       return cfg;
     })(),
-    // kimi pinned away from Enforcer-less openrouter providers (siliconflow /
-    // together) that drop optional tool-call params — per-model on the
-    // openrouter route, so other models are unaffected. this is routing, not
-    // reasoning: every model's effort now rides the per-prompt `variant`.
-    // see opencodeShared.ts.
+    // openrouter routing, not reasoning (every model's effort rides the
+    // per-prompt `variant`): the run's data-collection policy, kimi pinned
+    // away from Enforcer-less providers, the Muse Spark contributor tier
+    // opened to training hosts. see opencodeShared.ts.
     provider: {
-      openrouter: { models: kimiOpenRouterProviderOverrides() },
+      openrouter: openRouterProvider(openRouterDataCollection(ctx)),
       ...openAICompatibleProvider(model),
       ...azureProvider(model),
       ...providerGatewayOverride(model),

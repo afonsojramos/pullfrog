@@ -189,30 +189,69 @@ export function azureProvider(model: string | undefined): Record<string, AzurePr
 // roster shifts. see wiki/review-approval.md.
 const KIMI_ENFORCERLESS_PROVIDERS = ["siliconflow", "together"];
 
+export type OpenRouterDataCollection = "allow" | "deny";
+
 /**
- * Build the `provider.openrouter.models[id].options` map that pins every Kimi
- * K2 OpenRouter alias away from the Enforcer-less providers via OpenRouter's
- * `provider: {ignore:[...]}` routing directive. Sourced from the model registry
- * so a Kimi alias/route change in `action/models.ts` flows through automatically.
+ * OpenRouter's request-level `provider.data_collection` decides whether hosts
+ * that retain or train on prompts may serve a run. The account-wide privacy
+ * setting is only a ceiling a request can tighten, so the policy rides on the
+ * run instead: OSS-funded runs `allow` (public code on headless runs — and the
+ * cheapest V4.1 Flash host, DeepSeek's own, is a training host), Router runs
+ * `deny` (a customer's private code never reaches one; every catalog target
+ * was still served under `deny` on 2026-09-11), and a BYOK OpenRouter key gets
+ * no preference — the customer's own account decides. see wiki/muse-spark.md.
+ */
+export function openRouterDataCollection(ctx: {
+  payload: { proxyModel?: string | undefined };
+  toolState: { oss?: boolean | undefined };
+}): OpenRouterDataCollection | undefined {
+  if (!ctx.payload.proxyModel) return undefined;
+  return ctx.toolState.oss ? "allow" : "deny";
+}
+
+function dataCollectionPreference(policy: OpenRouterDataCollection | undefined): {
+  data_collection?: OpenRouterDataCollection;
+} {
+  if (!policy) return {};
+  return { data_collection: policy };
+}
+
+/**
+ * The `provider.openrouter` config block: the run's data policy as `extraBody`
+ * (the SDK merges it into every request), plus the per-model `options` that
+ * carry OpenRouter's `provider` routing object where a model needs its own —
+ * Kimi K2 pinned away from the Enforcer-less providers, and the Muse Spark
+ * contributor tier opened to data collection whatever the run's policy, since
+ * Meta training on the traffic is what that tier is. Sourced from the model
+ * registry so an alias/route change in `action/models.ts` flows through.
  *
  * Wiring: the per-model `options` object merges into the request options
  * (opencode `session/llm/request.ts` `mergeOptions(base, model.options)`),
  * gets wrapped under `providerOptions.openrouter` (`provider/transform.ts`
  * `sdkKey("@openrouter/ai-sdk-provider") === "openrouter"`), and the OpenRouter
- * AI-SDK provider spreads everything under `providerOptions.openrouter` straight
- * into the request body (`@openrouter/ai-sdk-provider` `doStream`/`doGenerate`),
- * so `provider` lands as the top-level routing object OpenRouter expects.
+ * AI-SDK provider spreads everything under `providerOptions.openrouter` into the
+ * request body LAST — after `extraBody` — so a per-model `provider` object
+ * replaces the run-level one wholesale. that is why the Kimi entry restates
+ * the run's `data_collection` beside its `ignore` list.
  */
-export function kimiOpenRouterProviderOverrides(): Record<string, { options: object }> {
-  return Object.fromEntries(
-    modelAliases
-      .map((a) => a.openRouterResolve)
-      .filter((r): r is string => r?.includes("kimi") ?? false)
-      .map((r) => [
-        r.replace(/^openrouter\//, ""),
-        { options: { provider: { ignore: KIMI_ENFORCERLESS_PROVIDERS } } },
-      ])
-  );
+export function openRouterProvider(policy: OpenRouterDataCollection | undefined): {
+  options?: { extraBody: { provider: { data_collection: OpenRouterDataCollection } } };
+  models: Record<string, { options: { provider: object } }>;
+} {
+  const models: Record<string, { options: { provider: object } }> = {};
+  for (const alias of modelAliases) {
+    const id = alias.openRouterResolve?.replace(/^openrouter\//, "");
+    if (!id) continue;
+    if (id.endsWith("-contributor")) {
+      models[id] = { options: { provider: { data_collection: "allow" } } };
+    }
+    if (id.includes("kimi")) {
+      const provider = { ...dataCollectionPreference(policy), ignore: KIMI_ENFORCERLESS_PROVIDERS };
+      models[id] = { options: { provider } };
+    }
+  }
+  if (!policy) return { models };
+  return { options: { extraBody: { provider: { data_collection: policy } } }, models };
 }
 
 /**
