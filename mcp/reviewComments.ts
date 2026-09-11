@@ -894,11 +894,11 @@ export function GetReviewCommentsTool(ctx: ToolContext) {
         instructions:
           `the file at commentsPath contains ${threadBlocks.length} review threads with full conversation history. ` +
           `comments marked with * are from the target review (${params.review_id}); any other thread is open feedback ` +
-          `on this PR that is also yours to address, including comments that landed after this run started. ` +
+          `on this PR, including comments that landed after this run started. Being returned does not authorize a code change; follow the task's scope and each thread's latest request. ` +
           `the TOC shows each thread's file:line and the line number where it appears in the file. ` +
           `to read a specific thread, use: grep -A 50 "^## <file:line>" ${commentsPath} ` +
           `(replace <file:line> with the path from the TOC, e.g. "^## action/utils/foo.ts:42"). ` +
-          `address each thread in order, working through one file at a time.`,
+          `read each full thread before deciding whether it calls for a reply or a code change.`,
       };
     }),
   });

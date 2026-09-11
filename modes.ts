@@ -138,26 +138,24 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 
 2. Checkout the PR branch via \`${t("checkout_pr")}\`.
 
-3. Fetch review comments via \`${t("get_review_comments")}\`.
+3. Fetch review comments via \`${t("get_review_comments")}\` and read the full conversation in each relevant thread.
 
-4. For each comment:
-   - understand the feedback
+4. For each thread:
+   - **check intent first**: questions, explanations, and disagreement call for a reply, not a code change. Change code only when explicitly requested. Automatic review feedback on Pullfrog-authored PRs (\`address_scope: all\`) remains actionable without a separate request; later replies can narrow or withdraw that permission.
+   - under \`address_scope: mentions\`, unmentioned threads are context only unless the user's review-body request explicitly includes them
    - **verify the finding yourself** against the actual code before deciding whether to apply — every comment (human or agent) is a hypothesis, not a directive. agent reviewers especially are fallible.
-   - you are searching for a solution that is **complete, minimal, and elegant** — you may need to think hard to find it. do not over-engineer, do not be over-defensive, **do not write AI slop**. reviewers bias toward *recommending additions*, and that bias has a recognizable slop texture: defensive checks for impossible cases, extra abstractions used once, comments restating obvious code, tests asserting tautologies, "just-in-case" guards, error handlers for cases the type system already rules out. reject those. evaluate whether applying the finding would leave the code more **sound, correct, AND elegant**; two-out-of-three is a signal to look harder for a fix that gets all three. if a request would add bloat — ceremony without commensurate correctness benefit — push back in your reply rather than mechanically applying it.
-   - if the request stands, make the code change using your native tools; otherwise reply explaining why
+   - keep requested changes **sound, minimal, and elegant**. Reject defensive checks for impossible cases, single-use abstractions, redundant comments, and tautological tests rather than mechanically applying reviewer suggestions.
+   - if intent permits a code change and the finding stands, implement it using your native tools; otherwise reply without editing
    - record what was done (or why nothing was done)
 
 5. Quality check:
-   - re-call \`${t("get_review_comments")}\` with \`fresh: true\` before committing: reviewers keep commenting while you work, and any thread it now returns that you have not addressed is in scope for this run.
-   - test changes, then review the diff before committing — verify only intended changes are present, no debug artifacts remain, no fix turned out to be bloat in context (revert any that did), and the changes are clean enough that a senior engineer would approve without hesitation
-   - ${commitStep}
+   - re-call \`${t("get_review_comments")}\` with \`fresh: true\` before finishing, even when only replying. Apply the same scope and intent checks to new comments; respect requests to stop or change direction before committing.
+   - if code changed, test and review the diff, remove unintended changes or bloat, then ${commitStep}
 
-6. Finalize. Reply + resolve are paired write actions: do BOTH or NEITHER for each thread.
-   - ${finalizeStep} (same push/prepush guidance as Build mode in *SYSTEM*)
-   - **if the push/commit fails**, call \`${t("report_progress")}\` with the exact error and STOP — do NOT reply or resolve any thread until the fix is live on the remote. Resolving a thread without the fix landing misleads the reviewer.
-   - **once the fix is live on the remote**, for each thread you acted on:
-     - reply ONCE via \`${t("reply_to_review_comment")}\`. The \`comment_id\` parameter takes the root comment's numeric \`id=\` (from the first \`comment author=...\` tag in the \`${t("get_review_comments")}\` output) — NOT the \`thread=\` value; that's a separate GraphQL ID used by resolve. The runtime dedupes identical bodies within a session.
-     - **immediately** call \`${t("resolve_review_thread")}\` with that thread's \`thread=\` value as \`thread_id\`. Resolve every thread where you (a) made the requested code change in full — partial fixes leave the thread open — OR (b) replied with a substantive answer the user explicitly asked for. Do NOT resolve threads where you pushed back on the request and the disagreement is unresolved; leave those open for the human to mediate.
+6. Finalize:
+   - **only if code changed**, ${finalizeStep} (same push/prepush guidance as Build mode in *SYSTEM*). If push/commit fails, report the exact error and STOP without claiming a fix or resolving its threads.
+   - reply ONCE per relevant thread via \`${t("reply_to_review_comment")}\`, including when no code changed. The \`comment_id\` is the root comment's numeric \`id=\`, NOT the \`thread=\` value from \`${t("get_review_comments")}\`. The runtime dedupes identical bodies within a session.
+   - resolve a thread via \`${t("resolve_review_thread")}\` (using \`thread=\` as \`thread_id\`) only after its requested fix is fully on the remote, or the user explicitly asks to resolve it. Leave discussion-only replies, partial fixes, and disagreements open.
    - call \`${t("report_progress")}\` with a brief summary. If your last \`${t("get_review_comments")}\` turned up threads you did not address, name them there — a review arriving this late is suppressed as a duplicate and nothing else will pick it up.`,
     },
     // Review and IncrementalReview route the minimum reviewfrog specialists
