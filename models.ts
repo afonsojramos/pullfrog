@@ -311,26 +311,26 @@ export const providers = {
     models: {
       grok: {
         displayName: "Grok",
-        resolve: "xai/grok-4.5",
-        effort: ["low", "medium", "high"],
-        openRouterResolve: "openrouter/x-ai/grok-4.5",
+        resolve: "xai/grok-4.6",
+        effort: ["low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/x-ai/grok-4.6",
         preferred: true,
       },
       // legacy aliases — xAI retired the entire fast/code-fast line on
       // 2026-05-15 (https://docs.x.ai/developers/migration/may-15-deprecation)
       // and now redirects every deprecated text-model slug to grok-4.3 at
       // standard pricing. fall back to the live `xai/grok` so the alias
-      // chain resolves to grok-4.5 for both direct-key and OpenRouter users.
+      // chain resolves to grok-4.6 for both direct-key and OpenRouter users.
       "grok-fast": {
         displayName: "Grok Fast",
         resolve: "xai/grok-4-1-fast",
-        openRouterResolve: "openrouter/x-ai/grok-4.5",
+        openRouterResolve: "openrouter/x-ai/grok-4.6",
         fallback: "xai/grok",
       },
       "grok-code-fast": {
         displayName: "Grok Code Fast",
         resolve: "xai/grok-code-fast-1",
-        openRouterResolve: "openrouter/x-ai/grok-4.5",
+        openRouterResolve: "openrouter/x-ai/grok-4.6",
         fallback: "xai/grok",
       },
     },
@@ -1062,9 +1062,9 @@ export const providers = {
       },
       grok: {
         displayName: "Grok",
-        resolve: "openrouter/x-ai/grok-4.5",
-        effort: ["low", "medium", "high"],
-        openRouterResolve: "openrouter/x-ai/grok-4.5",
+        resolve: "openrouter/x-ai/grok-4.6",
+        effort: ["low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/x-ai/grok-4.6",
       },
       // dated pin, not the bare id — see `deepseek/deepseek-pro` for why
       // OpenRouter's unversioned `deepseek-v4-pro` is the stale April preview.
