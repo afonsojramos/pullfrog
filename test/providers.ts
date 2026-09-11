@@ -92,6 +92,14 @@ export const providers: ProviderEntry[] = [
     noCiCredential: true,
   },
   {
+    // no META_MODEL_API_KEY in CI yet. `openrouter/muse-spark` and
+    // `vercel/muse-spark` keep the model itself under test meanwhile.
+    name: "meta",
+    flagship: "meta/muse-spark",
+    agent: "opencode",
+    noCiCredential: true,
+  },
+  {
     // one gateway key fronts every vendor; sonnet is the standard tier there too.
     name: "vercel",
     flagship: "vercel/claude-sonnet",

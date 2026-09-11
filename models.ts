@@ -483,6 +483,27 @@ export const providers = {
       },
     },
   }),
+  // Meta Model API — the direct route to Muse Spark. a registry entry, like
+  // kimi-for-coding: models.dev carries `meta` (`https://api.meta.ai/v1`, npm
+  // `@ai-sdk/openai`) and opencode 1.18.29 enables it from a bare
+  // META_MODEL_API_KEY — all five ids list in `opencode models`, and a bogus key
+  // reaches Meta's own auth check (`invalid_api_key`). see wiki/muse-spark.md.
+  meta: provider({
+    displayName: "Meta",
+    envVars: ["META_MODEL_API_KEY"],
+    models: {
+      // the Standard tier. the `-contributor` id is priced for training-data
+      // collection and is deliberately on no route — it is the variant Go gates
+      // behind DataPolicyError. no `subagentModel`: Meta has no cheaper sibling.
+      "muse-spark": {
+        displayName: "Muse Spark",
+        resolve: "meta/muse-spark-1.3",
+        effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/meta/muse-spark-1.3",
+        preferred: true,
+      },
+    },
+  }),
   opencode: provider({
     displayName: "OpenCode Zen",
     envVars: ["OPENCODE_API_KEY"],
@@ -682,6 +703,17 @@ export const providers = {
         resolve: "opencode/gpt-5-nano",
         effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/openai/gpt-5-nano",
+      },
+      // Zen's PAID Muse Spark, priced like Meta's own Standard tier. not the
+      // `-contributor-free` id beside it, which is the data-collection variant
+      // Go refuses with DataPolicyError. unverified through the harness on
+      // 2026-09-11: the workspace was out of balance and a claude-sonnet-5
+      // control failed identically. see wiki/muse-spark.md.
+      "muse-spark": {
+        displayName: "Muse Spark",
+        resolve: "opencode/muse-spark-1.3",
+        effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/meta/muse-spark-1.3",
       },
       // Zen's live free MiMo, and the second free row in a menu that big-pickle
       // was alone in since `mimo-v2-pro-free` lost its model.
@@ -1113,6 +1145,16 @@ export const providers = {
         resolve: "openrouter/minimax/minimax-m3",
         openRouterResolve: "openrouter/minimax/minimax-m3",
       },
+      // OpenRouter gates Meta models on an ACCOUNT-level 18+ confirmation
+      // (openrouter.ai/settings/preferences). Pullfrog's account has it, so the
+      // Router path runs; a BYOK OpenRouter key without it refuses with that
+      // link before the request reaches Meta. see wiki/muse-spark.md.
+      "muse-spark": {
+        displayName: "Muse Spark",
+        resolve: "openrouter/meta/muse-spark-1.3",
+        effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        openRouterResolve: "openrouter/meta/muse-spark-1.3",
+      },
     },
   }),
   vercel: provider({
@@ -1196,6 +1238,11 @@ export const providers = {
         displayName: "Kimi K3",
         resolve: "vercel/moonshotai/kimi-k3",
         effort: ["low", "high", "max"],
+      },
+      // the gateway publishes no effort ladder for this id.
+      "muse-spark": {
+        displayName: "Muse Spark",
+        resolve: "vercel/meta/muse-spark-1.3",
       },
     },
   }),
