@@ -37,7 +37,7 @@ import { performance } from "node:perf_hooks";
 import * as core from "@actions/core";
 import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
 import { pullfrogMcpName } from "../external.ts";
-import { getModelProvider, stripProviderPrefix } from "../models.ts";
+import { getModelProvider, getProviderGatewayUrl, stripProviderPrefix } from "../models.ts";
 import { AGENT_ACTIVITY_TIMEOUT_MS, getIdleMs, markActivity } from "../utils/activity.ts";
 import { log } from "../utils/cli.ts";
 import { installCodexHome } from "../utils/codexHome.ts";
@@ -409,6 +409,31 @@ function warnIfNativeEditsUnavailable(ctx: AgentRunContext): void {
 }
 
 /**
+ * A customer gateway, declared as a provider of its own rather than the
+ * built-in `openai` one re-pointed. codex 0.153.4 never reads `OPENAI_BASE_URL`,
+ * and its `openai_base_url` key keeps `supports_websockets = true`, which config
+ * cannot turn off on a built-in id (`merge_configured_model_providers` only
+ * `or_insert`s). A gateway refusing the Responses WebSocket upgrade — nearly all
+ * of them — then costs five reconnects the harness reports as a failed run. A
+ * declared provider defaults it to false and goes straight to HTTPS (measured
+ * 2026-09-11).
+ */
+const CODEX_GATEWAY_PROVIDER = "pullfrog-gateway";
+
+function gatewayProvider(gatewayUrl: string | undefined): string[] {
+  if (!gatewayUrl) return [];
+  return [
+    `[model_providers.${CODEX_GATEWAY_PROVIDER}]`,
+    'name = "OpenAI gateway"',
+    `base_url = ${JSON.stringify(gatewayUrl)}`,
+    'wire_api = "responses"',
+    // where the harness puts the run's OPENAI_API_KEY
+    'env_key = "CODEX_API_KEY"',
+    "",
+  ];
+}
+
+/**
  * Write `$CODEX_HOME/config.toml`. `auth.json` already sits in this directory
  * (installCodexHome), so codex discovers both from the one env var.
  *
@@ -423,6 +448,7 @@ function writeCodexConfig(params: {
   codexHome: string;
   model: string | undefined;
   effortRung: string | undefined;
+  gatewayUrl: string | undefined;
 }): void {
   const shellEnabled = params.ctx.payload.shell === "enabled";
   const sandboxMode = params.ctx.payload.push === "disabled" ? "read-only" : "workspace-write";
@@ -440,6 +466,7 @@ function writeCodexConfig(params: {
     'web_search = "live"',
     ...(params.model ? [`model = ${JSON.stringify(params.model)}`] : []),
     ...(params.effortRung ? [`model_reasoning_effort = ${JSON.stringify(params.effortRung)}`] : []),
+    ...(params.gatewayUrl ? [`model_provider = ${JSON.stringify(CODEX_GATEWAY_PROVIDER)}`] : []),
     "",
     "[features]",
     tomlBool(CODEX_DISABLED_FEATURES, false),
@@ -469,6 +496,7 @@ function writeCodexConfig(params: {
     "tool_timeout_sec = 660",
     "",
     ...repoMcpApprovals(repoDir),
+    ...gatewayProvider(params.gatewayUrl),
     // UNTRUSTED, deliberately, and this one line is the whole config-precedence
     // boundary. Codex loads `<repo>/.codex/config.toml` as a layer that
     // OUTRANKS ours (project 25 vs user 20), and its denylist strips none of
@@ -850,6 +878,10 @@ export const codex = agent({
       codexHome,
       model: resolveCodexModel(ctx),
       effortRung: effort.rung && CODEX_EFFORTS.includes(effort.rung) ? effort.rung : undefined,
+      // keyed off OpenAI, not the resolved model: codex serves nothing else, an
+      // auto-selected run has no model, and a ChatGPT-subscription token is
+      // valid only at ChatGPT's own backend
+      gatewayUrl: codexHomeAuth ? undefined : getProviderGatewayUrl("openai/"),
     });
 
     if (codexHomeAuth) {

@@ -1665,8 +1665,8 @@ export const OPENAI_COMPATIBLE_MAX_OUTPUT_ENV = "OPENAI_COMPATIBLE_MAX_OUTPUT";
  *
  * models.dev declares no base-URL env var for any catalogued provider (2 of 213
  * do, and neither is one of these), so nothing reads these names on its own —
- * `providerGatewayOverride` is what makes them mean anything to opencode, and
- * claude-code reads ANTHROPIC_BASE_URL itself.
+ * `providerGatewayOverride` is what makes them mean anything to opencode and
+ * `gatewayProvider` to codex, while claude-code reads ANTHROPIC_BASE_URL itself.
  *
  * Adding a provider that ALREADY has a block in `buildSecurityConfig` needs a
  * merge, not an entry here: that spread replaces the whole key, so listing

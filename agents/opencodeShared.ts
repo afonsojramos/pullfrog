@@ -106,6 +106,17 @@ export function openAICompatibleProvider(
 }
 
 /**
+ * What each opencode SDK joins onto `options.baseURL`, reconciled against the
+ * env var's own convention. `@ai-sdk/anthropic` posts to `${baseURL}/messages`,
+ * but `ANTHROPIC_BASE_URL` is a bare host — claude-code and Anthropic's SDKs
+ * append `/v1/messages` themselves — so the `/v1` has to be restored here or
+ * the gateway answers 404 (measured 2026-09-11). `@ai-sdk/openai` posts to
+ * `${baseURL}/responses`, which the `/v1`-inclusive `OPENAI_BASE_URL`
+ * convention already satisfies.
+ */
+const OPENCODE_GATEWAY_PATH: Record<string, string> = { anthropic: "/v1" };
+
+/**
  * Customer-gateway block for OPENCODE_CONFIG_CONTENT. opencode resolves a
  * provider's endpoint as `options.baseURL ?? model.api.url` (`getSDK`), and
  * models.dev declares no base-URL env var for any provider we catalog — so a
@@ -118,14 +129,16 @@ export function openAICompatibleProvider(
  * `anthropic/*` normally never reaches here — `resolveAgent` routes it to
  * claude-code, which reads ANTHROPIC_BASE_URL natively — but keying off the
  * resolved specifier rather than the harness means it still holds on the paths
- * that do send a Claude model through opencode.
+ * that do send a Claude model through opencode (`PULLFROG_AGENT=opencode`).
  */
 export function providerGatewayOverride(
   model: string | undefined
 ): Record<string, { options: { baseURL: string } }> {
-  const baseURL = getProviderGatewayUrl(model);
-  if (!model || !baseURL) return {};
-  return { [model.slice(0, model.indexOf("/"))]: { options: { baseURL } } };
+  const gatewayUrl = getProviderGatewayUrl(model);
+  if (!model || !gatewayUrl) return {};
+  const provider = model.slice(0, model.indexOf("/"));
+  const baseURL = `${gatewayUrl}${OPENCODE_GATEWAY_PATH[provider] ?? ""}`;
+  return { [provider]: { options: { baseURL } } };
 }
 
 /**
