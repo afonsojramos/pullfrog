@@ -12,6 +12,7 @@ import {
   AZURE_PROVIDER,
   AZURE_USE_CHAT_COMPLETIONS_ENV,
   getOpenCodeEnvVars,
+  getProviderGatewayUrl,
   modelAliases,
   OPENAI_COMPATIBLE_API_KEY_ENV,
   OPENAI_COMPATIBLE_BASE_URL_ENV,
@@ -102,6 +103,29 @@ export function openAICompatibleProvider(
       models: { [modelId]: { name: modelId, limit: openAICompatibleLimit() } },
     },
   };
+}
+
+/**
+ * Customer-gateway block for OPENCODE_CONFIG_CONTENT. opencode resolves a
+ * provider's endpoint as `options.baseURL ?? model.api.url` (`getSDK`), and
+ * models.dev declares no base-URL env var for any provider we catalog — so a
+ * config override is the ONLY lever that re-points one. Unlike
+ * `openAICompatibleProvider` this declares no `npm` and no models: the native
+ * provider and its catalog metadata (including token limits) stay exactly as
+ * they are, and only the host changes. `{}` when unset so the caller can spread
+ * it unconditionally.
+ *
+ * `anthropic/*` normally never reaches here — `resolveAgent` routes it to
+ * claude-code, which reads ANTHROPIC_BASE_URL natively — but keying off the
+ * resolved specifier rather than the harness means it still holds on the paths
+ * that do send a Claude model through opencode.
+ */
+export function providerGatewayOverride(
+  model: string | undefined
+): Record<string, { options: { baseURL: string } }> {
+  const baseURL = getProviderGatewayUrl(model);
+  if (!model || !baseURL) return {};
+  return { [model.slice(0, model.indexOf("/"))]: { options: { baseURL } } };
 }
 
 /**

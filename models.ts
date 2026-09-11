@@ -1652,6 +1652,41 @@ export const OPENAI_COMPATIBLE_CONTEXT_ENV = "OPENAI_COMPATIBLE_CONTEXT";
  */
 export const OPENAI_COMPATIBLE_MAX_OUTPUT_ENV = "OPENAI_COMPATIBLE_MAX_OUTPUT";
 
+// ── provider gateways ──────────────────────────────────────────────────────────
+
+/**
+ * Providers whose endpoint can be re-pointed at a customer gateway, and the env
+ * var that does it. Deliberately a short explicit map rather than a derived
+ * `<PROVIDER>_BASE_URL` rule: only a provider we have confirmed reachable
+ * through a proxy belongs here, and three of them must never be.
+ * `openai-compatible` already owns its endpoint via OPENAI_COMPATIBLE_BASE_URL,
+ * `azure` derives one from AZURE_RESOURCE_NAME, and bedrock/vertex authenticate
+ * against a cloud SDK rather than a URL.
+ *
+ * models.dev declares no base-URL env var for any catalogued provider (2 of 213
+ * do, and neither is one of these), so nothing reads these names on its own —
+ * `providerGatewayOverride` is what makes them mean anything to opencode, and
+ * claude-code reads ANTHROPIC_BASE_URL itself.
+ *
+ * Adding a provider that ALREADY has a block in `buildSecurityConfig` needs a
+ * merge, not an entry here: that spread replaces the whole key, so listing
+ * `openrouter` would silently drop `kimiOpenRouterProviderOverrides()`.
+ */
+export const PROVIDER_GATEWAY_URL_ENV: Record<string, string> = {
+  anthropic: "ANTHROPIC_BASE_URL",
+  openai: "OPENAI_BASE_URL",
+};
+
+/** the customer gateway a model's provider is re-pointed at, if any. */
+export function getProviderGatewayUrl(specifier: string | undefined): string | undefined {
+  const slashIndex = specifier?.indexOf("/") ?? -1;
+  if (!specifier || slashIndex <= 0) return undefined;
+  const envVar = PROVIDER_GATEWAY_URL_ENV[specifier.slice(0, slashIndex)];
+  if (!envVar) return undefined;
+  // a trailing slash doubles up against the path opencode joins onto it
+  return process.env[envVar]?.trim().replace(/\/$/, "") || undefined;
+}
+
 /**
  * the Bedrock model ID passed to claude-code or opencode is whatever the
  * user set in `BEDROCK_MODEL_ID` — Pullfrog never resolves or upgrades it.

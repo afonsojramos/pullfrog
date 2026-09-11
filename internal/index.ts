@@ -49,6 +49,7 @@ export {
   OSS_RECOMMENDED_MODEL,
   offeredRungs,
   ossFundedModelNames,
+  PROVIDER_GATEWAY_URL_ENV,
   parseEffortPosition,
   parseModel,
   providers,

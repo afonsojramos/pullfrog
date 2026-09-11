@@ -99,6 +99,7 @@ import {
   kimiOpenRouterProviderOverrides,
   type OpenCodeConfig,
   openAICompatibleProvider,
+  providerGatewayOverride,
 } from "./opencodeShared.ts";
 import { buildReflectionPrompt, runPostRunRetryLoop } from "./postRun.ts";
 import { REVIEWER_AGENT_NAME } from "./reviewer.ts";
@@ -155,6 +156,7 @@ function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): s
       openrouter: { models: kimiOpenRouterProviderOverrides() },
       ...openAICompatibleProvider(model),
       ...azureProvider(model),
+      ...providerGatewayOverride(model),
     },
   };
 
