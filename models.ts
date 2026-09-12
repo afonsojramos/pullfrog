@@ -316,6 +316,14 @@ export const providers = {
         openRouterResolve: "openrouter/x-ai/grok-4.6",
         preferred: true,
       },
+      // the Smart ladder's cheap rung: 1.25/2.5 against 4.6's 2/6, and a 0.2
+      // cache read against 0.5 — the only live xAI model a rung can save on.
+      "grok-4.3": {
+        displayName: "Grok 4.3",
+        resolve: "xai/grok-4.3",
+        effort: ["none", "low", "medium", "high"],
+        openRouterResolve: "openrouter/x-ai/grok-4.3",
+      },
       // legacy aliases — xAI retired the entire fast/code-fast line on
       // 2026-05-15 (https://docs.x.ai/developers/migration/may-15-deprecation)
       // and now redirects every deprecated text-model slug to grok-4.3 at
@@ -1509,8 +1517,8 @@ const PROVIDER_LADDERS: Record<string, Ladder> = {
     deep: "deepseek/deepseek-pro",
   },
   xai: {
-    minimal: "xai/grok-fast",
-    light: "xai/grok-fast",
+    minimal: "xai/grok-4.3",
+    light: "xai/grok-4.3",
     standard: "xai/grok",
     deep: "xai/grok",
   },
@@ -1725,11 +1733,17 @@ if (!defaultProxyAlias?.openRouterResolve) {
 export const DEFAULT_PROXY_MODEL = defaultProxyAlias.openRouterResolve;
 const defaultProxyDisplayName = defaultProxyAlias.displayName;
 
-// every router ladder rung must be a live alias, for the same reason the proxy default is checked
+// every router ladder rung must be a live alias, for the same reason the proxy default is checked —
+// and the rungs must reach two models, or the ladder routes nothing (a cheap rung whose alias
+// falls back to the top rung passed the first check while every tier ran the same model)
 for (const [name, ladder] of Object.entries({ ...PROVIDER_LADDERS, router: ROUTER_LADDER })) {
+  const terminal = new Set<string>();
   for (const slug of Object.values(ladder)) {
-    if (!resolveDisplayAlias(slug)) throw new Error(`${name} ladder names unknown alias ${slug}`);
+    const alias = resolveDisplayAlias(slug);
+    if (!alias) throw new Error(`${name} ladder names unknown alias ${slug}`);
+    terminal.add(alias.slug);
   }
+  if (terminal.size < 2) throw new Error(`${name} ladder runs every tier on ${[...terminal][0]}`);
 }
 
 // ── OSS allowlist ──────────────────────────────────────────────────────────────
