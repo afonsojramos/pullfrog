@@ -195,10 +195,11 @@ export async function main(): Promise<MainResult> {
       authorPermission: undefined,
       oidc: oidcCredentials,
     });
-    const errorMessage =
-      runContext.commercialRefused === "subscription_unpaid"
-        ? "Pro renewal failed for this organization"
-        : "Pro plan required for this organization";
+    const errorMessage = {
+      commercial: "Pro trial expired for this organization",
+      subscription_ended: "Pro subscription ended for this organization",
+      subscription_unpaid: "Pro renewal failed for this organization",
+    }[runContext.commercialRefused];
     log.error(errorMessage);
     const body = formatCommercialGateSummary({
       reason: runContext.commercialRefused,

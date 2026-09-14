@@ -1,6 +1,7 @@
 import type { PushPermission, ShellPermission } from "../external.ts";
 import type { RouterTier } from "../models.ts";
 import { apiFetch } from "./apiFetch.ts";
+import type { CommercialRefusal } from "./billingErrors.ts";
 import type { RepoContext } from "./github.ts";
 
 export interface Mode {
@@ -77,16 +78,6 @@ export interface RepoSettings {
  */
 export type AccountPlan = "none" | "payg";
 
-/**
- * The org commercial gate's refusal (billing model v2). Set when run-context
- * returns 402 for a `paused`/`unpaid` org — the backstop for manual re-runs and
- * self-configured triggers that never hit reserveRun. main.ts stops before
- * installing the agent or loading account secrets and writes actionable copy.
- * A forked action can bypass this response, so proxy-token enforces the same
- * verdict before issuing a Pullfrog Router key.
- */
-export type CommercialRefusal = "commercial" | "subscription_unpaid";
-
 export interface RunContext {
   settings: RepoSettings;
   apiToken: string;
@@ -94,6 +85,14 @@ export interface RunContext {
   plan: AccountPlan;
   proxyModel?: string | undefined;
   dbSecrets?: Record<string, string> | undefined;
+  /**
+   * The org commercial gate's refusal (billing model v2). Set when run-context
+   * returns 402 for a `paused`/`unpaid` org — the backstop for manual re-runs and
+   * self-configured triggers that never hit reserveRun. main.ts stops before
+   * installing the agent or loading account secrets and writes actionable copy.
+   * A forked action can bypass this response, so proxy-token enforces the same
+   * verdict before issuing a Pullfrog Router key.
+   */
   commercialRefused?: CommercialRefusal | undefined;
   /**
    * the server tried and failed to materialize Pullfrog-stored secrets (or we
@@ -210,14 +209,11 @@ export async function fetchRunContext(params: {
     // block runs).
     if (response.status === 402) {
       const body: unknown = await response.json().catch(() => null);
-      const reason: CommercialRefusal =
-        typeof body === "object" &&
-        body !== null &&
-        "reason" in body &&
-        body.reason === "subscription_unpaid"
-          ? "subscription_unpaid"
-          : "commercial";
-      return { ...defaultRunContext, commercialRefused: reason };
+      const reason =
+        typeof body === "object" && body !== null && "reason" in body ? body.reason : null;
+      const commercialRefused: CommercialRefusal =
+        reason === "subscription_unpaid" || reason === "subscription_ended" ? reason : "commercial";
+      return { ...defaultRunContext, commercialRefused };
     }
 
     if (!response.ok) {
