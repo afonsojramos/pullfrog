@@ -119,6 +119,7 @@ export {
   getProgressComment,
   updateProgressComment,
 } from "../utils/progressComment.ts";
+export { PROVIDER_DASHBOARDS, type ProviderDashboard } from "../utils/providerDashboards.ts";
 export type {
   RunStatusCheckConclusion,
   RunStatusCheckOctokit,

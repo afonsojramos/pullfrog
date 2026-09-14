@@ -78,6 +78,7 @@ import {
 import { getApiUrl } from "./apiUrl.ts";
 import { BillingError, formatBillingErrorSummary } from "./billingErrors.ts";
 import { MODEL_ACCESS_MARKER } from "./modelAccess.ts";
+import { PROVIDER_DASHBOARDS } from "./providerDashboards.ts";
 import {
   extractProviderId,
   findAnthropicSpendCap,
@@ -191,19 +192,12 @@ function formatMinimalFailureComment(repo: { owner: string; name: string }): str
 }
 
 /**
- * Best-known billing top-up URL per provider. Conservative list: only
- * providers we've actually classified billing-exhaustion shapes for in
- * `providerErrors.ts`. Unknown providers fall through to a generic CTA.
+ * Billing top-up URL per provider id, from the shared dashboard table. A
+ * provider `detectProviderId` cannot name falls through to a generic CTA.
  */
-const PROVIDER_BILLING_URLS: Record<string, string> = {
-  deepseek: "https://platform.deepseek.com/top_up",
-  anthropic: "https://console.anthropic.com/settings/billing",
-  openai: "https://platform.openai.com/account/billing",
-  google: "https://aistudio.google.com/usage",
-  opencode: "https://opencode.ai/zen",
-  xai: "https://console.x.ai/team/default/billing",
-  openrouter: "https://openrouter.ai/settings/credits",
-};
+const PROVIDER_BILLING_URLS: Record<string, string> = Object.fromEntries(
+  Object.entries(PROVIDER_DASHBOARDS).map(([id, dashboard]) => [id, dashboard.billing])
+);
 
 /**
  * `extractProviderId` only fires when the harness emits `providerID=...`
@@ -236,8 +230,6 @@ function detectProviderId(message: string): string | null {
   return null;
 }
 
-/** OpenRouter's key management page, where a key's total limit is raised. */
-const OPENROUTER_KEYS_URL = "https://openrouter.ai/workspaces/default/keys";
 /** OpenRouter's data-policy page, which decides what it may route to. */
 const OPENROUTER_PRIVACY_URL = "https://openrouter.ai/settings/privacy";
 
@@ -254,7 +246,7 @@ function formatProviderBillingExhausted(input: { errorMessage: string }): string
       "",
       "OpenRouter refused the request against the key's own spending ceiling, not your account balance — raising or removing that limit is the fix, and topping up credits alone may not be.",
       "",
-      `[Raise the key's limit →](${OPENROUTER_KEYS_URL}) · [Add credits →](${PROVIDER_BILLING_URLS.openrouter})`,
+      `[Raise the key's limit →](${PROVIDER_DASHBOARDS.openrouter.keys}) · [Add credits →](${PROVIDER_BILLING_URLS.openrouter})`,
       "",
       `\`\`\`\n${input.errorMessage}\n\`\`\``,
     ].join("\n");

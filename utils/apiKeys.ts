@@ -15,11 +15,13 @@ import {
   OPENAI_COMPATIBLE_MAX_OUTPUT_ENV,
   OPENAI_COMPATIBLE_MODEL_ENV,
   OPENAI_COMPATIBLE_PROVIDER,
+  providers,
   resolveDisplayAlias,
   VERTEX_MODEL_ID_ENV,
 } from "../models.ts";
 import { getApiUrl } from "./apiUrl.ts";
 import { getModelsFailure } from "./openCodeModels.ts";
+import { PROVIDER_DASHBOARDS } from "./providerDashboards.ts";
 import {
   GOOGLE_CLOUD_PROJECT_ENV,
   readProjectIdFromVertexServiceAccountJson,
@@ -775,14 +777,28 @@ export function buildRejectedCredentialError(params: {
   const where = params.inPullfrogStore
     ? `[Update it in Pullfrog →](${settingsUrl})`
     : `[Update the GitHub Actions secret →](https://github.com/${params.owner}/${params.name}/settings/secrets/actions)`;
+  const keysUrl = providerKeysUrl(params.credential);
+  const issue = keysUrl ? `[Issue a new key →](${keysUrl}) · ` : "";
 
   return [
     `**Your \`${params.credential}\` ${CREDENTIAL_REJECTED_MARKER}**${detail}, so the agent never ran.`,
     "",
     `**To fix:** issue a new key in your provider dashboard and update the copy Pullfrog uses${params.inPullfrogStore ? " in the console" : " in your repo's GitHub Actions secrets"}.`,
     "",
-    `${where} · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    `${issue}${where} · [Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
   ].join("\n");
+}
+
+/**
+ * The page where the provider that owns this env var issues API keys. First
+ * match wins, which only matters for `OPENCODE_API_KEY` — Zen and Go share it,
+ * and both rows name the same keys page, so the order is not load-bearing.
+ */
+function providerKeysUrl(credential: string): string | undefined {
+  for (const [id, provider] of Object.entries(providers)) {
+    if (provider.envVars.includes(credential)) return PROVIDER_DASHBOARDS[id]?.keys;
+  }
+  return undefined;
 }
 
 /**
