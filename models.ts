@@ -483,6 +483,9 @@ export const providers = {
         displayName: "Kimi K2",
         description: "Included in every Kimi membership tier",
         resolve: "kimi-for-coding/kimi-for-coding",
+        // models.dev published this ladder on 2026-09-14; the catalog gate
+        // mirrors it, so main was red until the alias carried it too.
+        effort: ["low", "high", "max"],
       },
       "kimi-k2-highspeed": {
         displayName: "Kimi K2 HighSpeed",
@@ -725,16 +728,26 @@ export const providers = {
         effort: ["minimal", "low", "medium", "high"],
         openRouterResolve: "openrouter/openai/gpt-5-nano",
       },
-      // Zen's PAID Muse Spark, priced like Meta's own Standard tier. not the
-      // `-contributor-free` id beside it, which is the data-collection variant
-      // Go refuses with DataPolicyError. unverified through the harness on
-      // 2026-09-11: the workspace was out of balance and a claude-sonnet-5
-      // control failed identically. see wiki/muse-spark.md.
+      // Zen's PAID Muse Spark, priced like Meta's own Standard tier. answered
+      // `OK` through the harness on 2026-09-12 once the workspace was funded.
       "muse-spark": {
         displayName: "Muse Spark",
         resolve: "opencode/muse-spark-1.3",
         effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
         openRouterResolve: "openrouter/meta/muse-spark-1.3",
+      },
+      // Zen's FREE contributor tier: the same model at $0 because Meta trains
+      // on the prompts and completions. Zen served it to our key on 2026-09-12
+      // without the DataPolicyError Go raises for its contributor id. see
+      // wiki/muse-spark.md.
+      "muse-spark-contributor": {
+        displayName: "Muse Spark Contributor",
+        description: "Meta trains on prompts and completions",
+        resolve: "opencode/muse-spark-1.3-contributor-free",
+        effort: ["minimal", "low", "medium", "high", "xhigh"],
+        // free to run, still gated on the provider's own OPENCODE_API_KEY —
+        // see the big-pickle note above (#1077).
+        isFree: true,
       },
       // Zen's live free MiMo, and the second free row in a menu that big-pickle
       // was alone in since `mimo-v2-pro-free` lost its model.
