@@ -14,6 +14,9 @@ export const secretNamesSchema = z.object({
   target: z.string(),
   secrets: z.array(z.string()),
   inherited: z.array(z.string()),
+  // `.default([])` so a CLI newer than its server — a preview deployment, a self-hosted
+  // install — keeps working: every command parses this shape, not just `auth`.
+  overrides: z.array(z.object({ name: z.string(), repo: z.string() })).default([]),
   writable: z.boolean(),
 });
 

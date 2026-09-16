@@ -27,9 +27,8 @@ export interface CodexAuthBody {
   };
   last_refresh?: string;
   /**
-   * ISO timestamp of a rejection OpenAI attributed to the token itself
-   * (`error.code: "token_expired"` — it does not emit RFC 6749's
-   * `invalid_grant` here). OpenAI rotates the refresh
+   * ISO timestamp of a rejection OpenAI attributed to the token itself (a `401`
+   * other than `invalid_client` — see `codexChainIsDead`). OpenAI rotates the refresh
    * token on every use, so such a rejection is PERMANENT — without a latch the
    * server re-issued the identical doomed refresh on every run (455 futile
    * round trips in 7 days, one per run, each holding a Postgres row lock across
@@ -54,16 +53,16 @@ interface OAuthTokenResponse {
   expires_in?: number;
 }
 
-/** OpenAI does NOT answer RFC 6749 codes here: `error` is an OBJECT and the
- * discriminator is `error.code`. Measured against auth.openai.com with negative
- * controls — a spent refresh answers `401 code:"token_expired"`, while a bad
- * `grant_type` answers `code: null` and an unknown client `code:"invalid_client"`.
- * So checking for `invalid_grant` here would never match and the dead-chain
- * latch (#1101) would never fire. */
-function codexChainIsDead(body: string): boolean {
+/** OpenAI does NOT answer RFC 6749 codes here: `error` is an OBJECT, when there is a body at
+ * all. Measured with negative controls, a spent refresh answers `401 code:"token_expired"`, a
+ * bad `grant_type` `400 code: null` and an unknown client `401 code:"invalid_client"` — but the
+ * chains production latched answered `401` with an EMPTY body, so keying on `token_expired`
+ * never fired the latch (#1101). A `401` is dead unless it blames our client id — codex-rs latches
+ * every `401` with no such carve-out, so this is the stricter of the two. */
+function codexChainIsDead(status: number, body: string): boolean {
+  if (status !== 401) return false;
   const err = parseOAuthErrorBody(body)?.error;
-  if (!err || typeof err !== "object") return false;
-  return "code" in err && err.code === "token_expired";
+  return !(err && typeof err === "object" && "code" in err && err.code === "invalid_client");
 }
 
 /** force one refresh round-trip against the OAuth provider. returns the
@@ -91,7 +90,12 @@ export async function refreshCodexAuthBody(body: CodexAuthBody): Promise<CodexAu
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     if (response.status >= 400 && response.status < 500) {
-      throw new OAuthInvalidGrantError("Codex", response.status, text, codexChainIsDead(text));
+      throw new OAuthInvalidGrantError(
+        "Codex",
+        response.status,
+        text,
+        codexChainIsDead(response.status, text)
+      );
     }
     throw new Error(`Codex token refresh failed: ${response.status} ${text}`);
   }

@@ -12,12 +12,13 @@
  * Thrown when an OAuth provider rejects a refresh token (4xx).
  *
  * `chainIsDead` is decided by the CALLER, because the two providers we talk to
- * disagree about how to say it and only the caller knows its own dialect:
- * xAI answers RFC 6749 (`{"error":"invalid_grant"}`) while OpenAI nests an
- * object and discriminates on `error.code` (`token_expired`). A rejection we
- * cannot classify — a CDN error page in front of the token endpoint, say — is
- * NOT dead: latching there would retire every customer's working credential
- * over a transient edge event.
+ * disagree about how to say it and only the caller knows its own dialect, and
+ * so does the list of rejections that are NOT dead. xAI answers RFC 6749
+ * (`{"error":"invalid_grant"}`), so anything else — an unknown client id, an
+ * unsupported grant, a CDN error page — is spared. OpenAI answers a dead chain
+ * with a `401` whose body varies and is often empty, so there the `401` itself
+ * is the signal and only `invalid_client` is spared. Latching wrongly retires a
+ * customer's working credential until they re-mint it.
  */
 export class OAuthInvalidGrantError extends Error {
   public readonly status: number;
