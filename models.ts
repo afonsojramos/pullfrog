@@ -749,6 +749,17 @@ export const providers = {
         // see the big-pickle note above (#1077).
         isFree: true,
       },
+      // Zen's FREE stealth preview (listed 2026-09-16), the big-pickle shape: an
+      // anonymous vendor's model at $0 for a limited time. OpenRouter's listing:
+      // prompts and completions may be retained, not trained on.
+      "union-alpha": {
+        displayName: "Union Alpha",
+        description: "Stealth preview; prompts may be retained",
+        resolve: "opencode/union-alpha",
+        // free to run, still gated on the provider's own OPENCODE_API_KEY —
+        // see the big-pickle note above (#1077).
+        isFree: true,
+      },
       // Zen's live free MiMo, and the second free row in a menu that big-pickle
       // was alone in since `mimo-v2-pro-free` lost its model.
       mimo: {
