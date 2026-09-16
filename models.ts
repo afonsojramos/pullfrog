@@ -724,9 +724,9 @@ export const providers = {
       },
       "gpt-5-nano": {
         displayName: "GPT Nano",
-        resolve: "opencode/gpt-5-nano",
-        effort: ["minimal", "low", "medium", "high"],
-        openRouterResolve: "openrouter/openai/gpt-5-nano",
+        resolve: "opencode/gpt-5.4-nano",
+        effort: ["none", "low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/openai/gpt-5.4-nano",
       },
       // Zen's PAID Muse Spark, priced like Meta's own Standard tier. answered
       // `OK` through the harness on 2026-09-12 once the workspace was funded.
