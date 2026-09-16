@@ -17,6 +17,45 @@ export const PULLFROG_API_URL = (process.env.PULLFROG_API_URL || "https://pullfr
   ""
 );
 
+export const CODEX_AUTH_SECRET = "CODEX_AUTH_JSON";
+export const CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN";
+export const GROK_AUTH_SECRET = "GROK_AUTH_JSON";
+
+/** the credentials `pullfrog auth` mints, derived from the three above so a new provider
+ * cannot be wired into `auth` and silently miss the `secret set` guard. a repo's own copy of
+ * one takes precedence over the account's AND the chain rotates, so a stale copy dies where it
+ * sits. a static API key is deliberately not here: a repo copy shadowing one is what repo
+ * scope is for. */
+export const SUBSCRIPTION_SECRET_NAMES = [CODEX_AUTH_SECRET, CLAUDE_OAUTH_SECRET, GROK_AUTH_SECRET];
+
+/** the refusal an account-level save earns while repos hold their own copy of `name`, or null
+ * when none do. `auth` and `secret set` are two doors to the same write, so they share one
+ * message — and it carries the commands rather than running them, because deleting a stored
+ * credential is the owner's call. `overrides` is empty for a repo target, so this self-scopes. */
+export function shadowRefusal(params: {
+  overrides: { name: string; repo: string }[];
+  owner: string;
+  name: string;
+}): string | null {
+  const repos = params.overrides
+    .filter((override) => override.name === params.name)
+    .map((override) => `${params.owner}/${override.repo}`);
+  if (!repos.length) return null;
+  const bin = process.env.PULLFROG_BIN_NAME || "pullfrog";
+  return [
+    `${pc.cyan(params.name)} is already set on ${repos.map((repo) => pc.cyan(repo)).join(", ")}.`,
+    `a repo's own copy takes precedence, so saving to ${pc.cyan(params.owner)} would not change`,
+    `what runs there read.`,
+    ``,
+    `delete the repo copies, then run this command again:`,
+    ...repos.map(
+      (repo) => `  ${pc.cyan(`npx ${bin} secret delete ${params.name} --repo ${repo}`)}`
+    ),
+    ``,
+    `${pc.dim("or:")} pass ${pc.cyan("--repo OWNER/REPO")} to replace one repo's own copy instead.`,
+  ].join("\n");
+}
+
 // active spinner reference so bail/cancel can stop it before exiting. shared
 // across init/auth subcommands via this module's singleton scope; whichever
 // command starts a spinner sets this so handleCancel/bail can clean up.

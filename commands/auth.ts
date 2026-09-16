@@ -41,20 +41,20 @@ import {
 import { configurationApi, resolveTarget, scopeArgs } from "./_configuration.ts";
 import {
   bail,
+  CLAUDE_OAUTH_SECRET,
+  CODEX_AUTH_SECRET,
   describeSecretTarget,
   fetchStatus,
+  GROK_AUTH_SECRET,
   getGhToken,
   handleCancel,
   PULLFROG_API_URL,
   promptScope,
   setActiveSpin,
   setPullfrogSecret,
+  shadowRefusal,
 } from "./_shared.ts";
 import { secretNamesSchema } from "./secret.ts";
-
-const CODEX_AUTH_SECRET = "CODEX_AUTH_JSON";
-const CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN";
-const GROK_AUTH_SECRET = "GROK_AUTH_JSON";
 
 /** prefix on `claude setup-token` OAuth tokens (`sk-ant-oat01-…`). a
  * warn-on-mismatch shape check only; whether the token actually WORKS is
@@ -216,55 +216,21 @@ async function runCodex(params: CodexCliParams): Promise<void> {
   await runCodexAuth(parsed);
 }
 
-/** a repo's own copy of `name` takes precedence over the account's, so saving to the account
- * alone leaves runs on that repo reading the old credential. asked before the sign-in; the
- * returned repos lose their copy once the new one is saved. */
-async function selectRepoCopiesToDelete(params: {
+/** checked before the sign-in, so nobody completes a device flow for a save that cannot land.
+ * `secret set` guards the same write with the same message — see `shadowRefusal`. */
+function refuseWhenRepoCopiesShadow(params: {
   access: ReturnType<typeof secretNamesSchema.parse>;
   owner: string;
   name: string;
-}) {
-  const repos = params.access.overrides
-    .filter((override) => override.name === params.name)
-    .map((override) => override.repo);
-  if (!repos.length) return [];
-  const list = repos.map((repo) => pc.cyan(`${params.owner}/${repo}`)).join(", ");
-  const remove = await p.select({
-    message: `${pc.cyan(params.name)} is also set on ${list}, where the repo's own copy takes precedence over the account's — delete it there after saving?`,
-    options: [
-      { value: true, label: "delete", hint: "runs there use the new credential" },
-      { value: false, label: "keep", hint: "runs there keep using the repo's own copy" },
-    ],
+}): void {
+  const refusal = shadowRefusal({
+    overrides: params.access.overrides,
+    owner: params.owner,
+    name: params.name,
   });
-  handleCancel(remove);
-  return remove ? repos : [];
-}
-
-/** the new credential is already saved by now, so a copy that fails to delete is reported
- * with the command that finishes the job instead of failing the whole command. */
-async function deleteRepoCopies(params: {
-  token: string;
-  owner: string;
-  name: string;
-  repos: string[];
-}) {
-  for (const repo of params.repos) {
-    const target = `${params.owner}/${repo}`;
-    try {
-      await configurationApi({
-        target: { owner: params.owner, repo },
-        path: "credentials",
-        method: "DELETE",
-        body: { name: params.name, confirmed: true },
-        token: params.token,
-      });
-      p.log.success(`deleted ${pc.cyan(params.name)} from ${pc.cyan(target)}`);
-    } catch (error) {
-      p.log.warn(
-        `could not delete ${pc.cyan(params.name)} from ${pc.cyan(target)}: ${error instanceof Error ? error.message : String(error)}\n  ${pc.dim("run:")} ${pc.cyan(`npx pullfrog secret delete ${params.name} --repo ${target}`)}`
-      );
-    }
-  }
+  if (!refusal) return;
+  p.log.warn(refusal);
+  bail("nothing saved.");
 }
 
 async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<void> {
@@ -329,6 +295,8 @@ async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<
           : "org owner required to change secrets"
       );
 
+    refuseWhenRepoCopiesShadow({ access, owner: remote.owner, name: CODEX_AUTH_SECRET });
+
     if (access.secrets.includes(CODEX_AUTH_SECRET)) {
       const overwrite = await p.select({
         message: `${pc.cyan(CODEX_AUTH_SECRET)} is already configured — overwrite?`,
@@ -343,12 +311,6 @@ async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<
         return;
       }
     }
-
-    const deleteFrom = await selectRepoCopiesToDelete({
-      access,
-      owner: remote.owner,
-      name: CODEX_AUTH_SECRET,
-    });
 
     p.log.info(
       [
@@ -450,13 +412,6 @@ async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<
       process.exit(1);
     }
     spin.stop(`saved ${pc.cyan(CODEX_AUTH_SECRET)} to ${target}`);
-    await deleteRepoCopies({
-      token,
-      owner: remote.owner,
-      name: CODEX_AUTH_SECRET,
-      repos: deleteFrom,
-    });
-
     setActiveSpin(null);
     p.outro("done.");
   } catch (error) {
@@ -567,6 +522,8 @@ async function runClaudeAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise
           : "org owner required to change secrets"
       );
 
+    refuseWhenRepoCopiesShadow({ access, owner: remote.owner, name: CLAUDE_OAUTH_SECRET });
+
     if (access.secrets.includes(CLAUDE_OAUTH_SECRET)) {
       const overwrite = await p.select({
         message: `${pc.cyan(CLAUDE_OAUTH_SECRET)} is already configured — overwrite?`,
@@ -581,12 +538,6 @@ async function runClaudeAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise
         return;
       }
     }
-
-    const deleteFrom = await selectRepoCopiesToDelete({
-      access,
-      owner: remote.owner,
-      name: CLAUDE_OAUTH_SECRET,
-    });
 
     p.log.info(
       [
@@ -637,13 +588,6 @@ async function runClaudeAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise
       process.exit(1);
     }
     spin.stop(`saved ${pc.cyan(CLAUDE_OAUTH_SECRET)} to ${target}`);
-    await deleteRepoCopies({
-      token,
-      owner: remote.owner,
-      name: CLAUDE_OAUTH_SECRET,
-      repos: deleteFrom,
-    });
-
     setActiveSpin(null);
     p.outro("done.");
   } catch (error) {
@@ -754,6 +698,8 @@ async function runGrokAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<v
           : "org owner required to change secrets"
       );
 
+    refuseWhenRepoCopiesShadow({ access, owner: remote.owner, name: GROK_AUTH_SECRET });
+
     if (access.secrets.includes(GROK_AUTH_SECRET)) {
       const overwrite = await p.select({
         message: `${pc.cyan(GROK_AUTH_SECRET)} is already configured — overwrite?`,
@@ -768,12 +714,6 @@ async function runGrokAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<v
         return;
       }
     }
-
-    const deleteFrom = await selectRepoCopiesToDelete({
-      access,
-      owner: remote.owner,
-      name: GROK_AUTH_SECRET,
-    });
 
     spin.start("requesting a device code from xAI");
     const device = await startXaiDeviceAuth();
@@ -821,13 +761,6 @@ async function runGrokAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<v
       process.exit(1);
     }
     spin.stop(`saved ${pc.cyan(GROK_AUTH_SECRET)} to ${target}`);
-    await deleteRepoCopies({
-      token,
-      owner: remote.owner,
-      name: GROK_AUTH_SECRET,
-      repos: deleteFrom,
-    });
-
     setActiveSpin(null);
     p.outro("done.");
   } catch (error) {
