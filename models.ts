@@ -431,11 +431,19 @@ export const providers = {
   // the same models as `moonshotai` above, billed against a Kimi membership
   // instead of a Moonshot API balance — a separate endpoint, separate model
   // ids and a separate key, which is why it is a provider rather than a second
-  // `envVars` entry. no provider injection is needed: models.dev carries
-  // `kimi-for-coding` (api `https://api.kimi.com/coding/v1`, npm
-  // `@ai-sdk/anthropic`) and opencode's env loop enables it from a bare
+  // `envVars` entry. no provider injection is needed: models.dev carries the
+  // provider (api `https://api.kimi.com/coding/v1`, npm
+  // `@ai-sdk/openai-compatible`) and opencode's env loop enables it from a bare
   // `KIMI_API_KEY`, verified against our pinned opencode-ai@1.18.5 — all four
   // ids list in `opencode models` and a run reaches Kimi's own auth check.
+  //
+  // models.dev renamed that provider on 2026-09-18: `kimi-for-coding` became
+  // `kimi-code-plan-cn` (api.kimi.com — where the console mints the key) and
+  // `kimi-code-plan-global` (api.kimi.ai). opencode resolves providers from
+  // its models.dev cache, so a `resolve` still spelling the old key names a
+  // provider it does not know. the `resolve` targets track models.dev's key;
+  // the provider KEY below is Pullfrog's slug and stays put. see
+  // wiki/kimi-code.md.
   //
   // NO `openRouterResolve` ON PURPOSE. OpenRouter cannot serve a Kimi
   // membership, so a Router path here would silently bill the wallet for
@@ -446,9 +454,11 @@ export const providers = {
   // keyless Router pick to the default subsidy model with `noRouterPath`.
   "kimi-for-coding": provider({
     // "Kimi Code" is the product name on kimi.com/code and in the console the
-    // key is minted from. The provider KEY has to stay `kimi-for-coding` — it
-    // is models.dev's id, so it is what `enabled_providers` and every
-    // `resolve` prefix must spell.
+    // key is minted from. the provider KEY stays `kimi-for-coding`: it is the
+    // slug prefix every stored pick, `--model` flag and BYOK card spells, and
+    // it is not what reaches opencode — `enabled_providers` is derived from
+    // the `resolve` prefix (`action/agents/opencode.ts`), which is why the
+    // two may differ here and nowhere else in this file.
     displayName: "Kimi Code",
     envVars: ["KIMI_API_KEY"],
     models: {
@@ -459,7 +469,7 @@ export const providers = {
       "kimi-k3": {
         displayName: "Kimi K3",
         description: "1M context, but only on Allegretto and above · Moderato caps it at 256K",
-        resolve: "kimi-for-coding/k3",
+        resolve: "kimi-code-plan-cn/k3",
         effort: ["low", "high", "max"],
         subagentModel: "kimi-k2",
       },
@@ -474,7 +484,7 @@ export const providers = {
       "kimi-k3-256k": {
         displayName: "Kimi K3 256K",
         description: "Same model at 256K for ~half the quota · Moderato or above",
-        resolve: "kimi-for-coding/k3-256k",
+        resolve: "kimi-code-plan-cn/k3-256k",
         effort: ["low", "high", "max"],
         preferred: true,
         subagentModel: "kimi-k2",
@@ -482,7 +492,7 @@ export const providers = {
       "kimi-k2": {
         displayName: "Kimi K2",
         description: "Included in every Kimi membership tier",
-        resolve: "kimi-for-coding/kimi-for-coding",
+        resolve: "kimi-code-plan-cn/kimi-for-coding",
         // models.dev published this ladder on 2026-09-14; the catalog gate
         // mirrors it, so main was red until the alias carried it too.
         effort: ["low", "high", "max"],
@@ -490,7 +500,7 @@ export const providers = {
       "kimi-k2-highspeed": {
         displayName: "Kimi K2 HighSpeed",
         description: "~6x output speed for ~3x quota · needs Allegretto or above",
-        resolve: "kimi-for-coding/kimi-for-coding-highspeed",
+        resolve: "kimi-code-plan-cn/kimi-for-coding-highspeed",
       },
     },
   }),
@@ -733,8 +743,12 @@ export const providers = {
       "muse-spark": {
         displayName: "Muse Spark",
         resolve: "opencode/muse-spark-1.3",
-        effort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        // models.dev dropped `max` from Zen's ladder on 2026-09-19 while the
+        // OpenRouter and direct `meta/` routes kept it; the catalog gate
+        // mirrors what is published per route.
+        effort: ["minimal", "low", "medium", "high", "xhigh"],
         openRouterResolve: "openrouter/meta/muse-spark-1.3",
+        openRouterEffort: ["minimal", "low", "medium", "high", "xhigh", "max"],
       },
       // Zen's FREE contributor tier: the same model at $0 because Meta trains
       // on the prompts and completions. Zen served it to our key on 2026-09-12
@@ -759,6 +773,11 @@ export const providers = {
         // free to run, still gated on the provider's own OPENCODE_API_KEY —
         // see the big-pickle note above (#1077).
         isFree: true,
+        // Zen dropped the id from `/v1/models` on 2026-09-18, two days after it
+        // listed it, and answers a 500 for it. a stealth preview has no same-
+        // family successor, so stored picks land on the other free stealth
+        // model, as `minimax-m2.5-free` does.
+        fallback: "opencode/big-pickle",
       },
       // Zen's live free MiMo, and the second free row in a menu that big-pickle
       // was alone in since `mimo-v2-pro-free` lost its model.
