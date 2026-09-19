@@ -39,7 +39,7 @@
  *     a stdout sentinel envelope.
  *
  * What stays identical:
- *   - bash: "deny" via OPENCODE_CONFIG_CONTENT
+ *   - native bash blocked (listed as "ask", thrown on by the gate plugin)
  *   - OPENCODE_PERMISSION filesystem sandbox — deny-all + allow /tmp
  *   - MCP Pullfrog server injected via `mcp.<name> = { type: "remote", url }`
  *   - ASKPASS for git auth
@@ -122,7 +122,11 @@ const installCli = () => installOpencodeCli({ binPath: "bin/opencode.exe" });
 function buildSecurityConfig(ctx: AgentRunContext, model: string | undefined): string {
   const config: OpenCodeConfig = {
     permission: {
-      bash: "deny",
+      // listed but never run: Zen's free tier 403s a tool list missing `bash`,
+      // `glob`, `grep` or `read` (2026-09-17), so the gate plugin throws on
+      // every bash call and "ask" (no responder in serve mode) fails closed.
+      // never switch one of those four to "deny". see wiki/security.md.
+      bash: "ask",
       edit: "allow",
       read: "allow",
       webfetch: "allow",
@@ -1271,7 +1275,7 @@ export const opencode = agent({
     // opencode 1.18 gates a code-mode `execute` tool — a script interpreter —
     // behind either of these. the spawn env inherits the workflow's `env:` block,
     // so leaving them set would let a repo-level variable hand the agent shell
-    // execution that sidesteps `bash: "deny"`. shell goes through pullfrog_shell,
+    // execution that sidesteps the bash block. shell goes through pullfrog_shell,
     // always. see wiki/sandbox-v2.md.
     delete env.OPENCODE_EXPERIMENTAL;
     delete env.OPENCODE_EXPERIMENTAL_CODE_MODE;

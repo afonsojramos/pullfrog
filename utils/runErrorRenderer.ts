@@ -31,6 +31,11 @@
  *      provider declines to route it on this account's plan (OpenCode Zen's
  *      own refusal string). Same "pick another model" CTA, different reason.
  *
+ *   4a'. Zen free-tier gate (#1377) — Zen 403s a free-tier request whose tool
+ *      list is missing a built-in it expects. The harness keeps `bash` listed,
+ *      but opencode's auto-compaction request carries no tools, so a long
+ *      free-Zen run can still die mid-flight on the raw upstream string.
+ *
  *   4b. Context-window overflow (#1116) — terminal `Prompt is too long` /
  *      `maximum context length is N tokens`. Actionable, so it renders on
  *      both surfaces rather than collapsing to the one-line comment.
@@ -126,6 +131,34 @@ function isContextOverflowError(message: string): boolean {
  */
 function isNoProviderAvailableError(message: string): boolean {
   return /\bNo provider available\b/i.test(message);
+}
+
+/**
+ * OpenCode Zen's free-tier request-shape gate (`FreeTierError`): since
+ * 2026-09-17 Zen refuses a free-tier request whose tool list is missing any of
+ * the built-in tools it expects — measured: `bash`, `glob`, `grep` and `read`
+ * each trip it, while `list`, `edit`, `write`, `task`, `todowrite`, `skill`,
+ * `webfetch`, `websearch` and `question` do not. The harness keeps `bash`
+ * listed (blocked by the gate plugin) so the main turn passes, but opencode's
+ * auto-compaction request carries no tools and trips the same gate mid-run
+ * (anomalyco/opencode#49587), and a repo-root `opencode.json` denying one of
+ * the four strips it from the first call. See wiki/models-catalog.md.
+ */
+function isZenFreeTierGateError(message: string): boolean {
+  return /free tier can only be used from within OpenCode/i.test(message);
+}
+
+function formatZenFreeTierGateSummary(input: { owner: string; name: string; raw: string }): string {
+  const settingsUrl = `${getApiUrl()}/console/${input.owner}/${input.name}`;
+  return [
+    "**Zen's free tier refused a request this run made.** OpenCode Zen currently rejects free-model requests whose tool list is missing one of the built-in tools it expects ([upstream issue](https://github.com/anomalyco/opencode/issues/49587)). Pullfrog sends all of them, but opencode's mid-run context-compaction request carries no tools at all, and a repo-level `opencode.json` that denies `bash`, `glob`, `grep` or `read` strips that tool from every request.",
+    "",
+    'Pick a paid model for this repo, drop any `"deny"` on `bash`, `glob`, `grep` or `read` from the repo\'s `opencode.json` if it sets one, or split the PR so the run stays under the compaction threshold and re-trigger.',
+    "",
+    `[Model settings →](${settingsUrl}) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    "",
+    `\`\`\`\n${input.raw}\n\`\`\``,
+  ].join("\n");
 }
 
 function formatNoProviderAvailableSummary(input: {
@@ -522,6 +555,15 @@ export function renderRunError(input: {
 
   if (isNoProviderAvailableError(input.errorMessage)) {
     const body = formatNoProviderAvailableSummary({
+      owner: input.repo.owner,
+      name: input.repo.name,
+      raw: input.errorMessage,
+    });
+    return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
+  }
+
+  if (isZenFreeTierGateError(input.errorMessage)) {
+    const body = formatZenFreeTierGateSummary({
       owner: input.repo.owner,
       name: input.repo.name,
       raw: input.errorMessage,
