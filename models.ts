@@ -311,9 +311,9 @@ export const providers = {
     models: {
       grok: {
         displayName: "Grok",
-        resolve: "xai/grok-4.6",
+        resolve: "xai/grok-4.7",
         effort: ["low", "medium", "high", "xhigh"],
-        openRouterResolve: "openrouter/x-ai/grok-4.6",
+        openRouterResolve: "openrouter/x-ai/grok-4.7",
         preferred: true,
       },
       // the Smart ladder's cheap rung: 1.25/2.5 against 4.6's 2/6, and a 0.2
@@ -328,17 +328,17 @@ export const providers = {
       // 2026-05-15 (https://docs.x.ai/developers/migration/may-15-deprecation)
       // and now redirects every deprecated text-model slug to grok-4.3 at
       // standard pricing. fall back to the live `xai/grok` so the alias
-      // chain resolves to grok-4.6 for both direct-key and OpenRouter users.
+      // chain resolves to grok-4.7 for both direct-key and OpenRouter users.
       "grok-fast": {
         displayName: "Grok Fast",
         resolve: "xai/grok-4-1-fast",
-        openRouterResolve: "openrouter/x-ai/grok-4.6",
+        openRouterResolve: "openrouter/x-ai/grok-4.7",
         fallback: "xai/grok",
       },
       "grok-code-fast": {
         displayName: "Grok Code Fast",
         resolve: "xai/grok-code-fast-1",
-        openRouterResolve: "openrouter/x-ai/grok-4.6",
+        openRouterResolve: "openrouter/x-ai/grok-4.7",
         fallback: "xai/grok",
       },
     },
@@ -817,7 +817,7 @@ export const providers = {
   // base URL (`https://opencode.ai/zen/go/v1`) but authenticated with the SAME
   // `OPENCODE_API_KEY`. it carries the open-weight coding models plus a couple
   // of frontier ones, six of which are served ONLY here — Zen's `/v1/models`
-  // does not list qwen3.7/3.8-*, mimo-v2.5-pro, longcat-2.0 or hy3. (it listed
+  // does not list qwen3.7/3.8-*, mimo-v2.6-pro, longcat-2.0 or hy3. (it listed
   // no glm-5.3* either until 2026-09, which is why `opencode/glm` trailed on
   // 5.2.) so for a Go subscriber this provider is not a duplicate route to Zen,
   // it is the only route to a large part of what they pay for.
@@ -923,8 +923,8 @@ export const providers = {
       // Xiaomi — Go-only; Zen serves the free `mimo-v2-pro-free` promo instead.
       "mimo-pro": {
         displayName: "MiMo Pro",
-        resolve: "opencode-go/mimo-v2.5-pro",
-        openRouterResolve: "openrouter/xiaomi/mimo-v2.5-pro",
+        resolve: "opencode-go/mimo-v2.6-pro",
+        openRouterResolve: "openrouter/xiaomi/mimo-v2.6-pro",
       },
       // Meituan — Go-only.
       longcat: {
@@ -950,9 +950,9 @@ export const providers = {
       // wiki/models-catalog.md on `opencode/kimi-k2`.
       grok: {
         displayName: "Grok",
-        resolve: "opencode-go/grok-4.6",
+        resolve: "opencode-go/grok-4.7",
         effort: ["low", "medium", "high", "xhigh"],
-        openRouterResolve: "openrouter/x-ai/grok-4.6",
+        openRouterResolve: "openrouter/x-ai/grok-4.7",
       },
       "gpt-luna": {
         displayName: "GPT Luna",
@@ -1162,9 +1162,9 @@ export const providers = {
       },
       grok: {
         displayName: "Grok",
-        resolve: "openrouter/x-ai/grok-4.6",
+        resolve: "openrouter/x-ai/grok-4.7",
         effort: ["low", "medium", "high", "xhigh"],
-        openRouterResolve: "openrouter/x-ai/grok-4.6",
+        openRouterResolve: "openrouter/x-ai/grok-4.7",
       },
       // dated pin, not the bare id — see `deepseek/deepseek-pro` for why
       // OpenRouter's unversioned `deepseek-v4-pro` is the stale April preview.
