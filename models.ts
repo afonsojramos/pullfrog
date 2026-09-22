@@ -366,8 +366,9 @@ export const providers = {
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
         resolve: "deepseek/deepseek-v4-pro",
-        effort: ["high", "max"],
-        openRouterEffort: ["low", "high", "max"],
+        // models.dev gave the direct id V4.1-Flash's ladder on 2026-09-21, which
+        // is what DeepSeek now serves under it — and the same as the Router pin's.
+        effort: ["low", "high", "max"],
         openRouterResolve: "openrouter/deepseek/deepseek-v4-pro-0813",
         preferred: true,
       },
@@ -783,7 +784,10 @@ export const providers = {
       // was alone in since `mimo-v2-pro-free` lost its model.
       mimo: {
         displayName: "MiMo",
-        resolve: "opencode/mimo-v2.5-free",
+        // models.dev deprecated `mimo-v2.5-free` on 2026-09-22. V2.6-Flash is
+        // the only other MiMo Zen serves, so the slug follows it across the
+        // tier rather than leaving stored picks on a dying id.
+        resolve: "opencode/mimo-v2.6-flash-free",
         // free to run, still gated on the provider's own OPENCODE_API_KEY —
         // see the big-pickle note above (#1077).
         isFree: true,
@@ -1231,8 +1235,10 @@ export const providers = {
   vercel: provider({
     // Vercel AI Gateway — one key serves every model it fronts. model IDs use
     // the models.dev `vercel` catalog's own naming (dotted versions, e.g.
-    // `anthropic/claude-opus-5`, `zai/glm-5.3`), and effort ladders mirror that
-    // catalog's entries, not the upstream vendor's. deliberately no
+    // `anthropic/claude-opus-5`, `zai/glm-5.3`). effort ladders come from the
+    // gateway's OWN `/v1/models`, not models.dev — the two disagree routinely
+    // (on 2026-09-22 they disagreed on all ten entries that drifted), and the
+    // drift test reads the gateway for that reason. deliberately no
     // `openRouterResolve`: a gateway pick is BYOK-only — silently rerouting it
     // over the Router proxy would bill the wallet for traffic the user pointed
     // at their own gateway.
@@ -1242,14 +1248,14 @@ export const providers = {
       "claude-opus": {
         displayName: "Claude Opus",
         resolve: "vercel/anthropic/claude-opus-5",
-        effort: ["low", "medium", "high", "xhigh", "max"],
+        effort: ["none", "low", "medium", "high", "xhigh"],
         preferred: true,
         subagentModel: "claude-sonnet",
       },
       "claude-sonnet": {
         displayName: "Claude Sonnet",
         resolve: "vercel/anthropic/claude-sonnet-5",
-        effort: ["low", "medium", "high", "xhigh"],
+        effort: ["none", "low", "medium", "high", "xhigh"],
       },
       "claude-haiku": {
         displayName: "Claude Haiku",
@@ -1258,7 +1264,7 @@ export const providers = {
       "gpt-sol": {
         displayName: "GPT Sol",
         resolve: "vercel/openai/gpt-5.6-sol",
-        effort: ["none", "low", "medium", "high", "xhigh", "max"],
+        effort: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
         subagentModel: "gpt-terra",
       },
       "gpt-astra": {
@@ -1270,7 +1276,7 @@ export const providers = {
       "gpt-terra": {
         displayName: "GPT Terra",
         resolve: "vercel/openai/gpt-5.6-terra",
-        effort: ["none", "low", "medium", "high", "xhigh", "max"],
+        effort: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
       },
       "gpt-luna": {
         displayName: "GPT Luna",
@@ -1280,25 +1286,25 @@ export const providers = {
       "gemini-pro": {
         displayName: "Gemini Pro",
         resolve: "vercel/google/gemini-3.1-pro-preview",
-        effort: ["low", "medium", "high"],
+        effort: ["low", "high"],
       },
       "gemini-flash": {
         displayName: "Gemini Flash",
         resolve: "vercel/google/gemini-3.8-flash",
-        effort: ["low", "medium", "high"],
+        effort: ["low", "high"],
       },
       "deepseek-pro": {
         displayName: "DeepSeek Pro",
         resolve: "vercel/deepseek/deepseek-v4-pro-0813",
-        effort: ["high", "xhigh"],
+        effort: ["none", "high", "max"],
       },
       // the gateway's bare `deepseek-v4-flash` is the April preview — the same
       // fork trap as OpenRouter, with `deepseek-v4-flash-0731` beside it — so
-      // this entry sat on the preview until V4.1. the gateway publishes no
-      // effort ladder for the V4.1 id.
+      // this entry sat on the preview until V4.1.
       "deepseek-flash": {
         displayName: "DeepSeek Flash",
         resolve: "vercel/deepseek/deepseek-v4.1-flash",
+        effort: ["none", "high", "max"],
       },
       glm: {
         displayName: "GLM",
@@ -1308,12 +1314,12 @@ export const providers = {
       "kimi-k3": {
         displayName: "Kimi K3",
         resolve: "vercel/moonshotai/kimi-k3",
-        effort: ["low", "high", "max"],
+        effort: ["none", "low", "high", "max"],
       },
-      // the gateway publishes no effort ladder for this id.
       "muse-spark": {
         displayName: "Muse Spark",
         resolve: "vercel/meta/muse-spark-1.3",
+        effort: ["minimal", "low", "medium", "high", "xhigh"],
       },
     },
   }),
