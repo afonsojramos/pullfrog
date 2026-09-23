@@ -188,9 +188,9 @@ export const providers = {
       },
       "gpt-sol": {
         displayName: "GPT Sol",
-        resolve: "openai/gpt-5.6-sol",
+        resolve: "openai/gpt-6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-6-sol",
         preferred: true,
         subagentModel: "gpt-terra",
       },
@@ -200,9 +200,9 @@ export const providers = {
       "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
-        resolve: "openai/gpt-5.6-sol",
+        resolve: "openai/gpt-6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
+        openRouterResolve: "openrouter/openai/gpt-6-sol-pro",
         subagentModel: "gpt-sol",
       },
       // gpt-5.6's balanced mid-tier. selectable on its own and doubles as Sol's
@@ -215,9 +215,9 @@ export const providers = {
       },
       "gpt-luna": {
         displayName: "GPT Luna",
-        resolve: "openai/gpt-5.6-luna",
+        resolve: "openai/gpt-6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-6-luna",
       },
       // legacy aliases — openai unified the codex line into the main GPT family
       // and is shutting down every "-codex" snapshot on 2026-07-23. transparently
@@ -598,9 +598,9 @@ export const providers = {
       },
       "gpt-sol": {
         displayName: "GPT Sol",
-        resolve: "opencode/gpt-5.6-sol",
+        resolve: "opencode/gpt-6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-6-sol",
         subagentModel: "gpt-terra",
       },
       "gpt-astra": {
@@ -614,9 +614,9 @@ export const providers = {
       "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
-        resolve: "opencode/gpt-5.6-sol",
+        resolve: "opencode/gpt-6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
+        openRouterResolve: "openrouter/openai/gpt-6-sol-pro",
         subagentModel: "gpt-sol",
       },
       // gpt-5.6 balanced mid-tier — selectable + Sol's subagent. see openai above.
@@ -628,9 +628,9 @@ export const providers = {
       },
       "gpt-luna": {
         displayName: "GPT Luna",
-        resolve: "opencode/gpt-5.6-luna",
+        resolve: "opencode/gpt-6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-6-luna",
       },
       // legacy aliases — see openai provider above for context.
       "gpt-codex": {
@@ -729,9 +729,9 @@ export const providers = {
       },
       grok: {
         displayName: "Grok",
-        resolve: "opencode/grok-4.6",
+        resolve: "opencode/grok-4.7",
         effort: ["low", "medium", "high", "xhigh"],
-        openRouterResolve: "openrouter/x-ai/grok-4.6",
+        openRouterResolve: "openrouter/x-ai/grok-4.7",
       },
       "gpt-5-nano": {
         displayName: "GPT Nano",
@@ -1060,15 +1060,15 @@ export const providers = {
         resolve: "openrouter/~anthropic/claude-haiku-latest",
         openRouterResolve: "openrouter/~anthropic/claude-haiku-latest",
       },
-      // pinned to the explicit gpt-5.6 tiers (not the ~openai/gpt-latest rolling
-      // alias): after the Sol/Terra/Luna rename, ~gpt-mini-latest no longer maps
+      // pinned to the explicit Sol/Terra/Luna tiers (not the ~openai/gpt-latest
+      // rolling alias): after that rename, ~gpt-mini-latest no longer maps
       // to Luna, so rolling aliases would silently diverge `gpt`/`gpt-mini` from
       // the chosen tiers across funding paths.
       "gpt-sol": {
         displayName: "GPT Sol",
-        resolve: "openrouter/openai/gpt-5.6-sol",
+        resolve: "openrouter/openai/gpt-6-sol",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-sol",
+        openRouterResolve: "openrouter/openai/gpt-6-sol",
         subagentModel: "gpt-terra",
       },
       "gpt-astra": {
@@ -1082,9 +1082,9 @@ export const providers = {
       "gpt-sol-pro": {
         displayName: "GPT Sol Pro",
         description: "Maximum reasoning effort",
-        resolve: "openrouter/openai/gpt-5.6-sol-pro",
+        resolve: "openrouter/openai/gpt-6-sol-pro",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-sol-pro",
+        openRouterResolve: "openrouter/openai/gpt-6-sol-pro",
         subagentModel: "gpt-sol",
       },
       // gpt-5.6 balanced mid-tier — selectable + Sol's subagent. see openai above.
@@ -1096,9 +1096,9 @@ export const providers = {
       },
       "gpt-luna": {
         displayName: "GPT Luna",
-        resolve: "openrouter/openai/gpt-5.6-luna",
+        resolve: "openrouter/openai/gpt-6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-6-luna",
       },
       // legacy aliases — see openai provider for context.
       "gpt-codex": {
@@ -1235,7 +1235,7 @@ export const providers = {
   vercel: provider({
     // Vercel AI Gateway — one key serves every model it fronts. model IDs use
     // the models.dev `vercel` catalog's own naming (dotted versions, e.g.
-    // `anthropic/claude-opus-5`, `zai/glm-5.3`). effort ladders come from the
+    // `anthropic/claude-opus-5.5`, `zai/glm-5.3`). effort ladders come from the
     // gateway's OWN `/v1/models`, not models.dev — the two disagree routinely
     // (on 2026-09-22 they disagreed on all ten entries that drifted), and the
     // drift test reads the gateway for that reason. deliberately no
@@ -1247,8 +1247,8 @@ export const providers = {
     models: {
       "claude-opus": {
         displayName: "Claude Opus",
-        resolve: "vercel/anthropic/claude-opus-5",
-        effort: ["none", "low", "medium", "high", "xhigh"],
+        resolve: "vercel/anthropic/claude-opus-5.5",
+        effort: ["low", "medium", "high", "xhigh", "max"],
         preferred: true,
         subagentModel: "claude-sonnet",
       },
@@ -1263,8 +1263,8 @@ export const providers = {
       },
       "gpt-sol": {
         displayName: "GPT Sol",
-        resolve: "vercel/openai/gpt-5.6-sol",
-        effort: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        resolve: "vercel/openai/gpt-6-sol",
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
         subagentModel: "gpt-terra",
       },
       "gpt-astra": {
@@ -1280,7 +1280,7 @@ export const providers = {
       },
       "gpt-luna": {
         displayName: "GPT Luna",
-        resolve: "vercel/openai/gpt-5.6-luna",
+        resolve: "vercel/openai/gpt-6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
       },
       "gemini-pro": {
