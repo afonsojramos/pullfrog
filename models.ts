@@ -969,9 +969,9 @@ export const providers = {
       },
       "gpt-luna": {
         displayName: "GPT Luna",
-        resolve: "opencode-go/gpt-5.6-luna",
+        resolve: "opencode-go/gpt-6-luna",
         effort: ["none", "low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/openai/gpt-5.6-luna",
+        openRouterResolve: "openrouter/openai/gpt-6-luna",
       },
     },
   }),
