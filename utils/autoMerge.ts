@@ -1,10 +1,10 @@
 import { addFooter } from "../mcp/comment.ts";
-import { countOutstandingPullfrogThreads } from "../mcp/review.ts";
 import type { ToolContext } from "../mcp/server.ts";
 import * as yes from "../yes/index.ts";
 import { log } from "./cli.ts";
 import { isPullfrog } from "./isPullfrog.ts";
 import { isTransientOctokitError } from "./isTransientNetworkError.ts";
+import { countOutstandingPullfrogThreads } from "./outstandingThreads.ts";
 
 /** narrow view of a PR review — the only fields the blocking-verdict logic reads. */
 type ReviewVerdict = { user: { login: string } | null; state: string };

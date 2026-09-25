@@ -155,7 +155,7 @@ For simple, well-defined tasks, skip the plan phase and go straight to build.`,
 6. Finalize:
    - **only if code changed**, ${finalizeStep} (same push/prepush guidance as Build mode in *SYSTEM*). If push/commit fails, report the exact error and STOP without claiming a fix or resolving its threads.
    - reply ONCE per relevant thread via \`${t("reply_to_review_comment")}\`, including when no code changed. The \`comment_id\` is the root comment's numeric \`id=\`, NOT the \`thread=\` value from \`${t("get_review_comments")}\`. The runtime dedupes identical bodies within a session.
-   - resolve a thread via \`${t("resolve_review_thread")}\` (using \`thread=\` as \`thread_id\`) only after its requested fix is fully on the remote, or the user explicitly asks to resolve it. Leave discussion-only replies, partial fixes, and disagreements open.
+   - resolve a thread via \`${t("resolve_review_thread")}\` (using \`thread=\` as \`thread_id\`) only after its requested fix is fully on the remote, the user explicitly asks to resolve it, or it is a Pullfrog finding you agree to withdraw. Leave other discussion-only replies, partial fixes, and disagreements open.
    - call \`${t("report_progress")}\` with a brief summary. If your last \`${t("get_review_comments")}\` turned up threads you did not address, name them there — a review arriving this late is suppressed as a duplicate and nothing else will pick it up.`,
     },
     // Review and IncrementalReview route the minimum reviewfrog specialists

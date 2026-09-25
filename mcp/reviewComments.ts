@@ -972,7 +972,7 @@ export function ResolveReviewThreadTool(ctx: ToolContext) {
     description:
       "Mark a review thread as resolved using GitHub's GraphQL API. " +
       "Only call this after addressing the review feedback, implementing fixes, testing them, and posting a reply. " +
-      "Do not resolve threads that are already resolved, threads where no action was taken, or threads where you disagree with the feedback.",
+      "Do not resolve threads that are already resolved, threads where no action was taken (unless you are withdrawing your own finding), or threads where you disagree with the feedback.",
     parameters: ResolveReviewThread,
     execute: execute(async (params) => {
       try {

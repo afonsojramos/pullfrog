@@ -557,6 +557,27 @@ export function duplicateReplyDecision(params: {
   };
 }
 
+/**
+ * a single-comment dispatch seeds the progress comment as a reply in the thread
+ * the user pinged. once the agent answers that thread itself, the run summary
+ * there is a second, redundant reply — drop it, as create_pull_request_review
+ * drops the progress comment its review supersedes.
+ */
+async function deleteProgressReplyInThread(
+  ctx: ToolContext,
+  threadRootId: number | undefined
+): Promise<void> {
+  const progress = ctx.toolState.progressComment;
+  if (progress?.type !== "review" || threadRootId === undefined) return;
+  const seeded = await ctx.octokit.rest.pulls.getReviewComment({
+    owner: ctx.repo.owner,
+    repo: ctx.repo.name,
+    comment_id: progress.id,
+  });
+  if (seeded.data.in_reply_to_id !== threadRootId) return;
+  await deleteProgressComment(ctx);
+}
+
 export function ReplyToReviewCommentTool(ctx: ToolContext) {
   return tool({
     name: "reply_to_review_comment",
@@ -605,6 +626,11 @@ export function ReplyToReviewCommentTool(ctx: ToolContext) {
         commentId: result.data.id,
         url: result.data.html_url,
         bodyWithFooter,
+      });
+
+      // the reply already landed; failing to tidy the progress comment must not fail it.
+      await deleteProgressReplyInThread(ctx, result.data.in_reply_to_id).catch((error) => {
+        log.debug(`progress reply cleanup failed: ${error}`);
       });
 
       return {

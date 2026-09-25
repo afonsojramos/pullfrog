@@ -108,6 +108,7 @@ export {
   LEAPING_INTO_ACTION_PREFIX,
 } from "../utils/leapingComment.ts";
 export { MAX_LEARNINGS_LENGTH, truncateAtLineBoundary } from "../utils/learningsTruncate.ts";
+export { countOutstandingPullfrogThreads } from "../utils/outstandingThreads.ts";
 export type {
   CreateProgressCommentTarget,
   ProgressComment,
