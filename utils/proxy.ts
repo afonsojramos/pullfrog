@@ -19,7 +19,6 @@
  *   - 404 → `TransientError` (stale repo↔account link — re-homes on next webhook)
  */
 
-import * as core from "@actions/core";
 import { DEFAULT_PROXY_MODEL, isCardGatedModel, resolveOpenRouterModel } from "../models.ts";
 import type { ToolState } from "../toolState.ts";
 import * as yes from "../yes/index.ts";
@@ -35,6 +34,7 @@ import { log, writeSummary } from "./cli.ts";
 import { reportErrorToComment } from "./errorReport.ts";
 import { fetchIdTokenFromStash, isTransientTokenError, type OidcCredentials } from "./github.ts";
 import type { ResolvedPayload } from "./payload.ts";
+import { maskSecret } from "./secretCommands.ts";
 
 /** which program pays for the minted key. the server re-derives entitlement for
  * every value of this — it is a request, never a claim. */
@@ -210,7 +210,7 @@ async function resolveProxyModel(ctx: {
   if (!key) return;
 
   process.env.OPENROUTER_API_KEY = key;
-  core.setSecret(key);
+  maskSecret(key);
   ctx.payload.proxyModel = ctx.proxyModel;
   // reflect the effective (proxy) model now — an error comment built between
   // here and main.ts's post-resolution refinement would otherwise show the
@@ -381,7 +381,7 @@ export async function resolveTrialFallback(ctx: {
   if (!key) return false;
 
   process.env.OPENROUTER_API_KEY = key;
-  core.setSecret(key);
+  maskSecret(key);
   ctx.payload.proxyModel = DEFAULT_PROXY_MODEL;
   ctx.toolState.model = DEFAULT_PROXY_MODEL;
   // `from` is what the repo was configured to use, so the disclosure can name

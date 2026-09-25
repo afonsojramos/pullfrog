@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "build": "node esbuild.config.js && tsc -p tsconfig.exports.json",
     "check:entrypoints": "nub scripts/check-entrypoint-imports.ts",
+    "check:secret-commands": "nub scripts/check-secret-commands.ts",
     "docker": "nub docker.ts",
     "play": "nub play.ts",
     "runtest": "nub test/run.ts",

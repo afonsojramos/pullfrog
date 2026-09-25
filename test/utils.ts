@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agents as agentMap } from "../agents/index.ts";
 import type { Inputs } from "../main.ts";
+import { isGitHubActions } from "../utils/globals.ts";
 import { trackChild, untrackChild } from "../utils/subprocess.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -277,7 +278,9 @@ export async function runAgentStreaming(options: RunStreamingOptions): Promise<A
       for (const line of lines) {
         if (line.trim() && canLog()) {
           if (line.startsWith("::add-mask::")) {
-            process.stdout.write(`${line}\n`);
+            // only the runner consumes this line; anywhere else it is a raw secret on a
+            // terminal an agent may be reading (an OpenAI key leaked this way, 2026-09)
+            if (isGitHubActions) process.stdout.write(`${line}\n`);
             continue;
           }
           console.log(`${prefix} ${line}`);

@@ -6,7 +6,7 @@ import { throttling } from "@octokit/plugin-throttling";
 import { Octokit } from "@octokit/rest";
 import * as yes from "../yes/index.ts";
 import { apiFetch } from "./apiFetch.ts";
-import { isGitHubActions } from "./globals.ts";
+import { maskSecret } from "./secretCommands.ts";
 
 /** OIDC audience for Pullfrog API token exchanges */
 const OIDC_AUDIENCE = "pullfrog-api";
@@ -171,9 +171,7 @@ export async function fetchIdTokenFromStash(creds: OidcCredentials): Promise<str
   if (!body.value) {
     throw new Error("ID token response has no value field");
   }
-  if (isGitHubActions) {
-    core.setSecret(body.value);
-  }
+  maskSecret(body.value);
   return body.value;
 }
 

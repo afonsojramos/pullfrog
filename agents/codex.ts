@@ -34,7 +34,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import * as core from "@actions/core";
 import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
 import { pullfrogMcpName } from "../external.ts";
 import { getModelProvider, getProviderGatewayUrl, stripProviderPrefix } from "../models.ts";
@@ -46,6 +45,7 @@ import { installFromNpmTarball } from "../utils/install.ts";
 import { OAUTH_WRITEBACK_STATE } from "../utils/oauthWriteback.ts";
 import { findProviderErrorMatch } from "../utils/providerErrors.ts";
 import { resolveRunEffort } from "../utils/runEffort.ts";
+import { saveSecretState } from "../utils/secretCommands.ts";
 import { filterEnv } from "../utils/secrets.ts";
 import {
   DEFAULT_MAX_RETAINED_BYTES,
@@ -888,7 +888,7 @@ export const codex = agent({
       // the CLI rewrites auth.json in place when the chain rotates; the post
       // hook diffs it and PUTs the new blob back to Pullfrog. see
       // wiki/codex-auth.md — a rotation we fail to persist expires in ~1h.
-      core.saveState(
+      saveSecretState(
         OAUTH_WRITEBACK_STATE,
         JSON.stringify({
           apiToken: ctx.apiToken,

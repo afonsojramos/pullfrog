@@ -4,8 +4,8 @@ import type { AuthorPermission, PushPermission, XrepoConfig } from "../external.
 import { log } from "./cli.ts";
 import { onExitSignal } from "./exitHandler.ts";
 import { acquireNewToken, type OidcCredentials } from "./github.ts";
-import { isGitHubActions } from "./globals.ts";
 import { formatPermissions, mirrorRolePermissions } from "./roleMirror.ts";
+import { maskSecret } from "./secretCommands.ts";
 
 // re-export for `pullfrog gha token` subcommand
 export { acquireNewToken as acquireInstallationToken };
@@ -122,9 +122,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
   if (externalToken) {
     mcpTokenValue = externalToken;
 
-    if (isGitHubActions) {
-      core.setSecret(externalToken);
-    }
+    maskSecret(externalToken);
 
     log.info("» using external GH_TOKEN for both git and MCP");
 
@@ -161,9 +159,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     xrepoGrant: params.xrepoGrant,
     permissions: gitPermissions,
   });
-  if (isGitHubActions) {
-    core.setSecret(gitToken);
-  }
+  maskSecret(gitToken);
   log.info(
     `» acquired git token (${Object.entries(gitPermissions)
       .map((e) => e.join(":"))
@@ -188,9 +184,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
     xrepoGrant: params.xrepoGrant,
     permissions: mcpPermissions,
   });
-  if (isGitHubActions) {
-    core.setSecret(mcpToken);
-  }
+  maskSecret(mcpToken);
   log.info(
     `» acquired scoped MCP token (${Object.entries(mcpPermissions)
       .map((e) => e.join(":"))
@@ -209,7 +203,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
   let ghToken: string | undefined;
   if (ghPermissions) {
     ghToken = await acquireNewToken({ permissions: ghPermissions });
-    if (isGitHubActions) core.setSecret(ghToken);
+    maskSecret(ghToken);
     log.info(
       `» acquired gh token mirroring ${params.authorPermission} (${formatPermissions(ghPermissions)})`
     );
@@ -223,7 +217,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
       xrepoGrant: params.xrepoGrant,
       permissions: { contents: "read" },
     });
-    if (isGitHubActions) core.setSecret(readToken);
+    maskSecret(readToken);
     log.info(`» acquired cross-repo read token (contents:read, ${params.xrepo.read.length} repos)`);
   }
 
@@ -253,9 +247,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
       oidc: params.oidc ?? undefined,
     })
       .then((fresh) => {
-        if (isGitHubActions) {
-          core.setSecret(fresh);
-        }
+        maskSecret(fresh);
         mcpTokenValue = fresh;
         currentMcpToken = fresh;
         log.warning("» GitHub rejected the MCP token; re-acquired a fresh scoped MCP token");
@@ -285,7 +277,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
         oidc: params.oidc ?? undefined,
       })
         .then((fresh) => {
-          if (isGitHubActions) core.setSecret(fresh);
+          maskSecret(fresh);
           void revokeGitHubInstallationToken(currentGitToken);
           currentGitToken = fresh;
           log.warning("» GitHub rejected the git token; re-acquired a fresh git token");
@@ -305,7 +297,7 @@ export async function resolveTokens(params: ResolveTokensParams): Promise<TokenR
         oidc: params.oidc ?? undefined,
       })
         .then((fresh) => {
-          if (isGitHubActions) core.setSecret(fresh);
+          maskSecret(fresh);
           void revokeGitHubInstallationToken(read);
           currentReadToken = fresh;
           log.warning("» GitHub rejected the read token; re-acquired a fresh read token");

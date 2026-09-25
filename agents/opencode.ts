@@ -53,7 +53,6 @@ import { type ChildProcess, spawn as nodeSpawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import * as core from "@actions/core";
 import {
   type AssistantMessage,
   createOpencodeClient,
@@ -80,6 +79,7 @@ import type { OAuthWriteback } from "../utils/codexRefreshDetect.ts";
 import { OAUTH_WRITEBACK_STATE } from "../utils/oauthWriteback.ts";
 import { findProviderErrorMatch } from "../utils/providerErrors.ts";
 import { resolveRunEffort } from "../utils/runEffort.ts";
+import { saveSecretState } from "../utils/secretCommands.ts";
 import { addSkill, installBundledSkills } from "../utils/skills.ts";
 import { trackChild, untrackChild } from "../utils/subprocess.ts";
 import type { TodoTracker } from "../utils/todoTracking.ts";
@@ -1306,7 +1306,7 @@ export const opencode = agent({
       });
     }
     if (writebacks.length > 0) {
-      core.saveState(
+      saveSecretState(
         OAUTH_WRITEBACK_STATE,
         JSON.stringify({ apiToken: ctx.apiToken, entries: writebacks })
       );
