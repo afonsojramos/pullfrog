@@ -733,6 +733,31 @@ export const providers = {
         effort: ["low", "medium", "high", "xhigh"],
         openRouterResolve: "openrouter/x-ai/grok-4.7",
       },
+      // Zen began listing Qwen's Max and Flash tiers in late 2026-09 (Max on
+      // 09-25); until then `opencode-go` was the only Qwen route, so a Zen
+      // subscriber without Go had none. Plus is still Go-only. Zen's Max entry
+      // publishes a reasoning toggle but no effort rungs.
+      "qwen-max": {
+        displayName: "Qwen Max",
+        resolve: "opencode/qwen3.8-max",
+        openRouterEffort: ["minimal", "low", "medium", "high", "xhigh"],
+        openRouterResolve: "openrouter/qwen/qwen3.8-max-0902",
+        // unlisted until a published `pullfrog` carries this alias (the
+        // merge-vs-publish rule in wiki/models-catalog.md). unhide in the release
+        // that ships it.
+        hidden: true,
+      },
+      "qwen-flash": {
+        displayName: "Qwen Flash",
+        resolve: "opencode/qwen3.8-flash",
+        effort: ["low", "medium", "xhigh"],
+        openRouterEffort: [],
+        openRouterResolve: "openrouter/qwen/qwen3.8-flash",
+        // unlisted until a published `pullfrog` carries this alias (the
+        // merge-vs-publish rule in wiki/models-catalog.md). unhide in the release
+        // that ships it.
+        hidden: true,
+      },
       "gpt-5-nano": {
         displayName: "GPT Nano",
         resolve: "opencode/gpt-5.4-nano",
@@ -833,11 +858,12 @@ export const providers = {
   // OpenCode Go is a separate $10/mo subscription from Zen, served on its own
   // base URL (`https://opencode.ai/zen/go/v1`) but authenticated with the SAME
   // `OPENCODE_API_KEY`. it carries the open-weight coding models plus a couple
-  // of frontier ones, six of which are served ONLY here — Zen's `/v1/models`
-  // does not list qwen3.7/3.8-*, mimo-v2.6-pro, longcat-2.0 or hy3. (it listed
+  // of frontier ones, four of which are served ONLY here — Zen's `/v1/models`
+  // does not list qwen3.7-plus, mimo-v2.6-pro, longcat-2.0 or hy3. (it listed
   // no glm-5.3* either until 2026-09, which is why `opencode/glm` trailed on
-  // 5.2.) so for a Go subscriber this provider is not a duplicate route to Zen,
-  // it is the only route to a large part of what they pay for.
+  // 5.2, and no qwen3.8-* until late 2026-09.) so for a Go subscriber this
+  // provider is not a duplicate route to Zen, it is the only route to a large
+  // part of what they pay for.
   // like `opencode` and `openrouter` this is a ROUTER, not a vendor: slugs and
   // display names mirror the upstream brand tier, and the picker groups them
   // under the upstream vendor.
@@ -897,7 +923,8 @@ export const providers = {
       // picker row that fails for almost everyone is worse than none. DeepSeek
       // stays reachable ungated via `deepseek/*`, `opencode/*` and
       // `openrouter/*`; both remain runnable by full specifier once opted in.
-      // Alibaba — new vendor family for the catalog; Zen serves neither tier.
+      // Alibaba — Zen serves Max and Flash too (see `opencode/qwen-max`); Plus
+      // is Go-only.
       "qwen-max": {
         displayName: "Qwen Max",
         resolve: "opencode-go/qwen3.8-max",
