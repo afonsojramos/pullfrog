@@ -1268,7 +1268,7 @@ export const providers = {
       "claude-sonnet": {
         displayName: "Claude Sonnet",
         resolve: "vercel/anthropic/claude-sonnet-5",
-        effort: ["none", "low", "medium", "high", "xhigh"],
+        effort: ["none", "low", "medium", "high", "xhigh", "max"],
       },
       "claude-haiku": {
         displayName: "Claude Haiku",
