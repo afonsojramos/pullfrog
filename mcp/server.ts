@@ -48,6 +48,7 @@ import {
   ListPullRequestReviewsTool,
   ResolveReviewThreadTool,
 } from "./reviewComments.ts";
+import { SearchIssuesTool } from "./searchIssues.ts";
 import { SelectModeTool } from "./selectMode.ts";
 import { addTools, type PullfrogTool } from "./shared.ts";
 import { KillBackgroundTool, ShellTool } from "./shell.ts";
@@ -183,6 +184,9 @@ function buildCommonTools(ctx: ToolContext, outputSchema?: JsonSchema): Pullfrog
 
   if (hasSimilarIssues({ repoIntelligence: ctx.repoIntelligence, event: ctx.payload.event })) {
     tools.push(SimilarIssuesTool(ctx));
+  }
+  if (ctx.payload.event.issue_number !== undefined && !ctx.payload.event.is_pr) {
+    tools.push(SearchIssuesTool(ctx));
   }
 
   const isStandalone = ctx.payload.event.trigger === "unknown";
