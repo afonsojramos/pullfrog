@@ -409,13 +409,13 @@ export interface PayloadRouting {
   tier: RouterTier;
   stakes: number;
   workload: number;
-  /** who decided: the scorer, the heuristic it falls back to, or the fixed tier a non-review kind of work carries. mirrors the `RouterSource` enum. */
+  /** who decided: Jev, the chat scorer it falls back to, the heuristic behind that, or the fixed tier a non-review kind of work carries. mirrors the `RouterSource` enum. */
   source: RouterSource;
   /** the scorer's own sentence or two on what a reviewer must reconstruct */
   rationale: string;
 }
 
-export type RouterSource = "scorer" | "heuristic" | "fixed";
+export type RouterSource = "jev" | "scorer" | "heuristic" | "fixed";
 
 // writeable payload type for building payloads
 export interface WriteablePayload {
