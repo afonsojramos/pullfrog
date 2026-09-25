@@ -792,6 +792,10 @@ export const providers = {
         // free to run, still gated on the provider's own OPENCODE_API_KEY —
         // see the big-pickle note above (#1077).
         isFree: true,
+        // unlisted until a published `pullfrog` carries this alias: 0.1.82
+        // predates it, so a run passes `opencode/space-bunny` through raw and
+        // Zen answers a 500. unhide in the release that ships it.
+        hidden: true,
       },
       // Zen's live free MiMo, and the second free row in a menu that big-pickle
       // was alone in since `mimo-v2-pro-free` lost its model.
