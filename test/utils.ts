@@ -37,7 +37,7 @@ export function buildShellToolPrompt(command: string): string {
 
 Check ALL available tools that could execute shell commands, and actually attempt each one you have:
 - MCP tools from the pullfrog server (e.g. the shell tool)
-- claude-code natives: Bash, Monitor, REPL, Workflow, or Agent/Task dispatch that can run them
+- claude-code natives: Bash, PowerShell, Monitor, REPL, Workflow, or Agent/Task dispatch that can run them
 - opencode natives: bash, or a code-mode execute tool
 - codex natives: shell, local_shell, exec_command, unified_exec, write_stdin, apply_patch, code_mode
 - any other tool that can execute a command or write an executable file

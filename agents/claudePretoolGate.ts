@@ -112,18 +112,18 @@ process.stdin.on("end", () => {
  * settings JSON file or a JSON string`), but we use a path so the script
  * and its config sit side-by-side under `ctx.tmpdir`.
  *
- * `execToolDenyRules` are the native exec tools (Bash/Monitor/REPL/Workflow +
- * their `Agent(...)` forms) to deny at a settings-source rule — the
- * authoritative, bypass-immune layer. `--disallowedTools` alone (a `cliArg`
- * deny) was observed to leak under `--dangerously-skip-permissions`, so the
- * deny is carried here too. The single consumer is `buildClaudeSettings`, which
+ * `denyRules` are the native tools to deny (`CLAUDE_DENIED_TOOLS` + their
+ * `Agent(...)` forms) at a settings-source rule — the authoritative,
+ * bypass-immune layer. `--disallowedTools` alone (a `cliArg` deny) was observed
+ * to leak under `--dangerously-skip-permissions`, so the deny is carried here
+ * too. The single consumer is `buildClaudeSettings`, which
  * spreads `hooks` and folds `permissions.deny` into its richer deny list; that
  * one object is then written to BOTH the `--settings` flag and the `/etc`
  * managed file, which is what keeps the two surfaces from drifting (#1179).
  */
 export function buildClaudePretoolGateSettings(
   scriptAbsolutePath: string,
-  execToolDenyRules: string[]
+  denyRules: string[]
 ): {
   hooks: {
     PreToolUse: Array<{
@@ -152,6 +152,6 @@ export function buildClaudePretoolGateSettings(
         },
       ],
     },
-    permissions: { deny: execToolDenyRules },
+    permissions: { deny: denyRules },
   };
 }

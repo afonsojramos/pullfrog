@@ -141,19 +141,19 @@ export const providers = {
       // API is the source of truth (#959).
       "claude-fable": {
         displayName: "Claude Fable",
-        resolve: "anthropic/claude-fable-5",
+        resolve: "anthropic/claude-fable-5-1",
         effort: ["low", "medium", "high", "xhigh", "max"],
         // rolling alias: models.dev's OpenRouter mirror lags brand-new pinned
-        // versions (claude-fable-5 isn't indexed yet), so track ~…-latest to
+        // versions (claude-fable-5 was missing there when this was added), so track ~…-latest to
         // stay catalog-valid and auto-follow version bumps.
         openRouterResolve: "openrouter/~anthropic/claude-fable-latest",
         subagentModel: "claude-sonnet",
       },
       "claude-opus": {
         displayName: "Claude Opus",
-        resolve: "anthropic/claude-opus-5",
+        resolve: "anthropic/claude-opus-5-5",
         effort: ["low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/anthropic/claude-opus-5",
+        openRouterResolve: "openrouter/anthropic/claude-opus-5.5",
         preferred: true,
         subagentModel: "claude-sonnet",
       },
@@ -566,24 +566,15 @@ export const providers = {
       },
       "claude-opus": {
         displayName: "Claude Opus",
-        resolve: "opencode/claude-opus-5",
+        resolve: "opencode/claude-opus-5-5",
         effort: ["low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/anthropic/claude-opus-5",
+        openRouterResolve: "openrouter/anthropic/claude-opus-5.5",
         subagentModel: "claude-sonnet",
-        // TEMPORARY — clear this ONLY when opus completes a run through opencode,
-        // never when the endpoint merely answers. Zen LISTS claude-opus-5 in
-        // /zen/v1/models, so the catalog test passes; on 2026-08-25 the endpoint
-        // itself answered 503 `Upstream request failed: Endpoint is unavailable.`
-        // (measured 5/5; claude-sonnet-5, claude-opus-4-8, claude-haiku-4-5 and
-        // claude-fable-5 all 200 on the same key). opencode retries above the AI
-        // SDK emitting no part.updated, so a run just produces nothing until it is
-        // killed — metaideas/init logged six zero-output failures from 2026-08-23.
-        // The 503 has since cleared and the model is STILL unusable: re-measured
-        // 2026-08-26, direct POST /zen/v1/messages is 10/10 200 at 1.3-4.1s while
-        // `opencode run --model opencode/claude-opus-5` on the same trivial prompt
-        // emitted nothing for 240s in CI. A raw-endpoint 200 is not runtime
-        // availability. see wiki/opencode-silent-stall.md
-        fallback: "opencode/claude-sonnet",
+        // fell back to Sonnet from 2026-08-25 to 2026-09-25: Zen listed
+        // claude-opus-5 while `opencode run` on it emitted nothing for 240s. A
+        // raw-endpoint 200 is not runtime availability — the fallback was cleared
+        // only once `opencode run` completed on both claude-opus-5 and 5-5. see
+        // wiki/opencode-silent-stall.md
       },
       "claude-sonnet": {
         displayName: "Claude Sonnet",
