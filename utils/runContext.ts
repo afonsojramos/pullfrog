@@ -40,6 +40,8 @@ export interface RepoSettings {
   push: PushPermission;
   shell: ShellPermission;
   prApproveEnabled: boolean;
+  // "Include draft PRs": the post-run safety net re-reviews a moved draft only when set.
+  reviewDrafts: boolean;
   // already globally-gated server-side (run-context ANDs the per-repo toggle with
   // the `isAutonomousMaintenanceEnabled()` kill switch), so the runtime treats it
   // as the final "may auto-merge" verdict. see autoMergeAfterApprove.
@@ -128,6 +130,7 @@ const defaultSettings: RepoSettings = {
   push: "restricted",
   shell: "restricted",
   prApproveEnabled: false,
+  reviewDrafts: false,
   autoMergeEnabled: false,
   codexAgent: false,
   signedCommits: false,

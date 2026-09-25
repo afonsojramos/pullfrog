@@ -645,6 +645,7 @@ export async function main(): Promise<MainResult> {
       postCheckoutScript: runContext.repoSettings.postCheckoutScript,
       prepushScript: runContext.repoSettings.prepushScript,
       prApproveEnabled: runContext.repoSettings.prApproveEnabled,
+      reviewDrafts: runContext.repoSettings.reviewDrafts,
       autoMergeEnabled: runContext.repoSettings.autoMergeEnabled,
       signedCommits: runContext.repoSettings.signedCommits,
       repoIntelligence: runContext.repoSettings.repoIntelligence,

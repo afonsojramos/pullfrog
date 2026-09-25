@@ -82,6 +82,7 @@ export interface ToolContext {
   postCheckoutScript: string | null;
   prepushScript: string | null;
   prApproveEnabled: boolean;
+  reviewDrafts: boolean;
   // globally-gated server-side (run-context ANDs the per-repo toggle with the
   // `isAutonomousMaintenanceEnabled()` kill switch). gates the run-end
   // autoMergeAfterApprove lifecycle action — there is deliberately NO

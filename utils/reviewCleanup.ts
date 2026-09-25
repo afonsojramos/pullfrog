@@ -57,7 +57,7 @@ async function dispatchFollowUpReReview(ctx: ToolContext, reviewedSha: string): 
 
   if (pr.data.head.sha === reviewedSha) return;
   if (pr.data.state !== "open") return;
-  if (pr.data.draft) return;
+  if (pr.data.draft && !ctx.reviewDrafts) return;
 
   log.info(
     `safety net: pr HEAD moved from ${reviewedSha.slice(0, 7)} to ${pr.data.head.sha.slice(0, 7)} ` +
