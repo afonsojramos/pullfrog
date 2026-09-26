@@ -411,7 +411,7 @@ export interface PayloadRouting {
   workload: number;
   /** who decided: Jev, the chat scorer it falls back to, the heuristic behind that, or the fixed tier a non-review kind of work carries. mirrors the `RouterSource` enum. */
   source: RouterSource;
-  /** the scorer's own sentence or two on what a reviewer must reconstruct */
+  /** the chat scorer's own sentence or two on what a reviewer must reconstruct; Jev's tier probabilities and axes instead */
   rationale: string;
 }
 
