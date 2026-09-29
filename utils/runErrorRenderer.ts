@@ -40,6 +40,9 @@
  *      `maximum context length is N tokens`. Actionable, so it renders on
  *      both surfaces rather than collapsing to the one-line comment.
  *
+ *   4b'. Run time limit — the agent was still working when the run's own
+ *      timeout fired. Actionable (raise the limit), so both surfaces.
+ *
  *   4c. Transient upstream failure (#1173) — Anthropic `529 Overloaded`,
  *      OpenRouter `provider_unavailable` / `timeout`, Zen `Streaming response
  *      failed: [5xx]`. Last of the classified branches so every more specific
@@ -63,8 +66,8 @@
  *      the hang case, since the raw internal string helps nobody on the PR.
  *
  * Net: the actionable classifications (billing, API-key, model-not-found,
- * no-provider-available, context-overflow, transient-upstream) render identical
- * bodies on both surfaces; the non-actionable ones (unexplained hang,
+ * no-provider-available, context-overflow, run time limit, transient-upstream)
+ * render identical bodies on both surfaces; the non-actionable ones (unexplained hang,
  * generic) keep the forensics in the Actions job summary and show a calm
  * one-liner in the PR comment, whose footer already carries Pullfrog
  * branding + rerun links.
@@ -173,6 +176,29 @@ function formatNoProviderAvailableSummary(input: {
     "This often happens when Pullfrog auto-selects a model your account can't reach. Pin an explicit model for this repo, or add credentials for the provider that was picked.",
     "",
     `[Model settings →](${settingsUrl}) · [Setup docs →](https://docs.pullfrog.com/keys) · [Ask in Discord →](https://discord.gg/8y96raFg8e)`,
+    "",
+    `\`\`\`\n${input.raw}\n\`\`\``,
+  ].join("\n");
+}
+
+/**
+ * The run's own time limit (`main.ts`), not a hang: the activity watchdog
+ * kills a silent turn within minutes, so reaching the limit almost always
+ * means the agent was still working. 393 runs across 88 accounts in 30 days
+ * ended here with a bare `Run failed.`, while the fix is one flag.
+ */
+function isRunTimeoutError(message: string): boolean {
+  return message.startsWith("agent run timed out after");
+}
+
+function formatRunTimeoutSummary(input: { owner: string; name: string; raw: string }): string {
+  const settingsUrl = `${getApiUrl()}/console/${input.owner}/${input.name}`;
+  return [
+    "**This run hit its time limit while still working, so it stopped before finishing.**",
+    "",
+    "Give runs longer with `--timeout=2h` (or `--notimeout`) in this repo's instructions — or raise the workflow's `timeout` input if it sets one, since that input wins. A smaller PR or a lower effort also finishes sooner.",
+    "",
+    `[Repo settings →](${settingsUrl}) · [Flags →](https://docs.pullfrog.com/flags)`,
     "",
     `\`\`\`\n${input.raw}\n\`\`\``,
   ].join("\n");
@@ -575,6 +601,15 @@ export function renderRunError(input: {
   // collapsing the comment to the hang/generic one-liner. see #1116.
   if (isContextOverflowError(input.errorMessage)) {
     const body = formatContextOverflowSummary({
+      owner: input.repo.owner,
+      name: input.repo.name,
+      raw: input.errorMessage,
+    });
+    return { summary: `### ❌ Pullfrog failed\n\n${body}`, comment: body };
+  }
+
+  if (isRunTimeoutError(input.errorMessage)) {
+    const body = formatRunTimeoutSummary({
       owner: input.repo.owner,
       name: input.repo.name,
       raw: input.errorMessage,
