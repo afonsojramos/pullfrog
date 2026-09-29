@@ -159,9 +159,9 @@ export const providers = {
       },
       "claude-sonnet": {
         displayName: "Claude Sonnet",
-        resolve: "anthropic/claude-sonnet-5",
+        resolve: "anthropic/claude-sonnet-5-5",
         effort: ["low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/anthropic/claude-sonnet-5",
+        openRouterResolve: "openrouter/anthropic/claude-sonnet-5.5",
       },
       "claude-haiku": {
         displayName: "Claude Haiku",
@@ -578,9 +578,9 @@ export const providers = {
       },
       "claude-sonnet": {
         displayName: "Claude Sonnet",
-        resolve: "opencode/claude-sonnet-5",
+        resolve: "opencode/claude-sonnet-5-5",
         effort: ["low", "medium", "high", "xhigh", "max"],
-        openRouterResolve: "openrouter/anthropic/claude-sonnet-5",
+        openRouterResolve: "openrouter/anthropic/claude-sonnet-5.5",
       },
       "claude-haiku": {
         displayName: "Claude Haiku",

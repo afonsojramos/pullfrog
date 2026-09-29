@@ -209,7 +209,7 @@ function buildAgentsJson(): string {
         "Read-only review subagent for lens-based code review (correctness, security, billing-subsystem, etc.). " +
         "Reads only — no writes, no state-changing shell or MCP calls, no nested subagent dispatch.",
       prompt: REVIEWER_SYSTEM_PROMPT,
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     },
   };
   return JSON.stringify(agents);
@@ -223,15 +223,15 @@ const CLAUDE_EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL";
 
 /**
  * levels the pinned binary's `--effort` will accept, verbatim from
- * `claude --help` on 2.1.280 and confirmed by probing each one on Opus 5.5.
- * 2.1.150 exited 1 on anything else, before any API call; 2.1.280 instead warns
+ * `claude --help` on 2.1.284 and confirmed by probing each one on Opus 5.5.
+ * 2.1.150 exited 1 on anything else, before any API call; 2.1.280+ instead warns
  * and silently runs the default effort — so this is still the last gate that
  * stops a rung the CLI would not honor. rungs come from models.dev, a different
  * source from this enum, so the two are free to drift.
  *
  * `ultra` deliberately absent: the binary carries it internally (the request
  * builder folds it to `max`) but `--effort ultra` is rejected as unknown.
- * `ultracode` (CLI >= 2.1.203) parses on 2.1.280 but no model publishes it as a
+ * `ultracode` (CLI >= 2.1.203) parses on 2.1.284 but no model publishes it as a
  * rung. reading the binary's strings will suggest otherwise; probe the flag.
  *
  * REVALIDATE ON EVERY claude-code BUMP.
