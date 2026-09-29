@@ -59,16 +59,18 @@ const DEFAULT_RETRY_AFTER_CAP_MS = 20_000;
 
 function getErrorResponseHeaders(error: unknown): Record<string, unknown> | undefined {
   if (error === null || typeof error !== "object") return undefined;
-  const response = (error as { response?: unknown }).response;
-  if (response === null || typeof response !== "object") return undefined;
-  const headers = (response as { headers?: unknown }).headers;
+  // octokit's `RequestError` carries `response.headers`; an HTTP-200 `GraphqlResponseError`
+  // (whose `response` is the `{ data, errors }` body) carries them top-level
+  const source = error as { response?: { headers?: unknown } | null; headers?: unknown };
+  const headers = source.response?.headers ?? source.headers;
   if (headers === null || typeof headers !== "object") return undefined;
   return headers as Record<string, unknown>;
 }
 
 /**
  * read a retry delay (ms) from a thrown HTTP error's response headers, honoring
- * GitHub's rate-limit backoff hints on octokit errors (`error.response.headers`):
+ * GitHub's rate-limit backoff hints on octokit errors (`error.response.headers`, or
+ * `error.headers` on a GraphQL response error):
  *   - `retry-after` (RFC 9110 delta-seconds or an HTTP-date) — an explicit
  *     backoff directive whenever present (covers secondary rate limits, which
  *     carry it with `x-ratelimit-remaining > 0`).
