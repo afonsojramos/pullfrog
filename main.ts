@@ -247,6 +247,8 @@ export async function main(): Promise<MainResult> {
   const opencodeCliPath = await agents.opencode.install();
   captureBaselineModels(opencodeCliPath);
 
+  // DRAGON: nothing above this block may resolve a model or read a provider env var — console-stored
+  // config (`OPENAI_COMPATIBLE_MODEL`, `BEDROCK_MODEL_ID`, …) is not in process.env yet. 0.1.85 did, and broke every such run (#1433).
   // inject account-level secrets into process.env (YAML secrets take precedence).
   // sanitizeSecret trims + masks so accidental trailing whitespace doesn't leak
   // through GitHub Actions' line-based log masking. whitespace-only values
