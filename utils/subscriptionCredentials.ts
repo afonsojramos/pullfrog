@@ -16,6 +16,9 @@ export const subscriptionSchema = z.object({
   inherited: z.boolean(),
   shared: z.boolean(),
   registeredAt: z.string(),
+  /** the provider's last verdict on the current value; null = usable or never checked. */
+  status: z.enum(["rejected", "exhausted"]).nullish(),
+  resetAt: z.string().nullish(),
 });
 export type Subscription = z.infer<typeof subscriptionSchema>;
 

@@ -30,6 +30,11 @@ import { resolveBody } from "./utils/body.ts";
 import { log } from "./utils/cli.ts";
 import { installCodexAuth, installXaiAuth, PULLFROG_DATA_DIR } from "./utils/codexHome.ts";
 import { checkConfiguredCredentials } from "./utils/credentialFallback.ts";
+import {
+  initializeCredentialPool,
+  resolvePoolModel,
+  selectConfiguredCredential,
+} from "./utils/credentialPool.ts";
 import { recordDiffReadFromToolUse } from "./utils/diffCoverage.ts";
 import { onExitSignal } from "./utils/exitHandler.ts";
 import { resolveGit, setGitAuthServer } from "./utils/gitAuth.ts";
@@ -253,16 +258,23 @@ export async function main(): Promise<MainResult> {
   // sanitizeSecret trims + masks so accidental trailing whitespace doesn't leak
   // through GitHub Actions' line-based log masking. whitespace-only values
   // return null and skip injection so the user sees a clear missing-key error.
+  const injected: string[] = [];
   if (runContext.dbSecrets) {
     for (const [key, value] of Object.entries(runContext.dbSecrets)) {
       if (!process.env[key]) {
         const sanitized = sanitizeSecret(key, value);
-        if (sanitized !== null) process.env[key] = sanitized;
+        if (sanitized === null) continue;
+        process.env[key] = sanitized;
+        injected.push(key);
       }
     }
     const count = Object.keys(runContext.dbSecrets).length;
     if (count > 0) log.info(`» ${count} db secret(s) loaded`);
   }
+
+  // load one stored subscription per provider for the discovery below. `injected` keeps a
+  // workflow credential distinct from a stored one now that both sit in process.env.
+  await initializeCredentialPool({ ctx: runContext, slug: payload.model, injected });
 
   // materialize the subscription auth.json entries (idempotent — the opencode
   // agent re-calls both inside run() and writes the same file; the writer
@@ -396,6 +408,19 @@ export async function main(): Promise<MainResult> {
     await using gitAuthServer = await startGitAuthServer(tmpdir);
     setGitAuthServer(gitAuthServer);
 
+    let resolvedModel = resolveModel({ slug: payload.model });
+    if (!resolvedModel && !payload.proxyModel && runContext.credentialAccess?.candidates.length) {
+      resolvedModel = resolvePoolModel({
+        codexAgent: runContext.repoSettings.codexAgent || payload.codexArm === true,
+      });
+    }
+    let poolSelected =
+      !payload.proxyModel &&
+      (await selectConfiguredCredential({
+        ctx: runContext,
+        model: resolvedModel,
+      }));
+
     // model-access gate: an explicitly-requested per-run model (`--opus`,
     // `--model=<slug>`) that this run can't serve hard-fails here, before the
     // agent starts. standing defaults keep `modelExplicit = false` and fall
@@ -408,7 +433,7 @@ export async function main(): Promise<MainResult> {
       oss: runContext.oss,
       proxyActive: !!payload.proxyModel,
       subsidyTarget: runContext.proxyModel,
-      resolvedModel: resolveModel({ slug: payload.model }),
+      resolvedModel,
       authorized: getAuthorizedModels(),
     });
     if (access.kind === "error") {
@@ -422,7 +447,14 @@ export async function main(): Promise<MainResult> {
       );
     }
     if (access.kind === "proxy") payload.proxyModel = access.target;
-    if (access.kind === "byok") payload.proxyModel = undefined;
+    if (access.kind === "byok") {
+      payload.proxyModel = undefined;
+      if (!poolSelected)
+        poolSelected = await selectConfiguredCredential({
+          ctx: runContext,
+          model: resolvedModel,
+        });
+    }
 
     // a subsidised run is Pullfrog's spend, so it is pinned to `high` on
     // whatever ladder the funded model publishes — matching what every OSS run
@@ -432,21 +464,18 @@ export async function main(): Promise<MainResult> {
       payload.effort = ossEffortFloor({ payload });
     }
 
-    const configuredModel = payload.proxyModel ? undefined : resolveModel({ slug: payload.model });
+    if (payload.proxyModel) resolvedModel = undefined;
 
     // ask the providers whether the configured model's credentials still work
-    // before committing to it. a rejected credential becomes either a run on
-    // whatever the account CAN still route or an accurate error naming
+    // before committing to it. a rejected credential becomes an accurate error naming
     // the credential — never the 401-three-seconds-in that used to send users
     // to a GitHub Actions secrets page they had never put a key in. skipped
     // for proxy runs for the same reason validateAgentApiKey is: the server
     // minted the key and is the authority on it.
-    const credentials = payload.proxyModel
-      ? { kind: "ok" as const }
-      : await checkConfiguredCredentials({
-          model: configuredModel,
-          authorized: getAuthorizedModels(),
-        });
+    const credentials =
+      payload.proxyModel || poolSelected
+        ? { kind: "ok" as const }
+        : await checkConfiguredCredentials({ model: resolvedModel });
     if (credentials.kind === "dead") {
       throw new Error(
         buildRejectedCredentialError({
@@ -458,20 +487,6 @@ export async function main(): Promise<MainResult> {
         })
       );
     }
-    if (credentials.kind === "fellBack" && configuredModel) {
-      log.warning(
-        `» ${credentials.credential} was rejected by its provider — running ${credentials.replacement} instead of ${configuredModel}`
-      );
-      toolState.modelFallback = { from: configuredModel };
-    }
-    // the replacement is a concrete resolve target, not `undefined`: leaving it
-    // unset would let `effectiveModel` fall through to `payload.model` (the
-    // ALIAS slug), which `authorized` doesn't hold and whose env vars were just
-    // deleted — so `validateAgentApiKey` would throw the missing-key error with
-    // the very GitHub-secrets CTA this whole change exists to stop showing.
-    const resolvedModel =
-      credentials.kind === "fellBack" ? credentials.replacement : configuredModel;
-
     vertexCredentials = materializeVertexCredentials({ model: resolvedModel });
 
     let agent = resolveAgent({

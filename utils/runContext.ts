@@ -191,6 +191,7 @@ export async function fetchRunContext(params: {
   try {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${params.token}`,
+      "X-Pullfrog-Credential-Pools": "1",
     };
     if (params.oidcToken) {
       headers["X-GitHub-OIDC-Token"] = params.oidcToken;

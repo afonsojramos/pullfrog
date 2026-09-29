@@ -1,10 +1,4 @@
-import {
-  getModelProvider,
-  isAutoTier,
-  modelAliases,
-  providers,
-  resolveDisplayAlias,
-} from "../models.ts";
+import { isAutoTier, modelAliases, resolveDisplayAlias } from "../models.ts";
 
 export const PULLFROG_DIVIDER = "<!-- PULLFROG_DIVIDER_DO_NOT_REMOVE_PLZ -->";
 
@@ -29,13 +23,6 @@ export interface BuildPullfrogFooterParams {
   customParts?: string[] | undefined;
   /** model slug from payload (e.g., "anthropic/claude-opus"). shown in footer as "Using `Model Name`" */
   model?: string | undefined;
-  /**
-   * When a credential was rejected and the run moved to another model, this is
-   * the slug the user had configured (e.g. "anthropic/claude-opus") — the footer
-   * renders `Using <model> (credentials for <configured> were rejected by the
-   * provider)` so the substitution is visible in PR comments + reviews.
-   */
-  fallbackFrom?: string | undefined;
   /**
    * When a Router account had a model (or the intelligent tier) selected that
    * the server clamped to the efficient default — custom picks are card-gated
@@ -65,23 +52,8 @@ export interface BuildPullfrogFooterParams {
   owner?: string | undefined;
 }
 
-/** Provider display name (e.g. "Anthropic") for the slug, or the raw provider segment as a fallback. */
-function providerDisplayName(slug: string): string {
-  try {
-    const key = getModelProvider(slug);
-    const meta = providers[key as keyof typeof providers];
-    return meta?.displayName ?? key;
-  } catch {
-    // raw IDs without a `/` (Bedrock model IDs) — never reach this function
-    // in practice because the BYOK fallback skips Bedrock, but defensively
-    // return the slug itself rather than throw if it ever does.
-    return slug;
-  }
-}
-
 function formatModelLabel(params: {
   model: string;
-  fallbackFrom?: string | undefined;
   clamped?: { from: string; reason: "card" | "noRouterPath" | "oss" | "trial" } | undefined;
   unselectedProxyDefault?: boolean | undefined;
   oss?: boolean | undefined;
@@ -111,12 +83,6 @@ function formatModelLabel(params: {
     return `${ossBase} (${configured} not used — pick one of the [funded models](https://docs.pullfrog.com/models#pullfrog-for-oss) or add a [provider key](https://docs.pullfrog.com/keys) to run your own)`;
   }
   const base = alias?.isFree ? `\`${displayName}\` (free)` : `\`${displayName}\``;
-  if (params.fallbackFrom) {
-    // "not configured" would be false here: the fallback's only producer is the
-    // rejected-credential path, where the user DID configure a credential and
-    // the provider turned it down.
-    return `${base} (credentials for ${providerDisplayName(params.fallbackFrom)} were rejected by the provider)`;
-  }
   if (params.clamped?.reason === "trial") {
     // short form only: the IMPORTANT call-out above the footer already explains
     // what the trial is and how to leave it. repeating it here would say the
@@ -205,7 +171,6 @@ export function buildPullfrogFooter(params: BuildPullfrogFooterParams): string {
     parts.push(
       `Using ${formatModelLabel({
         model: params.model,
-        fallbackFrom: params.fallbackFrom,
         clamped: params.clamped,
         unselectedProxyDefault: params.unselectedProxyDefault,
         oss: params.oss,

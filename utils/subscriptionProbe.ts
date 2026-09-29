@@ -12,9 +12,31 @@ const identitySchema = z.object({
   account_id: z.string().optional(),
   email_verified: z.boolean().optional(),
 });
+const codexWindowSchema = z
+  .object({ used_percent: z.number().optional(), reset_at: z.number().optional() })
+  .nullish();
 const codexUsageSchema = z.object({
-  rate_limit: z.object({ allowed: z.boolean(), limit_reached: z.boolean() }).optional(),
+  rate_limit: z
+    .object({
+      allowed: z.boolean(),
+      limit_reached: z.boolean(),
+      primary_window: codexWindowSchema,
+      secondary_window: codexWindowSchema,
+    })
+    .optional(),
 });
+
+/**
+ * the provider's answer about one credential. only `rejected` and `exhausted`
+ * advance the chain; `unknown` never changes who pays.
+ */
+export type ProbeVerdict =
+  | { status: "usable" }
+  | { status: "unknown" }
+  | { status: "rejected"; detail: string }
+  | { status: "exhausted"; detail: string; resetAt: Date | undefined };
+
+const unknown = { status: "unknown" } as const;
 
 export class SubscriptionCredentialError extends Error {}
 
@@ -63,15 +85,22 @@ export async function probeSubscription(input: {
   name: SubscriptionName;
   value: string;
   model?: string | undefined;
-}): Promise<"usable" | "rejected" | "unknown"> {
+}): Promise<ProbeVerdict> {
   if (input.name === "CLAUDE_CODE_OAUTH_TOKEN") {
     const result = await preflightClaudeSubscription({ token: input.value, model: input.model });
-    return result.usable ? "usable" : "rejected";
+    // preflight fails open on a 5xx or 400; only a 2xx says the token works
+    if (result.usable)
+      return result.status !== undefined && result.status < 300 ? { status: "usable" } : unknown;
+    return result.status === 429
+      ? { status: "exhausted", detail: result.reason, resetAt: result.resetAt }
+      : { status: "rejected", detail: result.reason };
   }
   const codex = input.name === "CODEX_AUTH_JSON" ? parseCodexAuthBody(input.value) : null;
   const grok = input.name === "GROK_AUTH_JSON" ? parseXaiAuthBody(input.value) : null;
   const auth = codex ?? grok;
-  if (!auth || auth.refresh_rejected_at) return "rejected";
+  if (!auth) return { status: "rejected", detail: "the stored credential is malformed" };
+  if (auth.refresh_rejected_at)
+    return { status: "rejected", detail: `refresh rejected at ${auth.refresh_rejected_at}` };
   if (grok && input.model)
     return probeInference({
       name: "XAI_API_KEY",
@@ -86,17 +115,26 @@ export async function probeSubscription(input: {
     accountId: codex?.tokens.account_id,
     grokBilling: !!grok,
   });
-  if (response?.status === 401) return "rejected";
-  if (!response?.ok) return "unknown";
+  if (response?.status === 401) return { status: "rejected", detail: "rejected with 401" };
+  if (!response?.ok) return unknown;
   const body: unknown = await response.json().catch(() => null);
-  if (codex) {
-    const parsed = codexUsageSchema.safeParse(body);
-    const limit = parsed.success ? parsed.data.rate_limit : undefined;
-    if (!limit) return "unknown";
-    return limit.allowed && !limit.limit_reached ? "usable" : "rejected";
-  }
   // billing balance is not the subscription's remaining allowance.
-  return "unknown";
+  if (!codex) return unknown;
+  const parsed = codexUsageSchema.safeParse(body);
+  const limit = parsed.success ? parsed.data.rate_limit : undefined;
+  if (!limit) return unknown;
+  if (limit.allowed && !limit.limit_reached) return { status: "usable" };
+  // the full window decides when the plan works again
+  const windows = [limit.primary_window, limit.secondary_window];
+  const full = windows.filter((window) => (window?.used_percent ?? 0) >= 100);
+  const resets = (full.length ? full : windows).flatMap((window) =>
+    window?.reset_at ? [window.reset_at] : []
+  );
+  return {
+    status: "exhausted",
+    detail: "the ChatGPT plan's usage limit is reached",
+    resetAt: resets.length ? new Date(Math.max(...resets) * 1000) : undefined,
+  };
 }
 
 /** probe the chosen model, not a models-list permission a restricted key may lack. */
@@ -104,12 +142,16 @@ export async function probeInference(input: {
   name: string;
   value: string;
   model: string;
-}): Promise<"usable" | "rejected" | "unknown"> {
+}): Promise<ProbeVerdict> {
   const anthropic = input.name === "ANTHROPIC_API_KEY";
   const openai = input.name === "OPENAI_API_KEY";
   if (!anthropic && !openai && input.name !== "XAI_API_KEY") {
     const result = await verifyCredential({ envVar: input.name, value: input.value });
-    return result === "dead" ? "rejected" : result === "alive" ? "usable" : "unknown";
+    return result === "dead"
+      ? { status: "rejected", detail: "rejected by its provider" }
+      : result === "alive"
+        ? { status: "usable" }
+        : unknown;
   }
   const headers = new Headers({ "content-type": "application/json" });
   if (anthropic) {
@@ -143,11 +185,24 @@ export async function probeInference(input: {
       .object({ error: z.string() })
       .safeParse(await response.json().catch(() => null));
     return error.success && error.data.error.startsWith("Incorrect API key provided.")
-      ? "rejected"
-      : "unknown";
+      ? { status: "rejected", detail: "rejected with 400: incorrect API key" }
+      : unknown;
+  }
+  // a 429 is usually a rate limit, which the run itself can wait out; only a spent OpenAI quota is final
+  if (response?.status === 429 && openai) {
+    const error = z
+      .object({ error: z.object({ code: z.string() }) })
+      .safeParse(await response.json().catch(() => null));
+    return error.success && error.data.error.code === "insufficient_quota"
+      ? { status: "exhausted", detail: "refused with 429: insufficient quota", resetAt: undefined }
+      : unknown;
   }
   await response?.body?.cancel();
-  if (!response) return "unknown";
-  if (response.ok) return "usable";
-  return [401, 402, 403, 429].includes(response.status) ? "rejected" : "unknown";
+  if (!response) return unknown;
+  if (response.ok) return { status: "usable" };
+  if (response.status === 401 || response.status === 403)
+    return { status: "rejected", detail: `rejected with ${response.status}` };
+  if (response.status === 402)
+    return { status: "exhausted", detail: "refused with 402", resetAt: undefined };
+  return unknown;
 }

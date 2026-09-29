@@ -38,7 +38,6 @@ function buildCommentFooter(ctx: ToolContext, customParts?: string[]): string {
         : undefined,
     customParts,
     model: ctx.toolState.model,
-    fallbackFrom: ctx.toolState.modelFallback?.from,
     clamped: ctx.toolState.modelClamped,
     unselectedProxyDefault: ctx.toolState.unselectedProxyDefault,
     oss: ctx.oss,

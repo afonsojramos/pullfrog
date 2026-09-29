@@ -98,6 +98,13 @@ export function captureAuthorizedModels(cliPath: string): void {
   log.debug(`» opencode authorized: ${authorized.size} models`);
 }
 
+/** A model whose credential the pool just probed. Added directly: a second
+ * `opencode models` would run inside the checkout and load the repo's own
+ * `.opencode` plugins, which can outlast its timeout and empty the set. */
+export function authorizeModel(model: string): void {
+  getAuthorizedModels().add(model);
+}
+
 /** Authorized set captured after Pullfrog-stored auth is applied. Throws if
  * called before `captureAuthorizedModels` — the call sites (api-key
  * validation, auto-select) all run strictly after capture. */

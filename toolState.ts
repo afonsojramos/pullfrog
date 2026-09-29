@@ -239,13 +239,6 @@ export interface ToolState {
   // precedence, and codex picks auth.json or an API key on mutually exclusive
   // branches. left unset rather than guessed where a harness cannot tell.
   credential?: AgentCredential | undefined;
-  // set by main.ts when the configured model's credentials were all REJECTED by
-  // their own providers and the run moved to one this account can still serve.
-  // carried into PR-comment footers so users see "Using <model> (credentials
-  // for <configured> were rejected by the provider)" rather than being silently
-  // downgraded. literal record of an event that happened — matches the
-  // ToolState design rule.
-  modelFallback?: { from: string } | undefined;
   // true when the run fell back to the default proxy model purely because the
   // repo has no model selected (Router billing + "auto"). carried into footers
   // so the user can see they're on the cost-optimized default — a weaker

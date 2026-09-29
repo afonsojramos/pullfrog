@@ -4,6 +4,7 @@ import {
   getModelProvider,
   getProviderGatewayUrl,
   modelAliases,
+  resolveCliModel,
   stripProviderPrefix,
 } from "../models.ts";
 import * as yes from "../yes/index.ts";
@@ -12,6 +13,7 @@ import { apiFetch } from "./apiFetch.ts";
 import { log } from "./cli.ts";
 import { clearInstalledSubscription, installCodexAuth, installXaiAuth } from "./codexHome.ts";
 import { sanitizeSecret } from "./normalizeEnv.ts";
+import { authorizeModel } from "./openCodeModels.ts";
 import type { RunContextData } from "./runContextData.ts";
 import { maskSecret, saveSecretState } from "./secretCommands.ts";
 import {
@@ -20,7 +22,7 @@ import {
   selectedCredentialSchema,
   subscriptionNameSchema,
 } from "./subscriptionCredentials.ts";
-import { probeInference, probeSubscription } from "./subscriptionProbe.ts";
+import { type ProbeVerdict, probeInference, probeSubscription } from "./subscriptionProbe.ts";
 
 const receipts: Record<string, string> = {};
 const workflowCredentials: Record<string, string> = {};
@@ -71,10 +73,19 @@ function subscriptionForModel(model: string) {
         : null;
 }
 
-/** load one subscription per provider for model discovery; keep the pool unflattened. */
-export async function initializeCredentialPool(ctx: RunContextData, model?: string) {
-  const access = ctx.credentialAccess;
+/**
+ * load one subscription per provider for model discovery; keep the pool unflattened. runs
+ * after the account secrets are injected: `injected` names the ones that came from storage,
+ * so everything else set here is a workflow credential.
+ */
+export async function initializeCredentialPool(input: {
+  ctx: RunContextData;
+  slug: string | undefined;
+  injected: string[];
+}) {
+  const access = input.ctx.credentialAccess;
   if (!access) return;
+  const model = discoveryModel(input.slug);
   maskSecret(access.token);
   const names = new Set([
     ...access.candidates.map((candidate) => candidate.name),
@@ -85,7 +96,7 @@ export async function initializeCredentialPool(ctx: RunContextData, model?: stri
   ]);
   for (const name of names) {
     const value = process.env[name];
-    if (value) workflowCredentials[name] = value;
+    if (value && !input.injected.includes(name)) workflowCredentials[name] = value;
   }
   for (const name of subscriptionNameSchema.options) {
     if (model && subscriptionForModel(model) !== name) continue;
@@ -103,6 +114,17 @@ export async function initializeCredentialPool(ctx: RunContextData, model?: stri
     receipts[name] = selected.receipt;
   }
   saveReceipts();
+}
+
+/**
+ * the configured model, for choosing which subscription to load. unlike `resolveModel` it
+ * never reads a routing slug's env var, so a missing one throws later inside main's error
+ * rendering rather than here: a routing slug resolves to its bare sentinel and loads nothing.
+ */
+function discoveryModel(slug: string | undefined) {
+  const value = process.env.PULLFROG_MODEL?.trim() || slug?.trim();
+  if (!value) return undefined;
+  return resolveCliModel(value) ?? (value.includes("/") ? value : undefined);
 }
 
 export function resolvePoolModel(input: { codexAgent: boolean }) {
@@ -134,45 +156,63 @@ export async function selectConfiguredCredential(input: {
   const names = getModelEnvVars(model).filter((name) => name !== subscription);
   if (subscription) names.unshift(subscription);
   const candidates = access.candidates.filter((candidate) => names.includes(candidate.name));
-  const workflow = names.filter((name) => workflowCredentials[name]);
-  if (!candidates.length && !workflow.length) return false;
-  for (const name of workflow) {
+  // nothing stored to choose between: the workflow credential runs exactly as it did before pools
+  if (!candidates.length) return false;
+  const refused: string[] = [];
+  for (const name of names.filter((item) => workflowCredentials[item])) {
     const value = workflowCredentials[name];
-    if (await usable({ name, value, model })) {
-      activate({ names, name, value, receipt: undefined });
+    const verdict = await probe({ name, value, model });
+    if (usable(verdict)) {
+      activate({ names, name, value, receipt: undefined, model });
       return true;
     }
+    refused.push(`${name} from the workflow: ${verdict.detail}`);
+    log.info(`» ${name} from the workflow unavailable; trying the next credential`);
   }
   for (const candidate of candidates) {
     const selected = await select({ access, candidate });
     if (!selected) continue;
-    if (await usable({ ...selected, model })) {
-      activate({ names, ...selected });
+    const verdict = await probe({ ...selected, model });
+    await reportVerdict({ receipt: selected.receipt, verdict });
+    if (usable(verdict)) {
+      activate({ names, ...selected, model });
       log.info(`» selected ${candidate.name} from ${candidate.source} scope`);
       return true;
     }
+    refused.push(`${candidate.name} from ${candidate.source} scope: ${verdict.detail}`);
     log.info(
       `» ${candidate.name} from ${candidate.source} scope unavailable; trying the next credential`
     );
   }
   throw new Error(
-    `all configured credentials for ${model} were rejected or exhausted; no other model or provider was selected`
+    `all configured credentials for ${model} were rejected or exhausted (${refused.join("; ")}); no other model or provider was selected`
   );
 }
 
-async function usable(input: { name: string; value: string; model: string }) {
+async function probe(input: { name: string; value: string; model: string }) {
   const subscription = subscriptionNameSchema.safeParse(input.name);
-  if (subscription.success)
-    return (
-      (await probeSubscription({
-        name: subscription.data,
-        value: input.value,
-        model: stripProviderPrefix(input.model),
-      })) !== "rejected"
-    );
-  return (
-    (await probeInference({ ...input, model: stripProviderPrefix(input.model) })) !== "rejected"
-  );
+  const model = stripProviderPrefix(input.model);
+  return subscription.success
+    ? probeSubscription({ name: subscription.data, value: input.value, model })
+    : probeInference({ ...input, model });
+}
+
+function usable(
+  verdict: ProbeVerdict
+): verdict is Extract<ProbeVerdict, { status: "usable" | "unknown" }> {
+  return verdict.status !== "rejected" && verdict.status !== "exhausted";
+}
+
+/** best-effort and bounded: a slow or failed report never fails the run. */
+async function reportVerdict(input: { receipt: string; verdict: ProbeVerdict }) {
+  if (input.verdict.status === "unknown") return;
+  await apiFetch({
+    path: "/api/runtime/credentials/status",
+    method: "POST",
+    headers: { authorization: `Bearer ${input.receipt}`, "content-type": "application/json" },
+    body: JSON.stringify(input.verdict),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => log.debug("» could not record a credential verdict"));
 }
 
 function activate(input: {
@@ -180,6 +220,7 @@ function activate(input: {
   name: string;
   value: string;
   receipt: string | undefined;
+  model: string;
 }) {
   for (const name of input.names) {
     delete process.env[name];
@@ -193,4 +234,5 @@ function activate(input: {
   installCodexAuth();
   installXaiAuth();
   saveReceipts();
+  authorizeModel(input.model);
 }
