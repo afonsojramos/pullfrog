@@ -11,7 +11,12 @@ import * as yes from "../yes/index.ts";
 import { resolveAgent } from "./agent.ts";
 import { apiFetch } from "./apiFetch.ts";
 import { log } from "./cli.ts";
-import { clearInstalledSubscription, installCodexAuth, installXaiAuth } from "./codexHome.ts";
+import {
+  canInstallSubscription,
+  clearInstalledSubscription,
+  installCodexAuth,
+  installXaiAuth,
+} from "./codexHome.ts";
 import { sanitizeSecret } from "./normalizeEnv.ts";
 import { authorizeModel } from "./openCodeModels.ts";
 import type { RunContextData } from "./runContextData.ts";
@@ -155,11 +160,16 @@ export async function selectConfiguredCredential(input: {
   const subscription = subscriptionForModel(model);
   const names = getModelEnvVars(model).filter((name) => name !== subscription);
   if (subscription) names.unshift(subscription);
-  const candidates = access.candidates.filter((candidate) => names.includes(candidate.name));
+  // a subscription this runner cannot install would displace a working API key, then fail as no key
+  const candidates = access.candidates.filter(
+    (candidate) => names.includes(candidate.name) && canInstallSubscription(candidate.name)
+  );
   // nothing stored to choose between: the workflow credential runs exactly as it did before pools
   if (!candidates.length) return false;
   const refused: string[] = [];
-  for (const name of names.filter((item) => workflowCredentials[item])) {
+  for (const name of names.filter(
+    (item) => workflowCredentials[item] && canInstallSubscription(item)
+  )) {
     const value = workflowCredentials[name];
     const verdict = await probe({ name, value, model });
     if (usable(verdict)) {
