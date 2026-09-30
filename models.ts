@@ -1386,6 +1386,12 @@ export function stripProviderPrefix(specifier: string): string {
   return slashIndex > 0 ? specifier.slice(slashIndex + 1) : specifier;
 }
 
+/** specifier → the model's own id, for display: `openrouter/~anthropic/claude-opus-latest` →
+ * `claude-opus-latest`. names what an alias points at today, which its name does not. */
+export function modelIdLabel(specifier: string): string {
+  return specifier.slice(specifier.lastIndexOf("/") + 1).replace(/^~/, "");
+}
+
 export function getModelEnvVars(slug: string): string[] {
   const parsed = parseModel(slug);
   const providerConfig = (providers as Record<string, ProviderConfig>)[parsed.provider];
@@ -1465,6 +1471,35 @@ export function modelHasStoredAuth(params: { model: string; secretNames: string[
     ...(HARNESS_ONLY_CREDENTIALS[getModelProvider(slug)] ?? []),
   ];
   return authVars.some((v) => params.secretNames.includes(v));
+}
+
+/**
+ * `proxyOptOut`, spelled the way run-context spells it: a Router run skips the
+ * mint when the pick is FREE or a Pullfrog-stored key covers it, and then runs
+ * as-configured rather than clamping to the auto tier.
+ *
+ * one predicate for every reader — the console picker's `customLocked`, the
+ * effort ladder's `resolveRunning` and `pickUsesOpenRouter`. they held two
+ * copies and the free half was missing from both, which put the whole `opencode/*` free tier (`opencode/big-pickle`
+ * is `preferred`, so the most-picked model there is) behind "add a payment
+ * method to run it" on a card-less Router repo, against a server that ran it.
+ */
+export function routerProxyOptOut(ctx: { slug: string | null; secretNames: string[] }) {
+  if (ctx.slug === null) return false;
+  return (
+    resolveDisplayAlias(ctx.slug)?.isFree === true ||
+    modelHasStoredAuth({ model: ctx.slug, secretNames: ctx.secretNames })
+  );
+}
+
+/** whether a pick runs as its OpenRouter target: a proxied account (Router, the OSS subsidy)
+ * mints for every pick `routerProxyOptOut` does not exempt. */
+export function pickUsesOpenRouter(params: {
+  slug: string;
+  proxied: boolean;
+  secretNames: string[];
+}): boolean {
+  return params.proxied && !routerProxyOptOut(params);
 }
 
 // ── derived flat list ──────────────────────────────────────────────────────────

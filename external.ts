@@ -128,11 +128,13 @@ export {
   ladderRungs,
   modelAliases,
   modelHasStoredAuth,
+  modelIdLabel,
   OSS_MODEL_ALLOWLIST,
   OSS_RECOMMENDED_MODEL,
   ossFundedModelNames,
   PROVIDER_GATEWAY_URL_ENV,
   parseModel,
+  pickUsesOpenRouter,
   providers,
   ROUTED_PROVIDERS,
   ROUTER_LADDER,
@@ -144,6 +146,7 @@ export {
   resolveModelSlug,
   resolveOpenRouterModel,
   resolveRoutedModel,
+  routerProxyOptOut,
 } from "./models.ts";
 
 // tool permission types shared with server dispatch
